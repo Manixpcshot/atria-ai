@@ -55,6 +55,10 @@ pub struct ClientConfig {
     pub web_thinking: bool,
     /// DeepSeek-web: the site's web-search toggle.
     pub web_search: bool,
+    /// DeepSeek-web: reuse this chat session (keeps the site-side chat alive).
+    pub web_session: String,
+    /// DeepSeek-web: write-back channel for the session id actually used.
+    pub web_session_out: Option<Arc<std::sync::Mutex<String>>>,
 }
 
 impl Default for ClientConfig {
@@ -73,6 +77,8 @@ impl Default for ClientConfig {
             workspace: String::new(),
             web_thinking: true,
             web_search: false,
+            web_session: String::new(),
+            web_session_out: None,
         }
     }
 }
@@ -122,7 +128,7 @@ impl AtriaClient {
         let http = reqwest::Client::builder()
             .pool_idle_timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(12))
-            .read_timeout(std::time::Duration::from_secs(45))
+            .read_timeout(std::time::Duration::from_secs(300))
             .build()
             .expect("build http client");
         Self { http }
@@ -144,7 +150,7 @@ impl AtriaClient {
             "model": cfg.model,
             "max_tokens": cfg.max_tokens,
             "temperature": cfg.temperature,
-            "messages": messages,
+            "messages": to_anthropic_messages(messages),
         });
         if !cfg.system.trim().is_empty() {
             body["system"] = Value::String(cfg.system.clone());
@@ -340,6 +346,27 @@ fn acc_to_blocks(accs: Vec<Acc>) -> Vec<Block> {
                 Some(Block::ToolUse { id, name, input })
             }
             Acc::Skip => None,
+        })
+        .collect()
+}
+
+/// Map internal messages to Anthropic wire format (images become `source` blocks).
+fn to_anthropic_messages(messages: &[Message]) -> Vec<Value> {
+    messages
+        .iter()
+        .map(|m| {
+            let content: Vec<Value> = m
+                .content
+                .iter()
+                .map(|b| match b {
+                    Block::Image { data, media } => json!({
+                        "type": "image",
+                        "source": { "type": "base64", "media_type": media, "data": data },
+                    }),
+                    other => serde_json::to_value(other).unwrap_or(Value::Null),
+                })
+                .collect();
+            json!({ "role": m.role, "content": content })
         })
         .collect()
 }

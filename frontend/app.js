@@ -18,6 +18,14 @@ const CONN_TEMPLATES = {
   'openrouter': { label: 'OpenRouter',               base: 'https://openrouter.ai/api/v1',                            kind: 'openai' },
   'omniroute':  { label: 'OmniRoute — گیت‌وی همه‌چیز', base: 'http://localhost:20128/v1',                              kind: 'openai' },
   'deepseek-web': { label: 'DeepSeek — حساب وب (یوزر توکن)', base: 'https://chat.deepseek.com',                       kind: 'deepseek_web' },
+  'cerebras':   { label: 'Cerebras — سریع‌ترین استنتاج', base: 'https://api.cerebras.ai/v1',                                kind: 'openai' },
+  'sambanova':  { label: 'SambaNova',                   base: 'https://api.sambanova.ai/v1',                               kind: 'openai' },
+  'together':   { label: 'Together AI',                 base: 'https://api.together.xyz/v1',                               kind: 'openai' },
+  'fireworks':  { label: 'Fireworks AI',                base: 'https://api.fireworks.ai/inference/v1',                      kind: 'openai' },
+  'hyperbolic': { label: 'Hyperbolic',                  base: 'https://api.hyperbolic.xyz/v1',                             kind: 'openai' },
+  'nvidia':     { label: 'NVIDIA NIM',                  base: 'https://integrate.api.nvidia.com/v1',                       kind: 'openai' },
+  'github':     { label: 'GitHub Models (رایگان)',      base: 'https://models.github.ai/inference',                         kind: 'openai' },
+  'perplexity': { label: 'Perplexity (Sonar)',          base: 'https://api.perplexity.ai/chat/completions',                 kind: 'openai' },
   'custom':     { label: 'سفارشی…',                   base: '',                                                        kind: 'openai' },
 };
 
@@ -68,11 +76,13 @@ const st = {
   cursorHolder: null,
   conns: [],
   activeConnId: '',
+  pendingImgs: [],
 };
 let dirtyChats = new Set();
 let goneChats = new Set();
 let flushTimer = 0;
 let diskDirs = null;
+let lastSession = '';
 
 function loadSettings() {
   let s;
@@ -542,6 +552,9 @@ function updateConnTab() {
   if (els.dsSearchRow) {
     els.dsSearchRow.classList.toggle('hidden', !(c && c.kind === 'deepseek_web'));
   }
+  if (els.btnAttach) {
+    els.btnAttach.classList.toggle('hidden', !!(c && c.kind === 'deepseek_web'));
+  }
 }
 
 /* ---------------- dom ---------------- */
@@ -580,6 +593,7 @@ function cacheEls() {
     cfSrvSearch: $('#cfSrvSearch'), cfSrvList: $('#cfSrvList'),
     cfDelete: $('#cfDelete'), cfSetActive: $('#cfSetActive'),
     storageBox: $('#storageBox'), btnRevealAtria: $('#btnRevealAtria'),
+    btnAttach: $('#btnAttach'), fileInput: $('#fileInput'), imgTray: $('#imgTray'),
   };
 }
 
@@ -615,7 +629,7 @@ function stars() {
 function autosize() {
   els.input.style.height = 'auto';
   els.input.style.height = Math.min(180, els.input.scrollHeight) + 'px';
-  els.btnSend.disabled = !els.input.value.trim();
+  els.btnSend.disabled = !els.input.value.trim() && !st.pendingImgs.length;
 }
 
 function scrollBottom(instant) {
@@ -814,7 +828,7 @@ function historyPanelEl(flow) {
   return box;
 }
 
-function bubbleEl(role, text, flow) {
+function bubbleEl(role, text, flow, images) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
   wrap.appendChild(avatarEl(role));
@@ -825,6 +839,18 @@ function bubbleEl(role, text, flow) {
   const md = document.createElement('div');
   md.className = 'md';
   b.appendChild(md);
+  if (images && images.length) {
+    const tray = document.createElement('div');
+    tray.className = 'msg-imgs';
+    for (const im of images) {
+      const el = document.createElement('img');
+      el.className = 'msg-img';
+      el.alt = im.name || '';
+      el.src = 'data:' + im.media + ';base64,' + im.data;
+      tray.appendChild(el);
+    }
+    b.insertBefore(tray, md);
+  }
   if (flow && flow.length && role !== 'user') stack.appendChild(historyPanelEl(flow));
   stack.appendChild(b);
   wrap.appendChild(stack);
@@ -841,7 +867,7 @@ function renderHistory() {
   if (!chat) return;
   for (const m of chat.messages) {
     els.messages.appendChild(
-      bubbleEl(m.role === 'user' ? 'user' : 'ai', m.plain || m.text || '…', m.flow));
+      bubbleEl(m.role === 'user' ? 'user' : 'ai', m.plain || m.text || '…', m.flow, m.images));
   }
   scrollBottom(true);
 }
@@ -864,6 +890,55 @@ function msgText(m) {
   return '';
 }
 
+/* ---------------- image attachments (vision models) ---------------- */
+
+const MAX_IMGS = 4;
+const MAX_IMG_BYTES = 4500 * 1024;
+
+function addImageFiles(files) {
+  const conn = activeConn();
+  if (conn && conn.kind === 'deepseek_web') {
+    return toast('در حساب وب دیپ‌سیک فعلاً پیوست تصویر پشتیبانی نمی‌شود', 'warn');
+  }
+  for (const f of Array.from(files || [])) {
+    if (st.pendingImgs.length >= MAX_IMGS) { toast('حداکثر ' + MAX_IMGS + ' تصویر', 'warn'); break; }
+    if (!/^image\//.test(f.type)) continue;
+    if (f.size > MAX_IMG_BYTES) { toast('حجم «' + f.name + '» زیاد است (حداکثر ۴٫۵ مگابایت)', 'warn'); continue; }
+    const r = new FileReader();
+    r.onload = () => {
+      const dataUrl = String(r.result || '');
+      const m = /^data:([^;,]+);base64,(.*)$/.exec(dataUrl);
+      if (!m) return;
+      st.pendingImgs.push({ data: m[2], media: m[1], name: f.name });
+      renderImgTray();
+    };
+    r.readAsDataURL(f);
+  }
+}
+
+function renderImgTray() {
+  if (!els.imgTray) return;
+  els.imgTray.innerHTML = '';
+  els.imgTray.classList.toggle('hidden', !st.pendingImgs.length);
+  st.pendingImgs.forEach((im, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'img-chip';
+    chip.innerHTML = '<img alt=""><button class="img-x" title="حذف">✕</button>';
+    chip.querySelector('img').src = 'data:' + im.media + ';base64,' + im.data;
+    chip.querySelector('.img-x').onclick = () => {
+      st.pendingImgs.splice(i, 1);
+      renderImgTray();
+    };
+    els.imgTray.appendChild(chip);
+  });
+  autosize();
+}
+
+function clearImgs() {
+  st.pendingImgs = [];
+  renderImgTray();
+}
+
 /* ---------------- effective model + history window ---------------- */
 
 // مدل مؤثرِ اتصال فعال: انتخاب فعلی اگر مجاز باشد، وگرنه آخرین مدل همین اتصال، وگرنه اولی
@@ -879,14 +954,17 @@ function effModel() {
 const MAX_CTX_CHARS = 120000;
 const MAX_CTX_MSGS = 48;
 function buildHistory(chat) {
-  const all = chat.messages.map((m) => ({
-    role: m.role === 'user' ? 'user' : 'assistant',
-    content: [{ type: 'text', text: msgText(m) }],
-  }));
+  const all = chat.messages.map((m) => {
+    const content = [];
+    for (const im of m.images || []) content.push({ type: 'image', data: im.data, media: im.media });
+    const t = msgText(m);
+    if (t || !content.length) content.push({ type: 'text', text: t });
+    return { role: m.role === 'user' ? 'user' : 'assistant', content };
+  });
   let chars = 0;
   const kept = [];
   for (let i = all.length - 1; i >= 0; i--) {
-    const len = ((all[i].content[0] && all[i].content[0].text) || '').length;
+    const len = all[i].content.reduce((a, b) => a + ((b && b.text) || '').length, 0);
     if (kept.length && (kept.length >= MAX_CTX_MSGS || chars + len > MAX_CTX_CHARS)) break;
     kept.unshift(all[i]);
     chars += len;
@@ -903,7 +981,7 @@ const TRANSIENT_RE = /(maxwaitms|rate.?limit|ratelimit|queue|expiration|timeout|
 
 function send() {
   const text = els.input.value.trim();
-  if (!text || st.sending) return;
+  if ((!text && !st.pendingImgs.length) || st.sending) return;
   const chat = currentChat();
   if (!chat) { newChat(true); return send(); }
 
@@ -925,15 +1003,17 @@ function send() {
     return toast('برای اتصال «' + conn.name + '» هنوز مدلی تعیین نکرده‌ای', 'warn');
   }
 
-  chat.messages.push({ role: 'user', text, plain: text, ts: Date.now() });
+  const sendImgs = st.pendingImgs.slice();
+  chat.messages.push({ role: 'user', text, plain: text, ts: Date.now(), images: sendImgs.length ? sendImgs : undefined });
   if (chat.title === 'گفتگوی جدید') {
-    const t1 = text.replace(/\s+/g, ' ').trim();
+    const t1 = (text || '[تصویر]').replace(/\s+/g, ' ').trim();
     chat.title = t1.slice(0, 42) + (t1.length > 42 ? '…' : '');
     renderConvList();
   }
   saveChats(chat.id);
+  clearImgs();
   els.empty.classList.add('hidden', 'off');
-  els.messages.appendChild(bubbleEl('user', text));
+  els.messages.appendChild(bubbleEl('user', text, null, sendImgs));
   els.input.value = '';
   autosize();
   scrollBottom();
@@ -977,6 +1057,7 @@ function startTurn() {
       workspace: st.settings.workspace || '',
       thinking: !!st.settings.thinking,
       web_search: !!st.settings.ds_search,
+      session_id: (chat && chat.dsSession) || '',
       messages: history,
     },
   }).catch((e) => failRun(e && e.message ? e.message : String(e)));
@@ -1347,6 +1428,7 @@ function finishRun(newMessages, finalText) {
   for (let i = pushed.length - 1; i >= 0; i--) {
     if (pushed[i].role === 'ai') { if (flow) pushed[i].flow = flow; break; }
   }
+  if (lastSession) chat.dsSession = lastSession;
   saveChats(chat.id);
   scrollBottom();
 }
@@ -1375,7 +1457,10 @@ function listenEvents() {
     ensurePanel();
     addChip('↻ تلاش مجدد (' + e.payload.attempt + ' از ۳)…');
   });
-  t.listen('atria:done', (e) => finishRun(e.payload.new_messages, e.payload.final_text));
+  t.listen('atria:done', (e) => {
+    lastSession = e.payload.session_id || '';
+    finishRun(e.payload.new_messages, e.payload.final_text);
+  });
   t.listen('atria:error', (e) => failRun(e.payload.message || 'unknown'));
   t.listen('atria:stopped', () => { failRun('متوقف شد'); toast('تولید متوقف شد', 'warn'); });
 }
@@ -1604,6 +1689,13 @@ function boot() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
   els.btnSend.onclick = send;
+  if (els.btnAttach) {
+    els.btnAttach.onclick = () => els.fileInput.click();
+    els.fileInput.onchange = () => {
+      addImageFiles(els.fileInput.files);
+      els.fileInput.value = '';
+    };
+  }
   els.btnStop.onclick = stop;
 
   // نوار مدل/حالت (مثل کلاد)

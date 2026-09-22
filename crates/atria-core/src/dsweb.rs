@@ -276,46 +276,10 @@ pub fn tool_prompt(tools: &[Value], enabled: bool) -> String {
     s
 }
 
-/// Split `<tool>{...}</tool>` calls out of the visible text.
+/// Split tool calls out of the visible text (robust: DSML + `<tool>` + quoting).
 /// Returns (clean_text, [(name, input)]).
 pub fn split_tool_calls(text: &str) -> (String, Vec<(String, Value)>) {
-    let mut clean = String::new();
-    let mut calls = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("<tool>") {
-        clean.push_str(&rest[..start]);
-        let after = &rest[start + "<tool>".len()..];
-        match after.find("</tool>") {
-            Some(end) => {
-                let body = &after[..end];
-                match parse_tool_body(body) {
-                    Some(call) => calls.push(call),
-                    None => {
-                        // keep unparsable block verbatim (model chatter)
-                        clean.push_str(&rest[start..start + "<tool>".len() + end + "</tool>".len()]);
-                    }
-                }
-                rest = &after[end + "</tool>".len()..];
-            }
-            None => {
-                rest = "";
-                break;
-            }
-        }
-    }
-    clean.push_str(rest);
-    (clean.trim().to_string(), calls)
-}
-
-fn parse_tool_body(body: &str) -> Option<(String, Value)> {
-    let v: Value = serde_json::from_str(body.trim()).ok()?;
-    let name = v.get("name").and_then(Value::as_str)?.to_string();
-    let input = v
-        .get("input")
-        .or_else(|| v.get("arguments"))
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    Some((name, input))
+    crate::toolfmt::parse_tool_markup(text)
 }
 
 /// Flatten history into DeepSeek's `role: text` prompt shape.
@@ -338,7 +302,12 @@ pub fn flatten_prompt(cfg: &ClientConfig, messages: &[Message], tools: &[Value])
         };
         let mut parts: Vec<String> = Vec::new();
         for b in &m.content {
+            if let Block::Image { .. } = b {
+                parts.push("[تصویر پیوست]".to_string());
+                continue;
+            }
             match b {
+                Block::Image { .. } => {}
                 Block::Text { text } => {
                     if !text.trim().is_empty() {
                         parts.push(text.clone());
@@ -623,8 +592,27 @@ impl DsWebClient {
         Ok(v)
     }
 
-    /// One agentic turn against the web API (fresh session; full history
-    /// folded into the prompt).
+    /// Create a fresh chat session on the site.
+    async fn create_session(&self, headers: &reqwest::header::HeaderMap) -> Result<Value, CoreError> {
+        let sess = self
+            .post_json("/chat_session/create", &json!({}), headers, "chat_session/create")
+            .await?;
+        let sid = sess
+            .pointer("/data/biz_data/chat_session/id")
+            .or_else(|| sess.pointer("/data/biz_data/id"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        if sid.is_null() {
+            return Err(CoreError::Api {
+                status: 0,
+                message: format!("شناسهٔ نشست برنگشت [{BASE}/api/v0/chat_session/create]"),
+            });
+        }
+        Ok(sid)
+    }
+
+    /// One agentic turn against the web API (session reused across turns so the
+    /// chat stays alive on chat.deepseek.com; full history folded into the prompt).
     pub async fn send(
         &self,
         cfg: &ClientConfig,
@@ -642,90 +630,89 @@ impl DsWebClient {
         }
         let headers = Self::base_headers(&token);
 
-        // 1) session
-        let sess = self
-            .post_json("/chat_session/create", &json!({}), &headers, "chat_session/create")
-            .await?;
-        let sid = sess
-            .pointer("/data/biz_data/chat_session/id")
-            .or_else(|| sess.pointer("/data/biz_data/id"))
-            .cloned()
-            .unwrap_or(Value::Null);
-        if sid.is_null() {
-            return Err(CoreError::Api {
-                status: 0,
-                message: format!("شناسهٔ نشست برنگشت [{BASE}/api/v0/chat_session/create]"),
-            });
-        }
+        // 1..4) session (reused when provided) + PoW + completion — one
+        // fresh-session retry if a reused session is rejected.
+        let mut last_prompt_len = 0usize;
+        let mut sid = Value::String(cfg.web_session.trim().to_string());
+        let mut allow_retry = !cfg.web_session.trim().is_empty();
+        let resp = loop {
+            if sid.as_str().unwrap_or("").is_empty() {
+                sid = self.create_session(&headers).await?;
+                allow_retry = false;
+            }
+            if let Some(out) = &cfg.web_session_out {
+                if let Ok(mut g) = out.lock() {
+                    *g = sid.as_str().unwrap_or("").to_string();
+                }
+            }
 
-        // 2) PoW challenge + solve (CPU-bound → blocking pool)
-        let chal_resp = self
-            .post_json(
-                "/chat/create_pow_challenge",
-                &json!({ "target_path": COMPLETION_PATH }),
-                &headers,
-                "chat/create_pow_challenge",
-            )
-            .await?;
-        let challenge = chal_resp
-            .pointer("/data/biz_data/challenge")
-            .or_else(|| chal_resp.pointer("/data/biz_data"))
-            .cloned()
-            .unwrap_or(Value::Null);
-        if challenge.is_null() {
-            return Err(CoreError::Api {
-                status: 0,
-                message: format!("چالش PoW برنگشت [{BASE}/api/v0/chat/create_pow_challenge]"),
-            });
-        }
-        let pow_header = tokio::task::spawn_blocking(move || solve_pow(&challenge))
-            .await
-            .map_err(|e| CoreError::Api { status: 0, message: e.to_string() })??;
+            // PoW challenge + solve (CPU-bound → blocking pool)
+            let chal_resp = self
+                .post_json(
+                    "/chat/create_pow_challenge",
+                    &json!({ "target_path": COMPLETION_PATH }),
+                    &headers,
+                    "chat/create_pow_challenge",
+                )
+                .await?;
+            let challenge = chal_resp
+                .pointer("/data/biz_data/challenge")
+                .or_else(|| chal_resp.pointer("/data/biz_data"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            if challenge.is_null() {
+                return Err(CoreError::Api {
+                    status: 0,
+                    message: format!("چالش PoW برنگشت [{BASE}/api/v0/chat/create_pow_challenge]"),
+                });
+            }
+            let pow_header = tokio::task::spawn_blocking(move || solve_pow(&challenge))
+                .await
+                .map_err(|e| CoreError::Api { status: 0, message: e.to_string() })??;
 
-        // 3) prompt + body
-        let prompt = flatten_prompt(cfg, messages, tools);
-        let model_type = match cfg.model.trim().to_ascii_lowercase().as_str() {
-            "deepseek-expert" | "expert" | "deepseek-v4-pro" | "pro" => "expert",
-            "deepseek-vision" | "vision" => "vision",
-            _ => "default",
+            // prompt + body
+            let prompt = flatten_prompt(cfg, messages, tools);
+            last_prompt_len = prompt.len();
+            let model_type = match cfg.model.trim().to_ascii_lowercase().as_str() {
+                "deepseek-expert" | "expert" | "deepseek-v4-pro" | "pro" => "expert",
+                "deepseek-vision" | "vision" => "vision",
+                _ => "default",
+            };
+            let body = json!({
+                "chat_session_id": sid,
+                "parent_message_id": Value::Null,
+                "prompt": prompt,
+                "ref_file_ids": [],
+                "thinking_enabled": cfg.web_thinking,
+                "search_enabled": cfg.web_search,
+                "action": Value::Null,
+                "preempt": false,
+                "model_type": model_type,
+            });
+
+            // stream completion
+            let mut stream_headers = headers.clone();
+            stream_headers.insert(
+                "x-ds-pow-response",
+                reqwest::header::HeaderValue::from_str(&pow_header)
+                    .map_err(|_| CoreError::Api { status: 0, message: "PoW header".into() })?,
+            );
+            let url = format!("{API}{COMPLETION_PATH}");
+            let resp = self.http.post(&url).headers(stream_headers).json(&body).send().await?;
+            if resp.status().is_success() {
+                break resp;
+            }
+            let text = resp.text().await.unwrap_or_default();
+            if allow_retry {
+                allow_retry = false;
+                sid = Value::Null;
+                continue;
+            }
+            return Err(CoreError::Api {
+                status: 500,
+                message: format!("{} [{url}]", extract_error(&text)),
+            });
         };
-        let body = json!({
-            "chat_session_id": sid,
-            "parent_message_id": Value::Null,
-            "prompt": prompt,
-            "ref_file_ids": [],
-            "thinking_enabled": cfg.web_thinking,
-            "search_enabled": cfg.web_search,
-            "action": Value::Null,
-            "preempt": false,
-            "model_type": model_type,
-        });
-
-        // 4) stream completion
-        let mut stream_headers = headers.clone();
-        stream_headers.insert(
-            "x-ds-pow-response",
-            reqwest::header::HeaderValue::from_str(&pow_header)
-                .map_err(|_| CoreError::Api { status: 0, message: "PoW header".into() })?,
-        );
-        let url = format!("{API}{COMPLETION_PATH}");
-        let resp = self.http.post(&url).headers(stream_headers).json(&body).send().await?;
-        let status = resp.status().as_u16();
-        if status == 401 || status == 403 || status == 429 || status >= 500 {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(CoreError::Api {
-                status,
-                message: format!("{} [{url}]", extract_error(&text)),
-            });
-        }
-        if status != 200 {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(CoreError::Api {
-                status,
-                message: format!("{} [{url}]", extract_error(&text)),
-            });
-        }
-
         use futures::StreamExt;
         let mut stream = resp.bytes_stream();
         let mut dec = SseDecoder::new();
@@ -802,7 +789,7 @@ impl DsWebClient {
         }
 
         let usage = Usage {
-            input_tokens: (prompt.len() / 4) as u32,
+            input_tokens: (last_prompt_len / 4) as u32,
             output_tokens: ((text.len() + thinking.len()) / 4) as u32,
         };
         let _ = thinking; // surfaced live; not echoed back (text protocol)

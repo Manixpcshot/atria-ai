@@ -42,6 +42,11 @@ pub enum Block {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
     },
+    /// Inline image (vision input): base64 `data` + `media` mime type.
+    Image {
+        data: String,
+        media: String,
+    },
 }
 
 impl Block {
@@ -66,6 +71,25 @@ impl Block {
                 content: v.get("content").and_then(|t| t.as_str()).map(str::to_string),
                 is_error: v.get("is_error").and_then(|t| t.as_bool()),
             }),
+            Some("image") => {
+                let src = v.get("source");
+                let data = v
+                    .get("data")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| src.and_then(|s| s.get("data")).and_then(serde_json::Value::as_str))
+                    .unwrap_or("");
+                let media = v
+                    .get("media")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| v.get("media_type").and_then(serde_json::Value::as_str))
+                    .or_else(|| src.and_then(|s| s.get("media_type")).and_then(serde_json::Value::as_str))
+                    .unwrap_or("image/png");
+                if data.is_empty() {
+                    None
+                } else {
+                    Some(Block::Image { data: data.to_string(), media: media.to_string() })
+                }
+            }
             _ => None,
         }
     }

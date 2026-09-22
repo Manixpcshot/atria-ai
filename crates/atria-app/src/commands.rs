@@ -44,6 +44,9 @@ pub struct ChatPayload {
     /// DeepSeek-web: web-search toggle.
     #[serde(default)]
     pub web_search: bool,
+    /// DeepSeek-web: session id to reuse (keeps the site-side chat alive).
+    #[serde(default)]
+    pub session_id: String,
 }
 
 fn default_true() -> bool {
@@ -58,6 +61,8 @@ pub struct DonePayload {
     pub rounds: u32,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// DeepSeek-web session actually used (persist per conversation).
+    pub session_id: String,
 }
 
 /// Live model catalog from an OpenAI-compatible server (OmniRoute/OpenRouter).
@@ -205,6 +210,7 @@ pub async fn chat_send(
     let stop = state.stop.clone();
     let running = state.running.clone();
     let mem_path = state.mem_path.clone();
+        let sess_out = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
 
     tauri::async_runtime::spawn(async move {
         let cfg = ClientConfig {
@@ -221,6 +227,8 @@ pub async fn chat_send(
             workspace: payload.workspace,
             web_thinking: payload.thinking,
             web_search: payload.web_search,
+            web_session: payload.session_id,
+            web_session_out: Some(sess_out.clone()),
         };
         let mut mem = MemoryStore::open(&mem_path);
 
@@ -244,6 +252,7 @@ pub async fn chat_send(
                         rounds: out.rounds,
                         input_tokens: out.input_tokens,
                         output_tokens: out.output_tokens,
+                        session_id: sess_out.lock().map(|g| g.clone()).unwrap_or_default(),
                     },
                 );
             }

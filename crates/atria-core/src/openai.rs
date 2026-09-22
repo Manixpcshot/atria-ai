@@ -52,7 +52,7 @@ impl OpenAiClient {
         let http = reqwest::Client::builder()
             .pool_idle_timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(12))
-            .read_timeout(std::time::Duration::from_secs(45))
+            .read_timeout(std::time::Duration::from_secs(300))
             .build()
             .expect("build http client");
         Self { http }
@@ -70,7 +70,31 @@ impl OpenAiClient {
         if !cfg.system.trim().is_empty() {
             msgs.push(json!({ "role": "system", "content": cfg.system }));
         }
-        msgs.extend(to_openai_messages(messages));
+        let vals = to_openai_messages(messages);
+        if vals.len() == messages.len() {
+            for (m, mut mv) in messages.iter().zip(vals) {
+                let has_img = m.content.iter().any(|b| matches!(b, Block::Image { .. }));
+                if has_img {
+                    let mut parts: Vec<Value> = Vec::new();
+                    let text = m.plain_text();
+                    if !text.is_empty() {
+                        parts.push(json!({ "type": "text", "text": text }));
+                    }
+                    for b in &m.content {
+                        if let Block::Image { data, media } = b {
+                            parts.push(json!({
+                                "type": "image_url",
+                                "image_url": { "url": format!("data:{media};base64,{data}") },
+                            }));
+                        }
+                    }
+                    mv["content"] = Value::Array(parts);
+                }
+                msgs.push(mv);
+            }
+        } else {
+            msgs.extend(vals);
+        }
 
         let mut body = json!({
             "model": cfg.model,

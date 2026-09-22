@@ -98,8 +98,24 @@ pub async fn run_agent(
         }
 
         let mut attempt = 0u32;
-        let turn = loop {
-            match send(cfg, &messages, &tools, |ev| emit(AgentEvent::Stream(ev)), stop.clone()).await {
+        let mut turn = loop {
+            let mut filt = crate::toolfmt::LiveFilter::default();
+            let send_res = send(
+                cfg,
+                &messages,
+                &tools,
+                |ev| match ev {
+                    crate::client::StreamEvent::Text(t) => {
+                        for piece in crate::toolfmt::LiveFilter::feed(&mut filt, &t) {
+                            emit(AgentEvent::Stream(crate::client::StreamEvent::Text(piece)));
+                        }
+                    }
+                    other => emit(AgentEvent::Stream(other)),
+                },
+                stop.clone(),
+            )
+            .await;
+            match send_res {
                 Ok(t) => break t,
                 Err(CoreError::Stopped) => return Err(CoreError::Stopped),
                 // Some gateways reject thinking blocks on continuation — retry once
@@ -131,6 +147,17 @@ pub async fn run_agent(
             }
         };
         stripped_retry = false;
+        // ابزارهای جاسازی‌شده در متن (DSML / <tool>) را به ToolUse واقعی تبدیل کن
+        crate::toolfmt::extract_tool_calls(&mut turn.message);
+        if turn.stop_reason == "end_turn"
+            && turn
+                .message
+                .content
+                .iter()
+                .any(|b| matches!(b, crate::types::Block::ToolUse { .. }))
+        {
+            turn.stop_reason = "tool_use".to_string();
+        }
 
         out.input_tokens += turn.usage.input_tokens;
         out.output_tokens += turn.usage.output_tokens;

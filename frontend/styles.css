@@ -1049,4 +1049,80 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   word-break: break-all; line-height: 1.7;
 }
 
+/* ============ v0.4.5: attachments + polished bars & model menu ============ */
+.img-tray {
+  display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 4px 2px;
+}
+.img-chip {
+  position: relative; width: 64px; height: 64px; border-radius: 12px;
+  overflow: hidden; border: 1px solid rgba(160, 130, 255, 0.35);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); animation: msgIn 0.25s ease both;
+}
+.img-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.img-chip .img-x {
+  position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+  border: none; border-radius: 50%; background: rgba(0, 0, 0, 0.65);
+  color: #fff; font-size: 9px; line-height: 1; cursor: pointer;
+}
+.img-chip .img-x:hover { background: rgba(255, 107, 125, 0.85); }
+.msg-imgs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.msg-img {
+  max-width: 220px; max-height: 220px; border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1); display: block;
+}
+#btnAttach { flex: none; }
+.mode-chip#btnAttach { font-family: var(--font); }
+
+/* settings tab bar + model picker — full styling */
+.stab-nav {
+  display: flex; gap: 6px; padding: 5px; margin-bottom: 14px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--brd);
+  border-radius: 14px; width: fit-content;
+}
+.stab {
+  border: none; background: transparent; color: var(--muted);
+  font-family: var(--font); font-size: 12.5px; font-weight: 700;
+  padding: 8px 18px; border-radius: 10px; cursor: pointer; transition: 0.18s;
+}
+.stab:hover { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
+.stab.active {
+  color: #fff; background: linear-gradient(135deg, rgba(160, 130, 255, 0.35), rgba(255, 130, 170, 0.25));
+  box-shadow: 0 2px 10px rgba(160, 130, 255, 0.25);
+}
+.model-pick {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 280px;
+  padding: 7px 14px; border-radius: 22px; border: 1px solid var(--brd);
+  background: rgba(255, 255, 255, 0.05); cursor: pointer; transition: 0.18s;
+}
+.model-pick:hover { border-color: rgba(160, 130, 255, 0.5); background: rgba(160, 130, 255, 0.1); }
+.mp-name {
+  font-family: var(--mono); font-size: 11.5px; direction: ltr;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+.mp-caret { color: var(--muted); font-size: 10px; }
+#modelMenu .mm-head {
+  padding: 10px 12px 6px; font-size: 11px; color: var(--muted);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06); margin-bottom: 4px;
+}
+#modelMenu .mm-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: start; padding: 9px 12px; border-radius: 10px;
+  border: 1px solid transparent; background: transparent; color: var(--ink);
+  cursor: pointer; transition: 0.15s;
+}
+#modelMenu .mm-item:hover { background: rgba(160, 130, 255, 0.1); }
+#modelMenu .mm-item.active {
+  border-color: rgba(160, 130, 255, 0.4); background: rgba(160, 130, 255, 0.14);
+}
+#modelMenu .mm-model {
+  font-family: var(--mono); font-size: 12px; direction: ltr;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px;
+}
+#modelMenu .mm-src {
+  flex: none; font-size: 9.5px; color: var(--muted);
+  background: rgba(255, 255, 255, 0.06); border-radius: 20px; padding: 3px 9px;
+  white-space: nowrap; max-width: 130px; overflow: hidden; text-overflow: ellipsis;
+}
+#modelMenu .mm-custom { color: var(--muted); font-family: var(--font); font-size: 11.5px; }
+
 .err-text { white-space: pre-line; }
