@@ -50,6 +50,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::list_models,
             commands::chat_send,
             commands::chat_stop,
             commands::memory_list,

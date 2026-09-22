@@ -13,6 +13,7 @@
 
 pub mod agent;
 pub mod client;
+pub mod dsweb;
 pub mod memory;
 pub mod openai;
 pub mod sse;

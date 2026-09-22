@@ -16,6 +16,8 @@ const PROVIDERS = {
   'deepseek':   { label: 'DeepSeek',                 base: 'https://api.deepseek.com/v1',                             kind: 'openai',    model: 'deepseek-chat' },
   'mistral':    { label: 'Mistral',                  base: 'https://api.mistral.ai/v1',                               kind: 'openai',    model: 'mistral-large-latest' },
   'openrouter': { label: 'OpenRouter',               base: 'https://openrouter.ai/api/v1',                            kind: 'openai',    model: 'openrouter/auto' },
+  'omniroute':  { label: 'OmniRoute — گیت‌وی همه‌چیز',  base: 'http://localhost:20128/v1',                            kind: 'openai',    model: 'auto' },
+  'deepseek-web': { label: 'DeepSeek — حساب وب (یوزر توکن)', base: 'https://chat.deepseek.com',                      kind: 'deepseek_web', model: 'deepseek-chat' },
   'custom':     { label: 'سفارشی…',                   base: '',                                                        kind: 'openai',    model: '' },
 };
 
@@ -36,6 +38,7 @@ const DEFAULTS = {
   tools_enabled: true,
   file_tools: true,
   workspace: '',
+  ds_search: false,
 };
 const LS_SETTINGS = 'atria.settings.v2';
 const LS_CHATS = 'atria.chats.v1';
@@ -98,6 +101,9 @@ function cacheEls() {
     thinkVal: $('#thinkVal'), memVal: $('#memVal'), streamVal: $('#streamVal'),
     sysVal: $('#sysVal'), maxTokVal: $('#maxTokVal'),
     toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'),
+    keyLabel: $('#keyLabel'), btnTokenGuide: $('#btnTokenGuide'), provHint: $('#provHint'),
+    dsSearchRow: $('#dsSearchRow'), dsSearchVal: $('#dsSearchVal'),
+    tokenGuide: $('#tokenGuide'), tokenGuideX: $('#tokenGuideX'), tokenGuideClose: $('#tokenGuideClose'),
   };
 }
 
@@ -164,6 +170,7 @@ function bindSettings() {
     st.settings.base_url = els.baseVal.value.trim();
     st.settings.model = els.modelVal.value.trim();
     saveSettings();
+    syncProviderHints();
   };
   els.keyVal.oninput = () => { st.settings.api_key = els.keyVal.value.trim(); saveSettings(); };
   els.modelVal.oninput = () => { st.settings.model = els.modelVal.value.trim(); saveSettings(); };
@@ -202,6 +209,8 @@ function bindSettings() {
   };
   els.toolsVal.onchange = () => { st.settings.tools_enabled = els.toolsVal.checked; saveSettings(); syncChips(); };
   els.fileToolsVal.onchange = () => { st.settings.file_tools = els.fileToolsVal.checked; saveSettings(); syncChips(); };
+  els.dsSearchVal.checked = !!st.settings.ds_search;
+  els.dsSearchVal.onchange = () => { st.settings.ds_search = els.dsSearchVal.checked; saveSettings(); };
   els.wsVal.oninput = () => { st.settings.workspace = els.wsVal.value.trim(); saveSettings(); };
 
   document.querySelectorAll('.stab').forEach((b) => b.addEventListener('click', () => {
@@ -367,6 +376,104 @@ function renderHistory() {
   }
   scrollBottom(true);
 }
+
+/* ---------------- wire helpers ---------------- */
+
+// Extract visible text from either a stored message ({plain|text}) or a
+// wire message from Rust ({content:[{type:'text',...}]}).
+function msgText(m) {
+  if (!m) return '';
+  if (typeof m === 'string') return m;
+  if (typeof m.plain === 'string' && m.plain) return m.plain;
+  if (typeof m.text === 'string' && m.text) return m.text;
+  if (Array.isArray(m.content)) {
+    return m.content
+      .filter((b) => b && b.type === 'text')
+      .map((b) => b.text || '')
+      .join('\n');
+  }
+  return '';
+}
+
+/* ---------------- send flow ---------------- */
+
+function send() {
+  const text = els.input.value.trim();
+  if (!text || st.sending) return;
+  const chat = currentChat();
+  if (!chat) { newChat(true); return send(); }
+
+  if (!st.settings.api_key) {
+    openModal(els.settingsModal);
+    return toast('ابتدا کلید/یوزر توکن خودت را در تنظیمات وارد کن', 'warn');
+  }
+
+  chat.messages.push({ role: 'user', text, plain: text, ts: Date.now() });
+  if (chat.title === 'گفتگوی جدید') {
+    chat.title = text.slice(0, 42) + (text.length > 42 ? '…' : '');
+    renderConvList();
+  }
+  els.empty.classList.add('hidden', 'off');
+  els.messages.appendChild(bubbleEl('user', text));
+  els.input.value = '';
+  autosize();
+  scrollBottom();
+
+  startTurn();
+}
+
+function startTurn() {
+  st.sending = true;
+  st.runText = '';
+  st.streamEl = null;
+  st.stackEl = null;
+  st.run = newRun();
+  st.live = null;
+  liveMdEl(); // create the live ai message shell
+  startBlink();
+  els.btnSend.classList.add('hidden');
+  els.btnStop.classList.remove('hidden');
+
+  const chat = currentChat();
+  const history = chat.messages.map((m) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: [{ type: 'text', text: msgText(m) }],
+  }));
+  if (!window.__atria || !window.__atria.chat_send) {
+    return failRun('پل ارتباطی IPC آماده نیست — برنامه را دوباره باز کن');
+  }
+  window.__atria.chat_send({
+    payload: {
+      api_key: st.settings.api_key,
+      base_url: st.settings.base_url || 'https://api.atria-asi.ai',
+      model: st.settings.model || 'Atria-Dawn-Preview',
+      max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 4096)),
+      temperature: Number(st.settings.temp),
+      system: st.settings.system || '',
+      tools_enabled: !!st.settings.tools_enabled,
+      stream: st.settings.stream !== false,
+      kind: st.settings.api_kind || 'anthropic',
+      file_tools: !!st.settings.file_tools,
+      workspace: st.settings.workspace || '',
+      thinking: !!st.settings.thinking,
+      web_search: !!st.settings.ds_search,
+      messages: history,
+    },
+  }).catch((e) => failRun(e && e.message ? e.message : String(e)));
+}
+
+function retryLast() {
+  if (st.sending) return;
+  if (st.failedWrap && st.failedWrap.parentNode) st.failedWrap.parentNode.removeChild(st.failedWrap);
+  st.failedWrap = null;
+  if (st.streamEl) {
+    const msg = st.streamEl.closest('.msg');
+    if (msg && msg.parentNode) msg.parentNode.removeChild(msg);
+  }
+  startTurn();
+}
+
+function stop() { window.__atria.chat_stop(); }
 
 /* ------- live pieces: run panel (DeepSeek-style think + tools timeline) ------- */
 
@@ -581,6 +688,8 @@ function onToolStart(id, name, label, input) {
     card._item = item;
   }
   card.classList.remove('pending');
+  if (label) card.querySelector('.tool-label').textContent = label;
+  if (name) card.querySelector('.tool-chip').textContent = name;
   card.querySelector('.tool-state').textContent = 'در حال اجرا…';
   const inEl = card.querySelector('.tool-in');
   inEl.classList.remove('hidden');
@@ -806,10 +915,29 @@ function closeModelMenu() { els.modelMenu.classList.add('hidden'); }
 
 function renderModelMenu() {
   els.modelMenu.innerHTML = '';
+  const tools = document.createElement('div');
+  tools.className = 'mm-tools';
+  tools.innerHTML =
+    '<input class="mm-search" id="mmSearch" placeholder="جست‌وجوی مدل…" spellcheck="false">' +
+    '<button class="mm-fetch" id="mmFetch" title="دریافت فهرست مدل‌ها از سرور">🔎</button>';
+  els.modelMenu.appendChild(tools);
   const groups = [
     ['آتریا', [
       ['atria', 'Atria-Dawn-Preview', 'Messages API'],
       ['atria-cc', 'Atria-Dawn-Preview', 'Chat Completions'],
+    ]],
+    ['DeepSeek — حساب وب (بدون کلید API)', [
+      ['deepseek-web', 'deepseek-chat', 'V4 Flash — روزمره و سریع'],
+      ['deepseek-web', 'deepseek-expert', 'V4 Pro — مسائل پیچیده'],
+      ['deepseek-web', 'deepseek-vision', 'درک تصویر'],
+    ]],
+    ['OmniRoute — گیت‌وی محلی همه‌چیز', [
+      ['omniroute', 'auto', 'مسیریابی هوشمند خودکار'],
+      ['omniroute', 'ds/deepseek-chat', 'DeepSeek · ds/'],
+      ['omniroute', 'gh/gpt-5.1-codex', 'GitHub Copilot · gh/'],
+      ['omniroute', 'if/kimi-k2-thinking', 'iFlow رایگان · if/'],
+      ['omniroute', 'cc/claude-sonnet-4-6', 'Claude Code · cc/'],
+      ['omniroute', 'openrouter/auto', 'OpenRouter از طریق OmniRoute'],
     ]],
     ['کلاد و پروایدرهای جهانی', [
       ['claude', 'claude-sonnet-4-6', 'Anthropic'],
@@ -817,7 +945,7 @@ function renderModelMenu() {
       ['gemini', 'gemini-3.8-flash', 'Google Gemini'],
       ['groq', 'llama-3.3-70b-versatile', 'Groq'],
       ['xai', 'grok-4', 'xAI Grok'],
-      ['deepseek', 'deepseek-chat', 'DeepSeek'],
+      ['deepseek', 'deepseek-chat', 'DeepSeek · API رسمی'],
       ['mistral', 'mistral-large-latest', 'Mistral'],
       ['openrouter', 'openrouter/auto', 'OpenRouter'],
     ]],
@@ -842,6 +970,71 @@ function renderModelMenu() {
   custom.textContent = '⚙︎ مدل سفارشی و همهٔ تنظیمات…';
   custom.onclick = () => { closeModelMenu(); openModal(els.settingsModal); };
   els.modelMenu.appendChild(custom);
+
+  tools.querySelector('#mmSearch').oninput = (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    els.modelMenu.querySelectorAll('.mm-item').forEach((it) => {
+      const hit = !q || it.textContent.toLowerCase().includes(q);
+      it.classList.toggle('hidden', !hit);
+    });
+  };
+  tools.querySelector('#mmFetch').onclick = (e) => { e.stopPropagation(); fetchLiveModels(); };
+}
+
+async function fetchLiveModels() {
+  const btn = document.getElementById('mmFetch');
+  if (btn) btn.textContent = '…';
+  try {
+    const ids = await window.__atria.list_models({
+      base: st.settings.base_url || '',
+      key: st.settings.api_key || '',
+    });
+    const old = document.getElementById('mmLive');
+    if (old) old.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'mmLive';
+    const h = document.createElement('div');
+    h.className = 'mm-head';
+    h.textContent = 'مدل‌های زندهٔ سرور (' + ids.length + ')';
+    wrap.appendChild(h);
+    for (const id of ids) {
+      const it = document.createElement('button');
+      it.className = 'mm-item mm-live';
+      it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
+      it.querySelector('.mm-model').textContent = id;
+      it.querySelector('.mm-src').textContent =
+        PROVIDERS[st.settings.provider] ? PROVIDERS[st.settings.provider].label : (st.settings.provider || 'سفارشی');
+      it.onclick = () => pickProvider(st.settings.provider || 'custom', id);
+      wrap.appendChild(it);
+    }
+    els.modelMenu.appendChild(wrap);
+    toast(ids.length + ' مدل از سرور دریافت شد', 'ok');
+  } catch (e) {
+    toast('دریافت فهرست مدل‌ها: ' + e, 'err');
+  } finally {
+    if (btn) btn.textContent = '🔎';
+  }
+}
+
+function syncProviderHints() {
+  const pid = st.settings.provider;
+  const isDs = pid === 'deepseek-web';
+  const isOmni = pid === 'omniroute';
+  if (!els.keyLabel) return;
+  els.keyLabel.textContent = isDs ? 'یوزر توکن دیپ‌سیک (از localStorage سایت)' : 'کلید API';
+  els.keyVal.placeholder = isDs
+    ? 'مقدار userToken — یا کل JSON آیتم userToken'
+    : 'کلید خودت را اینجا بگذار';
+  els.btnTokenGuide.classList.toggle('hidden', !isDs);
+  els.dsSearchRow.classList.toggle('hidden', !isDs);
+  els.provHint.classList.toggle('hidden', !(isDs || isOmni));
+  if (isDs) {
+    els.provHint.textContent =
+      '⚠ غیررسمی: با یوزر توکن حساب وب دیپ‌سیک کار می‌کند (نیازی به کلید API نیست) — با احتیاط و مسئولیت خودت.';
+  } else if (isOmni) {
+    els.provHint.textContent =
+      'OmniRoute را اجرا کن (npm i -g omniroute) و کلید را از Dashboard → Endpoint → Registered Keys بساز. آدرس پیش‌فرض سرور: http://localhost:20128/v1 — برای دیدن مدل‌ها در منوی مدل، 🔎 را بزن.';
+  }
 }
 
 function pickProvider(pid, model) {
@@ -858,6 +1051,7 @@ function pickProvider(pid, model) {
   }
   saveSettings();
   updateModelPick();
+  syncProviderHints();
   closeModelMenu();
   toast('مدل: ' + model, 'ok');
 }
@@ -892,6 +1086,10 @@ function boot() {
   els.memoryX.onclick = () => closeModal(els.memoryModal);
   els.memoryClose.onclick = () => closeModal(els.memoryModal);
   els.cmdkX.onclick = () => closeModal(els.cmdk);
+  els.btnTokenGuide.onclick = () => openModal(els.tokenGuide);
+  els.tokenGuideX.onclick = () => closeModal(els.tokenGuide);
+  els.tokenGuideClose.onclick = () => closeModal(els.tokenGuide);
+  els.tokenGuide.onclick = (e) => { if (e.target === els.tokenGuide) closeModal(els.tokenGuide); };
   els.btnWipe.onclick = () => {
     if (confirm('همهٔ گفتگوها حذف شوند؟')) {
       st.chats = [];
@@ -927,6 +1125,7 @@ function boot() {
   // نوار مدل/حالت (مثل کلاد)
   updateModelPick();
   syncChips();
+  syncProviderHints();
   els.modelPick.onclick = (e) => {
     e.stopPropagation();
     if (els.modelMenu.classList.contains('hidden')) { renderModelMenu(); els.modelMenu.classList.remove('hidden'); }

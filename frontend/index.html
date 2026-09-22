@@ -130,16 +130,19 @@
               <select id="kindVal">
                 <option value="anthropic">Messages API (Anthropic-compatible)</option>
                 <option value="openai">Chat Completions (OpenAI-compatible)</option>
+                <option value="deepseek_web">DeepSeek وب (userToken + PoW — بدون کلید API)</option>
               </select>
             </div>
           </div>
           <div class="field">
-            <label class="flabel">کلید API</label>
+            <label class="flabel" id="keyLabel">کلید API</label>
             <div class="key-row">
               <input type="password" id="keyVal" dir="ltr" spellcheck="false" placeholder="کلید خودت را اینجا بگذار">
               <button class="eye" id="keyEye" title="نمایش">👁</button>
+              <button class="btn tiny hidden" id="btnTokenGuide" type="button">از کجا بیاورم؟</button>
             </div>
-            <span class="fhint">کلید فقط در همین برنامه روی سیستم شما می‌ماند.</span>
+            <span class="fhint">کلید/توکن فقط در همین برنامه روی سیستم شما می‌ماند.</span>
+            <span class="fhint prov-help hidden" id="provHint"></span>
           </div>
           <div class="field">
             <label class="flabel">آدرس پایه (Base URL)</label>
@@ -160,6 +163,10 @@
           <label class="switch-field">
             <input type="checkbox" id="streamVal"><span class="switch"></span>
             جریان زنده (Streaming)
+          </label>
+          <label class="switch-field hidden" id="dsSearchRow">
+            <input type="checkbox" id="dsSearchVal"><span class="switch"></span>
+            🔎 جست‌وجوی وب دیپ‌سیک (در حساب وب)
           </label>
           <div class="field">
             <label class="flabel">دمای تولید: <b id="tempOut">0.7</b></label>
@@ -233,6 +240,34 @@
     </div>
   </div>
 
+  <!-- DeepSeek userToken guide -->
+  <div class="modal-backdrop hidden" id="tokenGuide">
+    <div class="modal glass">
+      <div class="modal-head">
+        <h2>یوزر توکن دیپ‌سیک از کجا بیاورم؟</h2>
+        <button class="x" id="tokenGuideX">✕</button>
+      </div>
+      <div class="modal-body">
+        <ol class="guide-list">
+          <li>در مرورگر وارد <b>chat.deepseek.com</b> شو و وارد حساب خودت شو</li>
+          <li><b>F12</b> بزن (Developer Tools) و به تب <b>Application</b> برو</li>
+          <li>در سمت چپ: <b>Local Storage</b> ← آدرس سایت ← آیتم <b>userToken</b></li>
+          <li>یا در تب <b>Console</b> این دستور را بزن:</li>
+        </ol>
+        <div class="code-hint" dir="ltr">JSON.parse(localStorage.getItem("userToken")).value</div>
+        <ol class="guide-list" start="5">
+          <li>رشتهٔ برگشته را کپی کن و در فیلد «یوزر توکن» همین‌جا بگذار</li>
+          <li>می‌توانی کل مقدار userToken را هم بگذاری — برنامه خودش بخش value را می‌خواند</li>
+        </ol>
+        <p class="fhint warn">⚠ غیررسمی و با مسئولیت خودت — ممکن است سایت دیپ‌سیک محدود کند؛ توکن حدود یک روز معتبر است و بعد باید دوباره بگیری.</p>
+      </div>
+      <div class="modal-foot">
+        <div class="spacer"></div>
+        <button class="btn primary" id="tokenGuideClose">فهمیدم</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toasts" id="toasts"></div>
 
   <script>
@@ -253,6 +288,7 @@
       memory_list: function () { return invoke('memory_list'); },
       memory_clear: function () { return invoke('memory_clear'); },
       app_meta: function () { return invoke('app_meta'); },
+      list_models: function (a) { return invoke('list_models', a); },
       minimize_win: function () { return invoke('minimize_win'); },
       maximize_win: function () { return invoke('maximize_win'); },
       close_win: function () { return invoke('close_win'); }

@@ -38,6 +38,16 @@ pub struct ChatPayload {
     /// Workspace root for the file tools.
     #[serde(default)]
     pub workspace: String,
+    /// DeepSeek-web: DeepThink toggle (default on).
+    #[serde(default = "default_true")]
+    pub thinking: bool,
+    /// DeepSeek-web: web-search toggle.
+    #[serde(default)]
+    pub web_search: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Payload of the `atria:done` event.
@@ -48,6 +58,12 @@ pub struct DonePayload {
     pub rounds: u32,
     pub input_tokens: u32,
     pub output_tokens: u32,
+}
+
+/// Live model catalog from an OpenAI-compatible server (OmniRoute/OpenRouter).
+#[tauri::command]
+pub async fn list_models(base: String, key: String) -> Result<Vec<String>, String> {
+    atria_core::client::list_models(&base, &key).await.map_err(|e| e.to_string())
 }
 
 /// Abort the in-flight generation.
@@ -110,6 +126,8 @@ pub async fn chat_send(
             kind: ApiKind::parse(&payload.kind),
             file_tools: payload.file_tools,
             workspace: payload.workspace,
+            web_thinking: payload.thinking,
+            web_search: payload.web_search,
         };
         let mut mem = MemoryStore::open(&mem_path);
 

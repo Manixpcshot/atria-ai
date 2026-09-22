@@ -13,8 +13,10 @@ pub enum ApiKind {
     #[default]
     Anthropic,
     /// OpenAI-compatible Chat Completions (`/v1/chat/completions`) —
-    /// OpenAI, Gemini (compat layer), Groq, DeepSeek, OpenRouter, ...
+    /// OpenAI, Gemini (compat layer), Groq, DeepSeek, OpenRouter, OmniRoute, ...
     OpenAi,
+    /// chat.deepseek.com web API — signed-in `userToken`, no paid API key.
+    DeepSeekWeb,
 }
 
 impl ApiKind {
@@ -22,6 +24,9 @@ impl ApiKind {
         match s.trim().to_ascii_lowercase().as_str() {
             "openai" | "oai" | "openai_compat" | "chat" | "chat_completions"
             | "chat-completions" | "completions" => ApiKind::OpenAi,
+            "deepseek_web" | "deepseekweb" | "deepseek-web" | "ds_web" | "dsweb" => {
+                ApiKind::DeepSeekWeb
+            }
             _ => ApiKind::Anthropic,
         }
     }
@@ -46,6 +51,10 @@ pub struct ClientConfig {
     pub file_tools: bool,
     /// Sandbox root for the file tools (empty = disabled).
     pub workspace: String,
+    /// DeepSeek-web: the site's DeepThink toggle.
+    pub web_thinking: bool,
+    /// DeepSeek-web: the site's web-search toggle.
+    pub web_search: bool,
 }
 
 impl Default for ClientConfig {
@@ -62,6 +71,8 @@ impl Default for ClientConfig {
             kind: ApiKind::Anthropic,
             file_tools: false,
             workspace: String::new(),
+            web_thinking: true,
+            web_search: false,
         }
     }
 }
@@ -392,7 +403,59 @@ pub async fn send(
                 .send(cfg, messages, tools, on_event, stop)
                 .await
         }
+        ApiKind::DeepSeekWeb => {
+            crate::dsweb::DsWebClient::new()
+                .send(cfg, messages, tools, on_event, stop)
+                .await
+        }
     }
+}
+
+/// GET `{base}/models` — OpenAI-compatible model catalog (OmniRoute,
+/// OpenRouter and friends). Used by the UI's live model picker.
+pub async fn list_models(base: &str, key: &str) -> Result<Vec<String>, CoreError> {
+    let mut b = base.trim().trim_end_matches('/').to_string();
+    for suffix in ["/v1/chat/completions", "/chat/completions"] {
+        if b.ends_with(suffix) {
+            b.truncate(b.len() - suffix.len());
+            break;
+        }
+    }
+    let b = b.trim_end_matches('/').to_string();
+    let url = if b.ends_with("/v1") { format!("{b}/models") } else { format!("{b}/v1/models") };
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .build()?;
+    let mut req = client.get(&url).timeout(std::time::Duration::from_secs(20));
+    if !key.trim().is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", key.trim()));
+    }
+    let resp = req.send().await?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await.unwrap_or_default();
+    if status != 200 {
+        return Err(CoreError::Api {
+            status,
+            message: format!("{} [{url}]", extract_error(&text)),
+        });
+    }
+    let v: Value = serde_json::from_str(&text)
+        .map_err(|_| CoreError::Api { status, message: format!("پاسخ نامعتبر [{url}]") })?;
+    let mut ids: Vec<String> = v
+        .pointer("/data")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|m| m.get("id").and_then(Value::as_str).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.retain(|id| !id.trim().is_empty());
+    ids.sort();
+    if ids.is_empty() {
+        return Err(CoreError::Api { status, message: format!("فهرست مدلی برنگشت [{url}]") });
+    }
+    Ok(ids)
 }
 
 /// Remove thinking blocks from history (fallback when a gateway rejects them).
