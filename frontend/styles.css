@@ -934,3 +934,74 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
 .fhint.warn { color: #ffb4a8; margin-top: 10px; display: block; }
 .btn.tiny { padding: 5px 10px; font-size: 11px; white-space: nowrap; }
 .key-row .btn.tiny { margin-inline-start: 4px; }
+
+/* ============ v0.4.1: connections manager + user-defined model lists ============ */
+.modal.wide { width: min(880px, calc(100vw - 40px)); }
+.conns-body {
+  display: grid; grid-template-columns: 240px 1fr; gap: 14px;
+  min-height: 380px; align-items: start;
+}
+.conn-list-col { display: flex; flex-direction: column; gap: 8px; }
+.conn-list { display: flex; flex-direction: column; gap: 7px; max-height: 420px; overflow-y: auto; }
+.conn-card {
+  text-align: start; cursor: pointer; padding: 9px 12px; border-radius: 11px;
+  background: rgba(255, 255, 255, 0.03); border: 1px solid var(--brd);
+  transition: 0.15s; animation: fadeSlide 0.25s ease both;
+}
+.conn-card:hover { background: rgba(160, 130, 255, 0.08); }
+.conn-card.active {
+  border-color: rgba(160, 130, 255, 0.5);
+  background: rgba(160, 130, 255, 0.12);
+  box-shadow: 0 0 0 1px rgba(160, 130, 255, 0.2);
+}
+.cc-name { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.cc-meta { font-size: 10.5px; color: var(--muted); direction: ltr; text-align: start; }
+.conn-summary { display: flex; flex-direction: column; gap: 8px; }
+.conn-summary .conn-card { pointer-events: auto; }
+.conn-form-col { display: flex; flex-direction: column; gap: 10px; }
+.conn-form-foot { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.btn.full { width: 100%; }
+.model-tags {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 7px;
+  min-height: 42px; border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 10px; background: rgba(0, 0, 0, 0.15);
+}
+.model-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 11px; direction: ltr;
+  background: rgba(160, 130, 255, 0.14); border: 1px solid rgba(160, 130, 255, 0.3);
+  border-radius: 20px; padding: 3px 5px 3px 10px; color: var(--ink);
+  animation: msgIn 0.25s ease both;
+}
+.model-tag .mt-x {
+  border: none; background: rgba(255, 255, 255, 0.08); color: var(--muted);
+  border-radius: 50%; width: 16px; height: 16px; font-size: 9px;
+  cursor: pointer; line-height: 1;
+}
+.model-tag .mt-x:hover { background: rgba(255, 107, 125, 0.3); color: #fff; }
+.srv-models { margin-top: 7px; display: flex; flex-direction: column; gap: 6px; }
+.srv-list {
+  display: flex; flex-direction: column; gap: 3px; max-height: 190px;
+  overflow-y: auto; padding: 5px; border: 1px solid var(--brd);
+  border-radius: 10px; background: rgba(0, 0, 0, 0.2);
+}
+.srv-item {
+  text-align: start; font-family: var(--mono); font-size: 11.5px; direction: ltr;
+  padding: 6px 10px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: var(--ink); cursor: pointer;
+}
+.srv-item:hover { background: rgba(160, 130, 255, 0.1); }
+.srv-item.picked {
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.1); color: #a8e6c9;
+}
+.mm-conn-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.mm-conn-name { font-weight: 700; color: #cfc6ff; }
+.mm-switch {
+  font-family: var(--font); font-size: 10.5px; color: var(--muted);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--brd);
+  border-radius: 20px; padding: 3px 10px; cursor: pointer; transition: 0.15s;
+}
+.mm-switch:hover { color: var(--ink); background: rgba(160, 130, 255, 0.15); }
