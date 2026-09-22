@@ -72,6 +72,8 @@ pub enum StreamEvent {
     Thinking(String),
     Text(String),
     ToolStart { id: String, name: String },
+    /// Tool-call arguments are being generated (`n` = new argument chars).
+    ToolArgs { id: String, n: usize },
 }
 
 /// One completed assistant turn.
@@ -254,6 +256,16 @@ impl AtriaClient {
                                 let p = d["partial_json"].as_str().unwrap_or("");
                                 if let Some(Acc::ToolUse { input_json, .. }) = blocks.get_mut(idx) {
                                     input_json.push_str(p);
+                                }
+                                if !p.is_empty() {
+                                    if let Some(Acc::ToolUse { id, .. }) = blocks.get(idx) {
+                                        if !id.is_empty() {
+                                            on_event(StreamEvent::ToolArgs {
+                                                id: id.clone(),
+                                                n: p.len(),
+                                            });
+                                        }
+                                    }
                                 }
                             }
                             _ => {}

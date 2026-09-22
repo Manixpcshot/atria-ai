@@ -185,7 +185,12 @@ fn emit_agent_event(app: &AppHandle, ev: AgentEvent) {
         AgentEvent::Stream(StreamEvent::Text(delta)) => {
             let _ = app.emit("atria:text", serde_json::json!({ "delta": delta }));
         }
-        AgentEvent::Stream(StreamEvent::ToolStart { .. }) => {}
+        AgentEvent::Stream(StreamEvent::ToolStart { id, name }) => {
+            let _ = app.emit("atria:tool_pending", serde_json::json!({ "id": id, "name": name }));
+        }
+        AgentEvent::Stream(StreamEvent::ToolArgs { id, n }) => {
+            let _ = app.emit("atria:tool_args", serde_json::json!({ "id": id, "n": n }));
+        }
         AgentEvent::ToolStart { id, name, label, input } => {
             let _ = app.emit(
                 "atria:tool_start",

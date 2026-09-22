@@ -50,7 +50,7 @@ const st = {
   live: null,
   streamEl: null,
   stackEl: null,
-  thinkEl: null,
+  run: null,
   cursorHolder: null,
 };
 
@@ -287,7 +287,56 @@ function avatarEl(role) {
   return a;
 }
 
-function bubbleEl(role, text) {
+function historyPanelEl(flow) {
+  const box = document.createElement('div');
+  box.className = 'think-box run-panel';
+  const head = document.createElement('button');
+  head.className = 'think-head';
+  head.innerHTML = '<span class="think-orb"><i></i></span>' +
+    '<span class="think-title">فرایند تفکر</span>' +
+    '<span class="think-now"></span><span class="chev">▾</span>';
+  head.querySelector('.think-now').textContent = (flow.length || 0) + ' گام';
+  head.onclick = () => box.classList.toggle('open');
+  const body = document.createElement('div');
+  body.className = 'think-body';
+  const flowEl = document.createElement('div');
+  flowEl.className = 'flow';
+  for (const it of flow) {
+    if (it.k === 't') {
+      const el = document.createElement('div');
+      el.className = 'step';
+      el.innerHTML = '<div class="step-title"></div><div class="step-text"></div>';
+      el.querySelector('.step-title').textContent = it.title || 'اندیشیدن…';
+      el.querySelector('.step-text').textContent = it.text || '';
+      flowEl.appendChild(el);
+    } else if (it.k === 'p') {
+      const card = toolCardEl(it.title, it.name, null, false);
+      card.classList.remove('pending');
+      card.classList.add(it.ok ? 'done' : 'failed');
+      card.querySelector('.tool-state').textContent =
+        it.ok ? '✓ انجام شد' : (it.ok === false ? '✕ خطا' : '');
+      const inEl = card.querySelector('.tool-in');
+      if (it.in) { inEl.classList.remove('hidden'); inEl.textContent = it.in; }
+      if (it.out) {
+        const out = card.querySelector('.tool-out');
+        out.classList.remove('hidden');
+        out.textContent = it.out;
+      }
+      flowEl.appendChild(card);
+    } else {
+      const r = document.createElement('div');
+      r.className = 'round-chip';
+      r.textContent = it.text || '↻ مرحلهٔ ابزار';
+      flowEl.appendChild(r);
+    }
+  }
+  body.appendChild(flowEl);
+  box.appendChild(head);
+  box.appendChild(body);
+  return box;
+}
+
+function bubbleEl(role, text, flow) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
   wrap.appendChild(avatarEl(role));
@@ -298,6 +347,7 @@ function bubbleEl(role, text) {
   const md = document.createElement('div');
   md.className = 'md';
   b.appendChild(md);
+  if (flow && flow.length && role !== 'user') stack.appendChild(historyPanelEl(flow));
   stack.appendChild(b);
   wrap.appendChild(stack);
   // render markdown into md container
@@ -312,47 +362,251 @@ function renderHistory() {
   els.empty.classList.toggle('off', !!(chat && chat.messages.length));
   if (!chat) return;
   for (const m of chat.messages) {
-    els.messages.appendChild(bubbleEl(m.role === 'user' ? 'user' : 'ai', m.plain || m.text || '…'));
+    els.messages.appendChild(
+      bubbleEl(m.role === 'user' ? 'user' : 'ai', m.plain || m.text || '…', m.flow));
   }
   scrollBottom(true);
 }
 
-/* ------- live pieces: thinking box / tool cards / cursor ------- */
+/* ------- live pieces: run panel (DeepSeek-style think + tools timeline) ------- */
 
-function ensureThink() {
-  if (st.thinkEl && st.thinkEl.isConnected) return st.thinkEl;
+const FA_STEP_START = /(خب|حالا|اکنون|بیایید|بریم|برویم|ابتدا|اولین|سپس|در نهایت|می‌خواهم|میخوام|باید|لازم|الان|هم‌اکنون|now|next|let'?s|first|then|i'?ll|i will|time to|going to|okay|right|alright)/i;
+const FA_TOOL = {
+  calculator: 'ماشین‌حساب', current_time: 'ساعت و تاریخ', remember: 'ذخیره در حافظه',
+  recall: 'جست‌وجوی حافظه', list_files: 'فهرست فایل‌ها', read_file: 'خواندن فایل',
+  write_file: 'نوشتن فایل', edit_file: 'ویرایش فایل', bash: 'اجرای دستور',
+};
+function faTool(name) { return FA_TOOL[name] || 'اجرای ابزار'; }
+function fmtN(n) { return n > 999 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+
+function fmtInput(input) {
+  let s;
+  try { s = JSON.stringify(input ?? {}, null, 2); } catch { s = String(input); }
+  if (s.length > 1200) s = s.slice(0, 1200) + '\n… (' + fmtN(s.length) + ' کاراکتر)';
+  return s;
+}
+
+// «هر فکر بگوید الآن چه می‌کند» — آخرین جملهٔ آغازگر («خب بریم برای نوشتن فایل»…)
+// یا اولین جمله، خلاصه‌شده به‌عنوان عنوان گام.
+function pickStepTitle(text) {
+  const clean = (text || '').replace(/[#*`>]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return 'در حال اندیشیدن…';
+  const parts = clean.split(/(?<=[.!?؟])\s+/);
+  let chosen = '';
+  for (const s of parts) if (FA_STEP_START.test(s)) chosen = s;
+  if (!chosen) chosen = parts[0] || clean;
+  chosen = chosen.trim();
+  if (chosen.length > 58) chosen = chosen.slice(0, 58) + '…';
+  return chosen;
+}
+
+function newRun() {
+  return { panel: null, flow: null, cards: new Map(), thinkStep: null, thinkTn: null,
+           thinkLen: 0, thinkKind: '', log: [] };
+}
+
+function ensurePanel() {
+  if (!st.run) st.run = newRun();
+  const run = st.run;
+  if (run.panel && run.panel.isConnected) return run.panel;
   const box = document.createElement('div');
-  box.className = 'think-box has';
+  box.className = 'think-box run-panel has open';
   box.innerHTML =
     '<button class="think-head"><span class="think-orb"><i></i></span>' +
     '<span class="think-title">در حال اندیشیدن…</span>' +
-    '<span class="think-wave"><i></i><i></i><i></i></span></button>' +
-    '<div class="think-body"></div>';
+    '<span class="think-now"></span>' +
+    '<span class="think-wave"><i></i><i></i><i></i></span>' +
+    '<span class="chev">▾</span></button>' +
+    '<div class="think-body"><div class="flow"></div></div>';
   box.querySelector('.think-head').onclick = () => box.classList.toggle('open');
-  st.stackEl.appendChild(box);
-  st.thinkEl = box;
+  const stack = st.stackEl;
+  const bub = stack.querySelector('.bubble');
+  if (bub) stack.insertBefore(box, bub); else stack.appendChild(box);
+  run.panel = box;
+  run.flow = box.querySelector('.flow');
   return box;
 }
 
-function finishThink() {
-  if (st.thinkEl) {
-    st.thinkEl.classList.remove('has');
-    st.thinkEl.querySelector('.think-title').textContent = 'تفکر مدل';
-    st.thinkEl = null;
-  }
+function setNow(title) {
+  const run = st.run;
+  if (!run.panel) return;
+  run.panel.querySelector('.think-now').textContent = title ? 'اکنون: ' + title : '';
 }
 
-function toolCardEl(label, name, input) {
+function collapsePanel() {
+  const run = st.run;
+  if (!run || !run.panel) return;
+  run.panel.classList.remove('has', 'open');
+  run.panel.querySelector('.think-title').textContent = 'فرایند تفکر';
+  run.panel.querySelector('.think-now').textContent =
+    run.log.length ? run.log.length + ' گام' : '';
+}
+
+function pushLog(item) { if (st.run.log.length < 48) st.run.log.push(item); }
+
+function addChip(text) {
+  ensurePanel();
+  const r = document.createElement('div');
+  r.className = 'round-chip';
+  r.textContent = text;
+  st.run.flow.appendChild(r);
+  pushLog({ k: 'r', text: text });
+  scrollBottom(true);
+}
+
+function addThinkStep() {
+  const run = st.run;
+  ensurePanel();
+  const el = document.createElement('div');
+  el.className = 'step';
+  el.innerHTML = '<div class="step-title"></div><div class="step-text"></div>';
+  run.flow.appendChild(el);
+  const item = { k: 't', title: '', text: '' };
+  pushLog(item);
+  el._item = item;
+  run.thinkStep = el;
+  run.thinkTn = null;
+  run.thinkLen = 0;
+  run.thinkKind = 'think';
+  return el;
+}
+
+function onThinking(delta) {
+  if (!st.settings.thinking) return;
+  closeLive();
+  const run = st.run || (st.run = newRun());
+  let el = run.thinkStep;
+  if (!el || run.thinkKind !== 'think' || run.thinkLen > 300) el = addThinkStep();
+  const item = el._item;
+  if (!run.thinkTn) {
+    run.thinkTn = document.createTextNode('');
+    el.querySelector('.step-text').appendChild(run.thinkTn);
+  }
+  run.thinkTn.textContent += delta;
+  run.thinkLen += delta.length;
+  if (item.text.length < 2200) item.text += delta;
+  if (run.thinkLen > 70 || /[.!?؟\n]/.test(delta)) {
+    const t = pickStepTitle(item.text);
+    if (t && t !== item.title) {
+      item.title = t;
+      el.querySelector('.step-title').textContent = t;
+      setNow(t);
+    }
+  }
+  scrollBottom(true);
+}
+
+function onText(delta) {
+  st.runText += delta;
+  if (st.cursorHolder) stopBlink();
+  if (st.run) { st.run.thinkStep = null; st.run.thinkKind = 'text'; }
+  ensureLive().push(delta);
+  scrollBottom(true);
+}
+
+function toolCardEl(label, name, input, pending) {
   const card = document.createElement('div');
-  card.className = 'tool-card';
+  card.className = 'tool-card' + (pending ? ' pending' : '');
   card.innerHTML =
     '<div class="tool-head"><span class="tool-ic">⚙️</span><span class="tool-label"></span>' +
-    '<span class="tool-chip"></span><span class="tool-state">در حال اجرا…</span></div>' +
+    '<span class="tool-chip"></span><span class="tool-state"></span></div>' +
+    '<div class="tool-bar"><i></i></div>' +
     '<div class="tool-io"><div class="tool-in"></div><div class="tool-out hidden"></div></div>';
   card.querySelector('.tool-label').textContent = label || name || 'ابزار';
   card.querySelector('.tool-chip').textContent = name || '';
-  card.querySelector('.tool-in').textContent = JSON.stringify(input ?? {}, null, 2);
+  card.querySelector('.tool-state').textContent = pending ? 'در حال آماده‌سازی…' : 'در حال اجرا…';
+  const inEl = card.querySelector('.tool-in');
+  if (input == null) inEl.classList.add('hidden');
+  else inEl.textContent = fmtInput(input);
   return card;
+}
+
+function toolKey(id, name) {
+  const i = id ? String(id) : '';
+  return i || (name ? 'call_' + name : '');
+}
+
+function findCard(id) {
+  const run = st.run;
+  if (!run || !run.flow) return null;
+  const key = id ? String(id) : '';
+  if (key && run.cards.has(key)) return run.cards.get(key);
+  const open = run.flow.querySelectorAll('.tool-card:not(.done):not(.failed)');
+  return open.length ? open[open.length - 1] : null;
+}
+
+function onToolPending(id, name) {
+  closeLive();
+  stopBlink();
+  const run = st.run || (st.run = newRun());
+  ensurePanel();
+  run.thinkStep = null;
+  run.thinkKind = 'tool';
+  const label = faTool(name);
+  const card = toolCardEl(label, name, null, true);
+  run.flow.appendChild(card);
+  card._key = toolKey(id, name);
+  card._chars = 0;
+  if (card._key) run.cards.set(card._key, card);
+  const item = { k: 'p', title: label, name: name, ok: null, in: '', out: '' };
+  pushLog(item);
+  card._item = item;
+  setNow(label);
+  scrollBottom(true);
+}
+
+function onToolArgs(id, n) {
+  const card = findCard(id);
+  if (!card) return;
+  card._chars = (card._chars || 0) + (Number(n) || 0);
+  card.querySelector('.tool-state').textContent =
+    'در حال نوشتن محتوا… ' + fmtN(card._chars) + ' کاراکتر';
+}
+
+function onToolStart(id, name, label, input) {
+  closeLive();
+  stopBlink();
+  const run = st.run || (st.run = newRun());
+  ensurePanel();
+  run.thinkStep = null;
+  run.thinkKind = 'tool';
+  let card = findCard(id);
+  if (!card) {
+    card = toolCardEl(label || faTool(name), name, null, true);
+    run.flow.appendChild(card);
+    card._key = toolKey(id, name);
+    if (card._key) run.cards.set(card._key, card);
+    const item = { k: 'p', title: label || faTool(name), name: name, ok: null, in: '', out: '' };
+    pushLog(item);
+    card._item = item;
+  }
+  card.classList.remove('pending');
+  card.querySelector('.tool-state').textContent = 'در حال اجرا…';
+  const inEl = card.querySelector('.tool-in');
+  inEl.classList.remove('hidden');
+  const shown = fmtInput(input);
+  inEl.textContent = shown;
+  if (card._item) card._item.in = shown.slice(0, 500);
+  setNow(label || faTool(name));
+  scrollBottom(true);
+}
+
+function onToolEnd(id, ok, output) {
+  closeLive();
+  const card = findCard(id);
+  if (!card) return;
+  card.classList.remove('pending');
+  card.classList.add(ok ? 'done' : 'failed');
+  card.querySelector('.tool-state').textContent = ok ? '✓ انجام شد' : '✕ خطا';
+  const out = card.querySelector('.tool-out');
+  out.classList.remove('hidden');
+  out.textContent = (output || '').slice(0, 4000);
+  if (card._item) {
+    card._item.ok = ok;
+    card._item.out = (output || '').slice(0, 500);
+  }
+  setNow('بررسی نتیجه');
+  scrollBottom(true);
 }
 
 function startBlink() {
@@ -409,141 +663,10 @@ function closeLive() {
   if (st.live) { st.live.done(); st.live = null; }
 }
 
-/* ---------------- wire helpers ---------------- */
-
-// Extract visible text from either a stored message ({plain|text}) or a
-// wire message from Rust ({content:[{type:'text',...}]}).
-function msgText(m) {
-  if (!m) return '';
-  if (typeof m === 'string') return m;
-  if (typeof m.plain === 'string' && m.plain) return m.plain;
-  if (typeof m.text === 'string' && m.text) return m.text;
-  if (Array.isArray(m.content)) {
-    return m.content
-      .filter((b) => b && b.type === 'text')
-      .map((b) => b.text || '')
-      .join('\n');
-  }
-  return '';
-}
-
-/* ---------------- send flow ---------------- */
-
-function send() {
-  const text = els.input.value.trim();
-  if (!text || st.sending) return;
-  const chat = currentChat();
-  if (!chat) { newChat(true); return send(); }
-
-  if (!st.settings.api_key) {
-    openModal(els.settingsModal);
-    return toast('ابتدا کلید API خودت را در تنظیمات وارد کن', 'warn');
-  }
-
-  chat.messages.push({ role: 'user', text, plain: text, ts: Date.now() });
-  if (chat.title === 'گفتگوی جدید') {
-    chat.title = text.slice(0, 42) + (text.length > 42 ? '…' : '');
-    renderConvList();
-  }
-  els.empty.classList.add('hidden', 'off');
-  els.messages.appendChild(bubbleEl('user', text));
-  els.input.value = '';
-  autosize();
-  scrollBottom();
-
-  startTurn();
-}
-
-function startTurn() {
-  st.sending = true;
-  st.runText = '';
-  st.streamEl = null;
-  st.stackEl = null;
-  st.thinkEl = null;
-  st.live = null;
-  liveMdEl(); // create the live ai message shell
-  startBlink();
-  els.btnSend.classList.add('hidden');
-  els.btnStop.classList.remove('hidden');
-
-  const chat = currentChat();
-  const history = chat.messages.map((m) => ({
-    role: m.role === 'user' ? 'user' : 'assistant',
-    content: [{ type: 'text', text: msgText(m) }],
-  }));
-  if (!window.__atria || !window.__atria.chat_send) {
-    return failRun('پل ارتباطی IPC آماده نیست — برنامه را دوباره باز کن');
-  }
-  window.__atria.chat_send({
-    payload: {
-      api_key: st.settings.api_key,
-      base_url: st.settings.base_url || 'https://api.atria-asi.ai',
-      model: st.settings.model || 'Atria-Dawn-Preview',
-      max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 4096)),
-      temperature: Number(st.settings.temp),
-      system: st.settings.system || '',
-      tools_enabled: !!st.settings.tools_enabled,
-      stream: st.settings.stream !== false,
-      kind: st.settings.api_kind || 'anthropic',
-      file_tools: !!st.settings.file_tools,
-      workspace: st.settings.workspace || '',
-      messages: history,
-    },
-  }).catch((e) => failRun(e && e.message ? e.message : String(e)));
-}
-
-function retryLast() {
-  if (st.sending) return;
-  if (st.failedWrap && st.failedWrap.parentNode) st.failedWrap.parentNode.removeChild(st.failedWrap);
-  st.failedWrap = null;
-  if (st.streamEl) {
-    const msg = st.streamEl.closest('.msg');
-    if (msg && msg.parentNode) msg.parentNode.removeChild(msg);
-  }
-  startTurn();
-}
-
-function stop() { window.__atria.chat_stop(); }
-
-/* ------- live event handlers ------- */
-
-function onThinking(delta) {
-  if (!st.settings.thinking) return;
-  closeLive();
-  const box = ensureThink();
-  box.querySelector('.think-body').textContent += delta;
-  scrollBottom(true);
-}
-
-function onText(delta) {
-  st.runText += delta;
-  if (st.cursorHolder) stopBlink();
-  ensureLive().push(delta);
-  scrollBottom(true);
-}
-
-function onToolStart(label, name, input) {
-  closeLive();
-  stopBlink();
-  st.stackEl.appendChild(toolCardEl(label, name, input));
-  scrollBottom(true);
-}
-
-function onToolEnd(card, ok, output) {
-  closeLive();
-  if (!card) return;
-  card.classList.add(ok ? 'done' : 'failed');
-  card.querySelector('.tool-state').textContent = ok ? '✓ انجام شد' : '✕ خطا';
-  const out = card.querySelector('.tool-out');
-  out.classList.remove('hidden');
-  out.textContent = (output || '').slice(0, 4000);
-  scrollBottom(true);
-}
-
 function failRun(msg) {
   stopBlink();
   closeLive();
-  finishThink();
+  collapsePanel();
   st.sending = false;
   els.btnSend.classList.remove('hidden');
   els.btnStop.classList.add('hidden');
@@ -564,21 +687,28 @@ function failRun(msg) {
 function finishRun(newMessages, finalText) {
   stopBlink();
   closeLive();
-  finishThink();
+  collapsePanel();
   st.sending = false;
   els.btnSend.classList.remove('hidden');
   els.btnStop.classList.add('hidden');
   if (st.streamEl) st.streamEl.classList.remove('streaming');
   const chat = currentChat();
   const plain = finalText && finalText.trim() ? finalText : st.runText || '(پاسخ خالی)';
+  const flow = (st.run && st.run.log.length) ? st.run.log : null;
+  const pushed = [];
   if (newMessages && newMessages.length) {
     for (const m of newMessages) {
       const t = msgText(m);
       if (!t.trim()) continue; // skip tool/think-only messages
       chat.messages.push({ role: m.role === 'user' ? 'user' : 'ai', text: t, plain: t, ts: Date.now() });
+      pushed.push(chat.messages[chat.messages.length - 1]);
     }
   } else {
     chat.messages.push({ role: 'ai', text: st.runText || plain, plain, ts: Date.now() });
+    pushed.push(chat.messages[chat.messages.length - 1]);
+  }
+  for (let i = pushed.length - 1; i >= 0; i--) {
+    if (pushed[i].role === 'ai') { if (flow) pushed[i].flow = flow; break; }
   }
   saveChats();
   scrollBottom();
@@ -593,29 +723,20 @@ function listenEvents() {
   t.listen('atria:round', (e) => {
     if (e.payload.round > 1) {
       closeLive();
-      finishThink();
-      const r = document.createElement('div');
-      r.className = 'round-chip';
-      r.textContent = '↻ مرحلهٔ ابزار ' + e.payload.round;
-      st.stackEl.appendChild(r);
-      scrollBottom(true);
+      ensurePanel();
+      st.run.thinkStep = null;
+      addChip('↻ مرحلهٔ ابزار ' + e.payload.round);
     }
   });
-  let lastCard = null;
-  t.listen('atria:tool_start', (e) => {
-    onToolStart(e.payload.label || e.payload.name, e.payload.name, e.payload.input);
-    lastCard = st.stackEl.lastElementChild;
-  });
-  t.listen('atria:tool_end', (e) => onToolEnd(lastCard, e.payload.ok, e.payload.output));
+  t.listen('atria:tool_pending', (e) => onToolPending(e.payload.id, e.payload.name));
+  t.listen('atria:tool_args', (e) => onToolArgs(e.payload.id, e.payload.n || 0));
+  t.listen('atria:tool_start', (e) =>
+    onToolStart(e.payload.id, e.payload.name, e.payload.label, e.payload.input));
+  t.listen('atria:tool_end', (e) => onToolEnd(e.payload.id, e.payload.ok, e.payload.output));
   t.listen('atria:retry', (e) => {
     closeLive();
-    if (st.stackEl) {
-      const r = document.createElement('div');
-      r.className = 'round-chip';
-      r.textContent = '↻ تلاش مجدد (' + e.payload.attempt + ' از ۳)…';
-      st.stackEl.appendChild(r);
-      scrollBottom(true);
-    }
+    ensurePanel();
+    addChip('↻ تلاش مجدد (' + e.payload.attempt + ' از ۳)…');
   });
   t.listen('atria:done', (e) => finishRun(e.payload.new_messages, e.payload.final_text));
   t.listen('atria:error', (e) => failRun(e.payload.message || 'unknown'));

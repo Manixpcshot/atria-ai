@@ -197,6 +197,14 @@ impl OpenAiClient {
                                 c.pointer("/function/arguments").and_then(Value::as_str)
                             {
                                 entry.2.push_str(a);
+                                if !a.is_empty() {
+                                    let aid = if entry.0.is_empty() {
+                                        format!("call_{}", entry.1)
+                                    } else {
+                                        entry.0.clone()
+                                    };
+                                    on_event(StreamEvent::ToolArgs { id: aid, n: a.len() });
+                                }
                             }
                             if was_empty && (!entry.0.is_empty() || !entry.1.is_empty()) {
                                 on_event(StreamEvent::ToolStart {
