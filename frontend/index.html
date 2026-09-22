@@ -125,49 +125,78 @@
         </div>
 
         <div class="stab-body" data-tab="behavior">
-          <label class="switch-field">
-            <input type="checkbox" id="thinkVal"><span class="switch"></span>
-            نمایش «تفکر» مدل (خارج از پاسخ اصلی)
-          </label>
-          <label class="switch-field">
-            <input type="checkbox" id="memVal"><span class="switch"></span>
-            حافظهٔ بلندمدت (remember / recall)
-          </label>
-          <label class="switch-field">
-            <input type="checkbox" id="streamVal"><span class="switch"></span>
-            جریان زنده (Streaming)
-          </label>
-          <label class="switch-field hidden" id="dsSearchRow">
-            <input type="checkbox" id="dsSearchVal"><span class="switch"></span>
-            🔎 جست‌وجوی وب دیپ‌سیک (در حساب وب)
-          </label>
-          <div class="field">
-            <label class="flabel">دمای تولید: <b id="tempOut">0.7</b></label>
+          <div class="set-sec-title">پاسخ‌گویی</div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">دمای تولید: <b id="tempOut">0.7</b></div>
+              <div class="set-desc">هرچه پایین‌تر، پاسخ منظم‌تر و پیش‌بینی‌پذیرتر</div>
+            </div>
             <input type="range" id="tempVal" min="0" max="1" step="0.1">
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">نمایش «تفکر» مدل</div>
+              <div class="set-desc">خارج از پاسخ اصلی، مثل بخش Think دیپ‌سیک</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="thinkVal"><span class="switch"></span></label>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">حافظهٔ بلندمدت</div>
+              <div class="set-desc">ابزارهای remember / recall برای به‌خاطر سپردن نکته‌ها</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="memVal"><span class="switch"></span></label>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">جریان زنده (Streaming)</div>
+              <div class="set-desc">نمایش خط‌به‌خط پاسخ هنگام تولید</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="streamVal"><span class="switch"></span></label>
+          </div>
+          <div class="set-row hidden" id="dsSearchRow">
+            <div class="set-row-text">
+              <div class="set-label">🔎 جست‌وجوی وب دیپ‌سیک</div>
+              <div class="set-desc">فقط در اتصال حساب وب دیپ‌سیک</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="dsSearchVal"><span class="switch"></span></label>
           </div>
         </div>
 
         <div class="stab-body" data-tab="sys">
+          <div class="set-sec-title">شخصیت و ابزارها</div>
           <div class="field">
             <label class="flabel">دستور سیستمی (System Prompt)</label>
-            <textarea id="sysVal" rows="3" placeholder="شخصیت و قوانین دلخواه…"></textarea>
+            <textarea id="sysVal" rows="4" dir="auto" spellcheck="false" placeholder="شخصیت و قوانین دلخواه — فارسی یا انگلیسی…"></textarea>
           </div>
-          <label class="switch-field">
-            <input type="checkbox" id="toolsVal"><span class="switch"></span>
-            حالت ایجنت — ابزارها: ماشین‌حساب، ساعت، حافظه
-          </label>
-          <label class="switch-field">
-            <input type="checkbox" id="fileToolsVal"><span class="switch"></span>
-            دسترسی به فایل‌ها — فقط داخل پوشهٔ کاری
-          </label>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">حالت ایجنت</div>
+              <div class="set-desc">ماشین‌حساب، ساعت، حافظه — مثل ایجنت‌های رسمی</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="toolsVal"><span class="switch"></span></label>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">دسترسی به فایل‌ها</div>
+              <div class="set-desc">فقط داخل پوشهٔ کاری (Workspace)</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="fileToolsVal"><span class="switch"></span></label>
+          </div>
           <div class="field">
             <label class="flabel">پوشهٔ کاری (Workspace)</label>
-            <input type="text" id="wsVal" dir="ltr" spellcheck="false" placeholder="مثلاً C:\Users\me\Documents\atria-ws">
+            <input type="text" id="wsVal" dir="ltr" spellcheck="false" placeholder="پیش‌فرض: .atria/workspace در پوشهٔ کاربر">
           </div>
           <div class="field">
             <label class="flabel">حداکثر طول پاسخ (توکن خروجی)</label>
-            <input type="number" id="maxTokVal" min="256" max="65536" dir="ltr">
-            <span class="fhint">سقف سرویس ۶۵۵۳۶ است — این عدد سقفِ طول پاسخ است و ربطی به موجودی/اعتبار حساب ندارد.</span>
+            <input type="number" id="maxTokVal" min="256" max="65536" step="256" inputmode="numeric" dir="ltr">
+            <span class="fhint">سقف سرویس ۶۵۵۳۶ است — سقفِ طول پاسخ است و ربطی به موجودی/اعتبار حساب ندارد.</span>
+          </div>
+          <div class="set-sec-title">ذخیره‌سازی</div>
+          <div class="field">
+            <div class="storage-box" id="storageBox">در حال آماده‌سازی…</div>
+            <button class="btn" id="btnRevealAtria" type="button">📂 باز کردن پوشهٔ .atria</button>
+            <span class="fhint">گفتگوها و ورک‌اسپیس مثل اپ‌های رسمی در پوشهٔ کاربر نگهداری می‌شوند — مثلاً <b dir="ltr">C:\Users\man\.atria</b></span>
           </div>
         </div>
       </div>
@@ -228,7 +257,7 @@
         <section class="conn-form-col hidden" id="connForm">
           <div class="field">
             <label class="flabel">نام اتصال</label>
-            <input id="cfName" spellcheck="false" placeholder="مثلاً OmniRoute محلی یا کلید کاری">
+            <input id="cfName" dir="auto" spellcheck="false" placeholder="مثلاً OmniRoute محلی یا کلید کاری">
           </div>
           <div class="row2">
             <div class="field">

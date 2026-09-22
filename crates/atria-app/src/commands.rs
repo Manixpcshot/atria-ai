@@ -95,6 +95,99 @@ pub fn memory_clear(state: State<'_, AppState>) {
     MemoryStore::open(&state.mem_path).clear();
 }
 
+
+/* ---------------- on-disk storage: ~/.atria (chats + workspace + memory) ---------------- */
+
+/// User home directory (Windows `USERPROFILE`, Unix `HOME`).
+fn home_dir() -> PathBuf {
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// `C:\Users\<user>\.atria` (or `~/.atria`) — like official AI apps.
+pub fn atria_root() -> PathBuf {
+    home_dir().join(".atria")
+}
+
+fn ensure_dirs() -> std::io::Result<(PathBuf, PathBuf, PathBuf)> {
+    let root = atria_root();
+    let chats = root.join("chats");
+    let ws = root.join("workspace");
+    std::fs::create_dir_all(&chats)?;
+    std::fs::create_dir_all(&ws)?;
+    Ok((root, chats, ws))
+}
+
+/// Folder layout for the UI storage panel.
+#[tauri::command]
+pub fn dirs_info() -> Result<serde_json::Value, String> {
+    let (root, chats, ws) = ensure_dirs().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "root": root.to_string_lossy(),
+        "chats": chats.to_string_lossy(),
+        "workspace": ws.to_string_lossy(),
+        "memory": root.join("memory.json").to_string_lossy(),
+    }))
+}
+
+/// Load every saved conversation (`~/.atria/chats/*.json`).
+#[tauri::command]
+pub fn chats_load() -> Result<Vec<String>, String> {
+    let (_, chats, _) = ensure_dirs().map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&chats) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.extension().and_then(|s| s.to_str()) == Some("json") {
+                if let Ok(txt) = std::fs::read_to_string(&p) {
+                    out.push(txt);
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// One conversation file to persist.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChatFile {
+    pub id: String,
+    pub data: String,
+}
+
+/// Atomic sync of changed conversations + removal of deleted ones.
+#[tauri::command]
+pub fn chats_sync(files: Vec<ChatFile>, remove: Vec<String>) -> Result<(), String> {
+    let (_, chats, _) = ensure_dirs().map_err(|e| e.to_string())?;
+    for f in files {
+        let name = atria_core::store::sanitize_file_id(&f.id);
+        let tmp = chats.join(format!("{}.json.tmp", name));
+        let dst = chats.join(format!("{}.json", name));
+        std::fs::write(&tmp, f.data.as_bytes()).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &dst).map_err(|e| e.to_string())?;
+    }
+    for id in remove {
+        let name = atria_core::store::sanitize_file_id(&id);
+        let _ = std::fs::remove_file(chats.join(format!("{}.json", name)));
+    }
+    Ok(())
+}
+
+/// Open the `~/.atria` folder in the system file manager.
+#[tauri::command]
+pub fn reveal_dir() -> Result<(), String> {
+    let (root, _, _) = ensure_dirs().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    let spawned = std::process::Command::new("explorer").arg(&root).spawn();
+    #[cfg(target_os = "macos")]
+    let spawned = std::process::Command::new("open").arg(&root).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawned = std::process::Command::new("xdg-open").arg(&root).spawn();
+    spawned.map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// Start one agentic turn. Returns immediately; progress is streamed through
 /// `atria:*` events and finalized with `atria:done` / `atria:error` /
 /// `atria:stopped`.

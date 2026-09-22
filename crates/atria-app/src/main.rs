@@ -12,10 +12,25 @@ use tauri::Manager;
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            // Persistent storage for agent memory.
-            let data_dir = app.path().app_data_dir().expect("app data dir");
-            std::fs::create_dir_all(&data_dir).ok();
-            let mem_path = data_dir.join("memory.json");
+            // Persistent storage under the user's ~/.atria folder (like official AI apps):
+            // chats/ + workspace/ + memory.json
+            let root = commands::atria_root();
+            let _ = std::fs::create_dir_all(root.join("chats"));
+            let _ = std::fs::create_dir_all(root.join("workspace"));
+            let mem_path = root.join("memory.json");
+            // one-time migration of the old app-data memory file
+            if !mem_path.exists() {
+                if let Some(old_mem) = app
+                    .path()
+                    .app_data_dir()
+                    .ok()
+                    .map(|d| d.join("memory.json"))
+                {
+                    if old_mem.exists() {
+                        let _ = std::fs::copy(&old_mem, &mem_path);
+                    }
+                }
+            }
             app.manage(AppState {
                 stop: Arc::new(AtomicBool::new(false)),
                 running: Arc::new(AtomicBool::new(false)),
@@ -51,6 +66,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_models,
+            commands::dirs_info,
+            commands::chats_load,
+            commands::chats_sync,
+            commands::reveal_dir,
             commands::chat_send,
             commands::chat_stop,
             commands::memory_list,

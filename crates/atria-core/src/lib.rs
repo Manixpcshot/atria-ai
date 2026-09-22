@@ -15,6 +15,7 @@ pub mod agent;
 pub mod client;
 pub mod dsweb;
 pub mod memory;
+pub mod store;
 pub mod openai;
 pub mod sse;
 pub mod tools;

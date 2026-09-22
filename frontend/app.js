@@ -60,6 +60,10 @@ const st = {
   conns: [],
   activeConnId: '',
 };
+let dirtyChats = new Set();
+let goneChats = new Set();
+let flushTimer = 0;
+let diskDirs = null;
 
 function loadSettings() {
   let s;
@@ -77,7 +81,108 @@ function saveSettings() {
 function loadChats() {
   try { return JSON.parse(localStorage.getItem(LS_CHATS) || '[]'); } catch { return []; }
 }
-function saveChats() { localStorage.setItem(LS_CHATS, JSON.stringify(st.chats)); }
+function saveChats(dirtiedId) {
+  if (dirtiedId) dirtyChats.add(dirtiedId);
+  try { localStorage.setItem(LS_CHATS, JSON.stringify(st.chats)); } catch {}
+  scheduleFlush();
+}
+function scheduleFlush() {
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = setTimeout(flushChats, 250);
+}
+async function flushChats() {
+  flushTimer = 0;
+  if (!window.__atria || !window.__atria.chats_sync) return;
+  const files = [];
+  for (const c of st.chats) if (dirtyChats.has(c.id)) files.push({ id: c.id, data: JSON.stringify(c) });
+  const remove = Array.from(goneChats);
+  if (!files.length && !remove.length) return;
+  dirtyChats.clear();
+  goneChats.clear();
+  try { await window.__atria.chats_sync({ files, remove }); } catch {}
+}
+function removeChatFile(id) { goneChats.add(id); dirtyChats.delete(id); scheduleFlush(); }
+function wipeChats() {
+  for (const c of st.chats) goneChats.add(c.id);
+  dirtyChats.clear();
+  st.chats = [];
+  try { localStorage.setItem(LS_CHATS, '[]'); } catch {}
+  scheduleFlush();
+  newChat(true);
+}
+let saveSetTimer = 0;
+function saveSettingsSoon() {
+  if (saveSetTimer) clearTimeout(saveSetTimer);
+  saveSetTimer = setTimeout(() => { saveSetTimer = 0; saveSettings(); }, 250);
+}
+let connListTimer = 0, connTabTimer = 0, saveConnsTimer = 0;
+function saveConnsSoon() {
+  if (saveConnsTimer) clearTimeout(saveConnsTimer);
+  saveConnsTimer = setTimeout(() => { saveConnsTimer = 0; saveConns(); }, 250);
+}
+function updateConnListSoon() {
+  if (connListTimer) clearTimeout(connListTimer);
+  connListTimer = setTimeout(() => { connListTimer = 0; renderConnList(); }, 200);
+}
+function updateConnTabSoon() {
+  if (connTabTimer) clearTimeout(connTabTimer);
+  connTabTimer = setTimeout(() => { connTabTimer = 0; updateConnTab(); }, 200);
+}
+
+// restore conversations from ~/.atria/chats (disk is the source of truth)
+async function restoreFromDisk() {
+  if (!window.__atria || !window.__atria.chats_load) return;
+  try {
+    diskDirs = await window.__atria.dirs_info();
+    if (!st.settings.workspace && diskDirs && diskDirs.workspace) {
+      st.settings.workspace = String(diskDirs.workspace);
+      if (els.wsVal) els.wsVal.value = st.settings.workspace;
+      saveSettings();
+    }
+    renderStorage();
+    const list = await window.__atria.chats_load();
+    const disk = [];
+    for (const raw of list || []) {
+      try { const c = JSON.parse(raw); if (c && c.id && Array.isArray(c.messages)) disk.push(c); } catch {}
+    }
+    if (disk.length) {
+      const byId = new Map();
+      for (const c of [...st.chats, ...disk]) {
+        const old = byId.get(c.id);
+        const n = (c.messages || []).length;
+        const nOld = old ? (old.messages || []).length : -1;
+        if (n >= nOld) byId.set(c.id, c); // newest content wins
+      }
+      st.chats = Array.from(byId.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      if (!currentChat()) {
+        st.currentId = st.chats[0] ? st.chats[0].id : null;
+        if (st.currentId) localStorage.setItem(LS_CURRENT, st.currentId);
+      }
+      renderConvList();
+      renderHistory();
+    } else if (st.chats.length) {
+      for (const c of st.chats) dirtyChats.add(c.id); // one-time migration LS -> disk
+      flushChats();
+    }
+  } catch {}
+}
+function renderStorage() {
+  if (!els.storageBox || !diskDirs) return;
+  const rows = [
+    ['گفتگوها', diskDirs.chats],
+    ['ورک‌اسپیس', diskDirs.workspace],
+    ['حافظه', diskDirs.memory],
+  ];
+  els.storageBox.innerHTML = '';
+  for (const [k, v] of rows) {
+    const r = document.createElement('div');
+    r.className = 'st-row';
+    r.innerHTML = '<b></b><span></span>';
+    r.querySelector('b').textContent = k;
+    r.querySelector('span').textContent = String(v || '');
+    els.storageBox.appendChild(r);
+  }
+}
 function currentChat() { return st.chats.find((c) => c.id === st.currentId) || null; }
 
 /* ---------------- connections (multiple API endpoints per provider) ---------------- */
@@ -200,9 +305,9 @@ function commitConnForm() {
   c.kind = els.cfKind.value;
   c.base = els.cfBase.value.trim();
   c.key = els.cfKey.value.trim();
-  saveConns();
-  renderConnList();
-  updateConnTab();
+  saveConnsSoon();
+  updateConnListSoon();
+  updateConnTabSoon();
   updateModelPick();
 }
 
@@ -325,6 +430,10 @@ function bindConns() {
     updateConnTab();
   };
   els.cfName.oninput = commitConnForm;
+  els.cfName.onkeydown = (e) => { if (!(e.isComposing || e.keyCode === 229) && e.key === 'Enter') { e.preventDefault(); els.cfBase.focus(); } };
+  els.cfBase.onkeydown = (e) => { if (!(e.isComposing || e.keyCode === 229) && e.key === 'Enter') { e.preventDefault(); els.cfKey.focus(); } };
+  els.cfKey.onkeydown = (e) => { if (!(e.isComposing || e.keyCode === 229) && e.key === 'Enter') { e.preventDefault(); els.cfKey.blur(); } };
+  els.cfName.onblur = els.cfBase.onblur = els.cfKey.onblur = () => { commitConnForm(); saveConns(); };
   els.cfKind.onchange = () => { commitConnForm(); updateConnFormHints(); };
   els.cfTemplate.onchange = () => {
     const t = CONN_TEMPLATES[els.cfTemplate.value];
@@ -348,6 +457,7 @@ function bindConns() {
   els.cfTokenGuide.onclick = () => openModal(els.tokenGuide);
   els.cfModelAdd.onclick = () => { addConnModel(els.cfModelInput.value); els.cfModelInput.value = ''; };
   els.cfModelInput.onkeydown = (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter') {
       e.preventDefault();
       addConnModel(els.cfModelInput.value);
@@ -442,6 +552,7 @@ function cacheEls() {
     cfFetchModels: $('#cfFetchModels'), cfSrvWrap: $('#cfSrvWrap'),
     cfSrvSearch: $('#cfSrvSearch'), cfSrvList: $('#cfSrvList'),
     cfDelete: $('#cfDelete'), cfSetActive: $('#cfSetActive'),
+    storageBox: $('#storageBox'), btnRevealAtria: $('#btnRevealAtria'),
   };
 }
 
@@ -496,7 +607,7 @@ function bindSettings() {
   els.tempVal.oninput = () => {
     st.settings.temp = Number(els.tempVal.value);
     els.tempOut.textContent = st.settings.temp.toFixed(1);
-    saveSettings();
+    saveSettingsSoon();
   };
   els.thinkVal.onchange = () => { st.settings.thinking = els.thinkVal.checked; saveSettings(); syncChips(); };
   els.memVal.onchange = () => { st.settings.mem = els.memVal.checked; saveSettings(); };
@@ -507,17 +618,31 @@ function bindSettings() {
   els.toolsVal.checked = !!st.settings.tools_enabled;
   els.fileToolsVal.checked = !!st.settings.file_tools;
   els.wsVal.value = st.settings.workspace || '';
-  els.sysVal.oninput = () => { st.settings.system = els.sysVal.value; saveSettings(); };
+  // فیلدهای متنی: ذخیره با تأخیر (تایپ بدون لگ) + نهایی‌سازی در blur
+  els.sysVal.oninput = () => { st.settings.system = els.sysVal.value; saveSettingsSoon(); };
+  els.sysVal.onblur = saveSettings;
   els.maxTokVal.onchange = () => {
-    st.settings.max_tokens = Math.min(65536, Math.max(256, Number(els.maxTokVal.value) || 4096));
-    els.maxTokVal.value = st.settings.max_tokens;
+    let v = Math.round(Number(els.maxTokVal.value));
+    if (!Number.isFinite(v)) v = 4096;
+    v = Math.min(65536, Math.max(256, v));
+    st.settings.max_tokens = v;
+    els.maxTokVal.value = v;
     saveSettings();
   };
   els.toolsVal.onchange = () => { st.settings.tools_enabled = els.toolsVal.checked; saveSettings(); syncChips(); };
   els.fileToolsVal.onchange = () => { st.settings.file_tools = els.fileToolsVal.checked; saveSettings(); syncChips(); };
   els.dsSearchVal.checked = !!st.settings.ds_search;
   els.dsSearchVal.onchange = () => { st.settings.ds_search = els.dsSearchVal.checked; saveSettings(); };
-  els.wsVal.oninput = () => { st.settings.workspace = els.wsVal.value.trim(); saveSettings(); };
+  // ورک‌اسپیس: حین تایپ trim نشود (مکان‌نما نپرد) — فقط در blur
+  els.wsVal.oninput = () => { st.settings.workspace = els.wsVal.value; saveSettingsSoon(); };
+  els.wsVal.onblur = () => {
+    els.wsVal.value = els.wsVal.value.trim();
+    st.settings.workspace = els.wsVal.value;
+    saveSettings();
+  };
+  if (els.btnRevealAtria) els.btnRevealAtria.onclick = () => {
+    if (window.__atria && window.__atria.reveal_dir) window.__atria.reveal_dir().catch(() => {});
+  };
 }
 
 function openModal(m) { m.classList.remove('hidden'); }
@@ -555,13 +680,15 @@ function renderConvList() {
 }
 
 function newChat(silent) {
-  const chat = { id: 'c' + Date.now(), title: 'گفتگوی جدید', createdAt: Date.now(), messages: [] };
+  if (st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
+  const chat = { id: 'c' + Date.now() + Math.random().toString(36).slice(2, 6), title: 'گفتگوی جدید', createdAt: Date.now(), messages: [] };
   st.chats.unshift(chat);
   st.currentId = chat.id;
-  saveChats();
+  saveChats(chat.id);
   localStorage.setItem(LS_CURRENT, chat.id);
   renderConvList();
   renderHistory();
+  scrollBottom(true);
   if (!silent) els.input.focus();
 }
 
@@ -571,11 +698,16 @@ function switchChat(id) {
   localStorage.setItem(LS_CURRENT, id);
   renderConvList();
   renderHistory();
+  scrollBottom(true);
   closeModal(els.cmdk);
 }
 
 function deleteChat(id) {
-  st.chats = st.chats.filter((c) => c.id !== id);
+  if (st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
+  const c = st.chats.find((x) => x.id === id);
+  if (!confirm('گفتگوی «' + (c ? c.title : 'این گفتگو') + '» حذف شود؟')) return;
+  st.chats = st.chats.filter((x) => x.id !== id);
+  removeChatFile(id);
   saveChats();
   if (st.currentId === id) {
     st.currentId = st.chats[0] ? st.chats[0].id : null;
@@ -715,9 +847,11 @@ function send() {
 
   chat.messages.push({ role: 'user', text, plain: text, ts: Date.now() });
   if (chat.title === 'گفتگوی جدید') {
-    chat.title = text.slice(0, 42) + (text.length > 42 ? '…' : '');
+    const t1 = text.replace(/\s+/g, ' ').trim();
+    chat.title = t1.slice(0, 42) + (t1.length > 42 ? '…' : '');
     renderConvList();
   }
+  saveChats(chat.id);
   els.empty.classList.add('hidden', 'off');
   els.messages.appendChild(bubbleEl('user', text));
   els.input.value = '';
@@ -1125,7 +1259,7 @@ function finishRun(newMessages, finalText) {
   for (let i = pushed.length - 1; i >= 0; i--) {
     if (pushed[i].role === 'ai') { if (flow) pushed[i].flow = flow; break; }
   }
-  saveChats();
+  saveChats(chat.id);
   scrollBottom();
 }
 
@@ -1352,9 +1486,7 @@ function boot() {
   els.tokenGuide.onclick = (e) => { if (e.target === els.tokenGuide) closeModal(els.tokenGuide); };
   els.btnWipe.onclick = () => {
     if (confirm('همهٔ گفتگوها حذف شوند؟')) {
-      st.chats = [];
-      saveChats();
-      newChat(true);
+      wipeChats();
       toast('همه گفتگوها حذف شدند', 'ok');
     }
   };
@@ -1377,6 +1509,7 @@ function boot() {
 
   els.input.addEventListener('input', autosize);
   els.input.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
   els.btnSend.onclick = send;
@@ -1387,6 +1520,9 @@ function boot() {
   updateModelPick();
   syncChips();
   updateConnTab();
+  restoreFromDisk();
+  window.addEventListener('beforeunload', () => { if (flushTimer) { clearTimeout(flushTimer); flushChats(); } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && (dirtyChats.size || goneChats.size)) flushChats(); });
   els.modelPick.onclick = (e) => {
     e.stopPropagation();
     if (els.modelMenu.classList.contains('hidden')) { renderModelMenu(); els.modelMenu.classList.remove('hidden'); }
