@@ -38,11 +38,18 @@ jobs:
           Copy-Item LICENSE dist-stage/
           Compress-Archive -Path dist-stage/* -DestinationPath Atria-Dawn-win64.zip
 
+      - name: Detect release tag
+        id: taginfo
+        shell: pwsh
+        run: |
+          $tag = (git describe --tags --exact-match 2>$null)
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Upload assets to the GitHub release
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || steps.taginfo.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
           files: |
             target/release/atria.exe
             Atria-Dawn-win64.zip
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ github.event.release.tag_name || steps.taginfo.outputs.tag }}
