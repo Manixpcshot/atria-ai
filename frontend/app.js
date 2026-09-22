@@ -247,7 +247,7 @@ function renderHistory(messages) {
 
   let i = 0;
   while (i < messages.length) {
-    const m = messages[i];
+    let m = messages[i];
 
     if (m.role === 'user' && isToolResults(m)) {
       for (const b of m.content) {
