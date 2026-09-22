@@ -102,7 +102,7 @@ pub async fn chat_send(
             api_key: payload.api_key,
             base_url: payload.base_url,
             model: payload.model,
-            max_tokens: payload.max_tokens.clamp(64, 200_000),
+            max_tokens: payload.max_tokens.clamp(256, 65_536),
             temperature: payload.temperature.clamp(0.0, 1.0),
             system: payload.system,
             stream: payload.stream,

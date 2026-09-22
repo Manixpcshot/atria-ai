@@ -52,8 +52,12 @@ const st = {
 };
 
 function loadSettings() {
-  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}') }; }
-  catch { return { ...DEFAULTS }; }
+  let s;
+  try { s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}') }; }
+  catch { s = { ...DEFAULTS }; }
+  // سقف سرویس 65536 — مقدارهای خراب قدیمی را خودکار درمان کن
+  s.max_tokens = Math.min(65536, Math.max(256, Number(s.max_tokens) || 4096));
+  return s;
 }
 function saveSettings() {
   localStorage.setItem(LS_SETTINGS, JSON.stringify(st.settings));
@@ -186,7 +190,7 @@ function bindSettings() {
   els.wsVal.value = st.settings.workspace || '';
   els.sysVal.oninput = () => { st.settings.system = els.sysVal.value; saveSettings(); };
   els.maxTokVal.onchange = () => {
-    st.settings.max_tokens = Math.max(256, Number(els.maxTokVal.value) || 4096);
+    st.settings.max_tokens = Math.min(65536, Math.max(256, Number(els.maxTokVal.value) || 4096));
     els.maxTokVal.value = st.settings.max_tokens;
     saveSettings();
   };
@@ -464,7 +468,7 @@ function send() {
       api_key: st.settings.api_key,
       base_url: st.settings.base_url || 'https://api.atria-asi.ai',
       model: st.settings.model || 'Atria-Dawn-Preview',
-      max_tokens: Number(st.settings.max_tokens) || 4096,
+      max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 4096)),
       temperature: Number(st.settings.temp),
       system: st.settings.system || '',
       tools_enabled: !!st.settings.tools_enabled,
