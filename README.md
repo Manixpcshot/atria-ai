@@ -13,7 +13,11 @@
   - 🧮 **ماشین‌حساب** — محاسبات دقیق ریاضی
   - ⏰ **ساعت و تاریخ** — زمان UTC و تهران
   - 🧠 **حافظه** — `remember` / `recall` برای یادآوری چیزها بین گفتگوها
+  - 📂 **دسترسی به فایل‌ها** — `list_files` / `read_file` / `write_file` در sandbox پوشهٔ کاری
 - 🌊 **پاسخ زنده (Streaming)** — تایپ پاسخ لحظه‌به‌لحظه با SSE
+- 🧩 **کد خط‌به‌خط** — رندر افزایشی بلوک‌های کد؛ هر خط با انیمیشن اضافه می‌شود، بدون ریفرش صفحه
+- 🌐 **چند سرویس‌دهنده (Multi-Provider)** — آتریا (Messages / Chat Completions)، OpenAI، **Google Gemini**، Groq، DeepSeek، OpenRouter و حالت سفارشی
+- 🔑 **کلید API فقط از سوی شما** — هیچ کلیدی در برنامه تعبیه نشده است
 - 💭 **نمایش تفکر** — بلوک‌های reasoning مدل (Atria-Dawn یک مدل Reasoning است)
 - 🛠 **نمایش ابزارها** — کارت‌های انیمیشنی برای هر فراخوانی ابزار
 - 💬 **گفتگوهای نامحدود** — ذخیرهٔ خودکار، جابه‌جایی سریع
@@ -36,10 +40,10 @@
 ## ⚙️ تنظیم کلید API
 
 ۱. اپ را اجرا کنید → روی **تنظیمات** ⚙️ بزنید
-۲. کلید Atria خود را (با پیشوند `atr_`) وارد کنید
+۲. سرویس‌دهنده را انتخاب کنید (آتریا، Gemini، OpenAI و…) و کلید همان سرویس را وارد کنید
 ۳. مدل به‌صورت پیش‌فرض `Atria-Dawn-Preview` است
 
-> 🔑 کلید پیش‌فرض داخل مخزن گذاشته شده تا اپ «از جعبه» کار کند؛ بهتر است کلید شخصی خودتان را در تنظیمات قرار دهید.
+> 🔑 هیچ کلیدی داخل برنامه تعبیه نشده؛ کلید خودتان را وارد کنید (کلید آتریا با پیشوند `atr_`). کلید فقط در تنظیمات خودِ برنامه (localStorage) می‌ماند.
 
 ## 🛠 ساخت از سورس
 
@@ -69,9 +73,10 @@ atria-desktop/
 ├── crates/
 │   ├── atria-core/      # 🦀 موتور Rust: کلاینت Messages API، SSE، حلقهٔ ایجنت، ابزارها
 │   │   ├── src/client.rs    # کلاینت سازگار با Anthropic Messages API
+│   │   ├── src/openai.rs    # کلاینت Chat Completions (OpenAI / Gemini / Groq / …)
 │   │   ├── src/sse.rs       # دیکدر جریان SSE
 │   │   ├── src/agent.rs     # حلقهٔ ایجنت (مدل ⇄ ابزار)
-│   │   ├── src/tools.rs     # ابزارها + ماشین‌حساب امن
+│   │   ├── src/tools.rs     # ابزارها + ماشین‌حساب امن + فایل‌های sandbox
 │   │   └── src/memory.rs    # حافظهٔ پایدار remember/recall
 │   └── atria-app/       # 🖥 پوستهٔ Tauri v2 + پنجرهٔ سفارشی
 ├── frontend/            # 🎨 UI انیمیشنی (HTML/CSS/JS + وزیرمی‌دان)
@@ -80,7 +85,7 @@ atria-desktop/
 
 ### API
 
-سازگار با **Anthropic Messages API**:
+سازگار با **Anthropic Messages API** (پیش‌فرض، کامل‌ترین حالت ایجنت) و **OpenAI Chat Completions** (گویش `openai` برای Gemini و دیگران):
 
 ```bash
 curl -X POST https://api.atria-asi.ai/v1/messages \

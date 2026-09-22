@@ -1,9 +1,10 @@
 //! The agent loop: model ⇄ tools until the model produces a final answer.
 
-use crate::client::{AtriaClient, ClientConfig, CoreError, StreamEvent, strip_thinking};
+use crate::client::{send, strip_thinking, ClientConfig, CoreError, StreamEvent};
 use crate::memory::MemoryStore;
-use crate::tools::{execute, tool_catalog, tool_label};
+use crate::tools::{execute, file_tool_catalog, tool_catalog, tool_label};
 use crate::types::{Block, Message, Role};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -39,7 +40,6 @@ pub struct AgentOutput {
 /// Run one agentic turn over `messages` (full history including the new user
 /// message). Returns the new messages the agent produced.
 pub async fn run_agent(
-    client: &AtriaClient,
     cfg: &ClientConfig,
     mut messages: Vec<Message>,
     mem: &mut MemoryStore,
@@ -57,10 +57,12 @@ pub async fn run_agent(
         out.rounds += 1;
         emit(AgentEvent::Round(out.rounds));
 
-        let tools = if cfg.tools { tool_catalog() } else { Vec::new() };
+        let mut tools = if cfg.tools { tool_catalog() } else { Vec::new() };
+        if cfg.file_tools {
+            tools.extend(file_tool_catalog());
+        }
 
-        let turn = match client
-            .send(cfg, &messages, &tools, |ev| emit(AgentEvent::Stream(ev)), stop.clone())
+        let turn = match send(cfg, &messages, &tools, |ev| emit(AgentEvent::Stream(ev)), stop.clone())
             .await
         {
             Ok(t) => t,
@@ -82,7 +84,8 @@ pub async fn run_agent(
         out.input_tokens += turn.usage.input_tokens;
         out.output_tokens += turn.usage.output_tokens;
 
-        // Execute every requested tool locally.
+        // Execute every requested tool locally (sandboxed to the workspace).
+        let root = Path::new(&cfg.workspace);
         let mut results = Vec::new();
         if turn.stop_reason == "tool_use" {
             for block in &turn.message.content {
@@ -93,7 +96,7 @@ pub async fn run_agent(
                         label: tool_label(name).to_string(),
                         input: input.clone(),
                     });
-                    let res = execute(name, input, mem);
+                    let res = execute(name, input, mem, root);
                     emit(AgentEvent::ToolEnd {
                         id: id.clone(),
                         name: name.clone(),

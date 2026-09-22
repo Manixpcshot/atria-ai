@@ -6,6 +6,27 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+/// Which wire protocol to speak.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ApiKind {
+    /// Anthropic Messages API (`/v1/messages`) — full agent tool use on Atria.
+    #[default]
+    Anthropic,
+    /// OpenAI-compatible Chat Completions (`/v1/chat/completions`) —
+    /// OpenAI, Gemini (compat layer), Groq, DeepSeek, OpenRouter, ...
+    OpenAi,
+}
+
+impl ApiKind {
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "openai" | "oai" | "openai_compat" | "chat" | "chat_completions"
+            | "chat-completions" | "completions" => ApiKind::OpenAi,
+            _ => ApiKind::Anthropic,
+        }
+    }
+}
+
 /// Connection + generation settings.
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
@@ -19,6 +40,12 @@ pub struct ClientConfig {
     pub stream: bool,
     /// Advertise built-in tools (agent mode).
     pub tools: bool,
+    /// Which API dialect to use.
+    pub kind: ApiKind,
+    /// Local file-access tools (`list_files` / `read_file` / `write_file`).
+    pub file_tools: bool,
+    /// Sandbox root for the file tools (empty = disabled).
+    pub workspace: String,
 }
 
 impl Default for ClientConfig {
@@ -32,6 +59,9 @@ impl Default for ClientConfig {
             system: String::new(),
             stream: true,
             tools: true,
+            kind: ApiKind::Anthropic,
+            file_tools: false,
+            workspace: String::new(),
         }
     }
 }
@@ -166,9 +196,11 @@ impl AtriaClient {
             for ev in dec.feed(&chunk) {
                 match ev.name.as_str() {
                     "message_start" => {
-                        usage.input_tokens =
-                            ev.data.pointer("/message/usage/input_tokens").and_then(Value::as_u64)
-                                .unwrap_or(0) as u32;
+                        usage.input_tokens = ev
+                            .data
+                            .pointer("/message/usage/input_tokens")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0) as u32;
                     }
                     "content_block_start" => {
                         let cb = &ev.data["content_block"];
@@ -226,7 +258,8 @@ impl AtriaClient {
                         }
                     }
                     "message_delta" => {
-                        if let Some(sr) = ev.data.pointer("/delta/stop_reason").and_then(Value::as_str)
+                        if let Some(sr) =
+                            ev.data.pointer("/delta/stop_reason").and_then(Value::as_str)
                         {
                             stop_reason = sr.to_string();
                         }
@@ -239,7 +272,9 @@ impl AtriaClient {
                     "error" => {
                         return Err(CoreError::Api {
                             status: 400,
-                            message: ev.data.pointer("/error/message")
+                            message: ev
+                                .data
+                                .pointer("/error/message")
                                 .and_then(Value::as_str)
                                 .unwrap_or("stream error")
                                 .to_string(),
@@ -298,7 +333,7 @@ fn turn_from_value(v: &Value) -> Turn {
     }
 }
 
-fn extract_error(text: &str) -> String {
+pub(crate) fn extract_error(text: &str) -> String {
     if let Ok(v) = serde_json::from_str::<Value>(text) {
         if let Some(m) = v.pointer("/error/message").and_then(Value::as_str) {
             return m.to_string();
@@ -308,6 +343,27 @@ fn extract_error(text: &str) -> String {
         }
     }
     text.chars().take(400).collect()
+}
+
+/// Unified send: routes to the Messages API or the Chat Completions backend,
+/// chosen via [`ClientConfig::kind`]. This is what the agent loop calls.
+pub async fn send(
+    cfg: &ClientConfig,
+    messages: &[Message],
+    tools: &[Value],
+    on_event: impl FnMut(StreamEvent),
+    stop: Arc<AtomicBool>,
+) -> Result<Turn, CoreError> {
+    match cfg.kind {
+        ApiKind::Anthropic => {
+            AtriaClient::new().send(cfg, messages, tools, on_event, stop).await
+        }
+        ApiKind::OpenAi => {
+            crate::openai::OpenAiClient::new()
+                .send(cfg, messages, tools, on_event, stop)
+                .await
+        }
+    }
 }
 
 /// Remove thinking blocks from history (fallback when a gateway rejects them).

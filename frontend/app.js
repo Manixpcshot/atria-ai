@@ -1,793 +1,600 @@
-/* ==========================================================================
-   Atria Dawn — UI logic (vanilla JS + Tauri IPC)
-   ========================================================================== */
+/* Atria — UI controller */
 'use strict';
 
-const $ = (s, el = document) => el.querySelector(s);
-const T = window.__TAURI__ || {};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
 
-/* ============================ config ============================ */
-const DEFAULT_SYSTEM = `You are Atria (آتریا) — a capable, warm AI agent living in the "Atria Dawn" desktop app powered by a Rust engine.
+/* ---------------- providers ---------------- */
 
-Personality & style:
-- Practical, proactive and friendly. Reply in the SAME language the user writes (Persian by default).
-- Format answers with Markdown. Prefer concise but complete answers.
-
-You are an AGENT:
-- When a tool can help (exact math, current date/time, saving or recalling notes), CALL the tool instead of guessing or claiming you cannot.
-- Use "remember" whenever the user asks you to keep something, and "recall" before answering questions about saved notes.
-- After tool results, always give the user a clear final answer in their language.`;
-
-const DEFAULTS = {
-  api_key: '',
-  base_url: 'https://api.atria-asi.ai',
-  model: 'Atria-Dawn-Preview',
-  max_tokens: 4096,
-  temperature: 0.7,
-  tools_enabled: true,
-  stream: true,
-  show_thinking: true,
-  system: DEFAULT_SYSTEM,
+const PROVIDERS = {
+  'atria':       { label: 'آتریا — Messages API',      base: 'https://api.atria-asi.ai',                                        kind: 'anthropic', model: 'Atria-Dawn-Preview' },
+  'atria-cc':    { label: 'آتریا — Chat Completions',  base: 'https://api.atria-asi.ai',                                        kind: 'openai',    model: 'Atria-Dawn-Preview' },
+  'openai':      { label: 'OpenAI',                    base: 'https://api.openai.com/v1',                                       kind: 'openai',    model: 'gpt-4o-mini' },
+  'gemini':      { label: 'Google Gemini',             base: 'https://generativelanguage.googleapis.com/v1beta/openai',         kind: 'openai',    model: 'gemini-2.5-flash' },
+  'groq':        { label: 'Groq',                      base: 'https://api.groq.com/openai/v1',                                  kind: 'openai',    model: 'llama-3.3-70b-versatile' },
+  'deepseek':    { label: 'DeepSeek',                  base: 'https://api.deepseek.com/v1',                                     kind: 'openai',    model: 'deepseek-chat' },
+  'openrouter':  { label: 'OpenRouter',                base: 'https://openrouter.ai/api/v1',                                    kind: 'openai',    model: 'openrouter/auto' },
+  'custom':      { label: 'سفارشی…',                    base: '',                                                                kind: 'openai',    model: '' },
 };
 
-function loadCfg() {
-  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('atria.cfg') || '{}') }; }
-  catch { return { ...DEFAULTS }; }
-}
-let cfg = loadCfg();
-function persistCfg() {
-  try { localStorage.setItem('atria.cfg', JSON.stringify(cfg)); } catch { /* ignore */ }
-}
+/* ---------------- state ---------------- */
 
-/* ============================ conversations ============================ */
-function loadConvs() {
+const DEFAULTS = {
+  // اتصال — کلید API دیگر در برنامه تعبیه نشده؛ کاربر آن را وارد می‌کند
+  provider: 'atria',
+  api_key: '',
+  base_url: 'https://api.atria-asi.ai',
+  api_kind: 'anthropic',
+  model: 'Atria-Dawn-Preview',
+  // رفتار
+  thinking: true,
+  mem: true,
+  temp: 0.7,
+  stream: true,
+  // سیستم
+  system: '',
+  max_tokens: 4096,
+  tools_enabled: true,
+  file_tools: true,
+  workspace: '',
+};
+const LS_SETTINGS = 'atria.settings.v2';
+const LS_CHATS = 'atria.chats.v1';
+const LS_CURRENT = 'atria.current.v1';
+
+const st = {
+  settings: loadSettings(),
+  chats: loadChats(),
+  currentId: localStorage.getItem(LS_CURRENT) || null,
+  sending: false,
+  runText: '',
+  runThink: '',
+  timers: { blink: null, type: null },
+};
+
+function loadSettings() {
   try {
-    const v = JSON.parse(localStorage.getItem('atria.convs') || '[]');
-    return Array.isArray(v) ? v : [];
-  } catch { return []; }
+    const s = JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}');
+    // migration from v1: keep values, drop any legacy embedded key if user never set one
+    return { ...DEFAULTS, ...s };
+  } catch { return { ...DEFAULTS }; }
 }
-let convs = loadConvs();
-let curId = localStorage.getItem('atria.cur') || null;
+function saveSettings() {
+  localStorage.setItem(LS_SETTINGS, JSON.stringify(st.settings));
+  els.modelChip.textContent = 'مدل: ' + (st.settings.model || '—');
+}
+function loadChats() {
+  try { return JSON.parse(localStorage.getItem(LS_CHATS) || '[]'); } catch { return []; }
+}
+function saveChats() { localStorage.setItem(LS_CHATS, JSON.stringify(st.chats)); }
 
-function persistConvs() {
-  try { localStorage.setItem('atria.convs', JSON.stringify(convs)); }
-  catch { toast('حافظه پر شد — گفتگوها ذخیره نشدند', 'warn'); }
+function currentChat() { return st.chats.find((c) => c.id === st.currentId) || null; }
+
+/* ---------------- dom refs ---------------- */
+
+let els = {};
+function cacheEls() {
+  els = {
+    chatList: $('#chatList'), chatTitle: $('#chatTitle'), modelChip: $('#modelChip'),
+    chat: $('#chat'), empty: $('#empty'), input: $('#input'), send: $('#send'),
+    newChat: $('#newChat'), clearBtn: $('#clearBtn'), settingsBtn: $('#settingsBtn'),
+    settingsPanel: $('#settingsPanel'), keyVal: $('#keyVal'), modelVal: $('#modelVal'),
+    baseVal: $('#baseVal'), kindVal: $('#kindVal'), provVal: $('#provVal'),
+    tempVal: $('#tempVal'), tempOut: $('#tempOut'), thinkVal: $('#thinkVal'),
+    memVal: $('#memVal'), streamVal: $('#streamVal'), sysVal: $('#sysVal'),
+    maxTokVal: $('#maxTokVal'), toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'),
+    wsVal: $('#wsVal'), closeSettings: $('#closeSettings'), wipe: $('#wipe'),
+    hint: $('#hint'), memoryBtn: $('#memoryBtn'), memoryPanel: $('#memoryPanel'),
+    closeMemory: $('#closeMemory'), memList: $('#memList'), memClear: $('#memClear'),
+    toast: $('#toast'), cmdk: $('#cmdk'), cmdkInput: $('#cmdkInput'), cmdkList: $('#cmdkList'),
+  };
 }
 
-function currentConv(create = true) {
-  let c = convs.find((x) => x.id === curId);
-  if (!c && create) {
-    c = {
-      id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-      title: 'گفتگوی جدید',
-      ts: Date.now(),
-      messages: [],
-    };
-    convs.unshift(c);
-    curId = c.id;
-    localStorage.setItem('atria.cur', curId);
-  }
-  return c;
-}
+/* ---------------- settings ---------------- */
 
-function makeTitle(conv) {
-  for (const m of conv.messages) {
-    if (m.role === 'user') {
-      for (const b of m.content || []) {
-        if (b.type === 'text' && b.text.trim()) return b.text.trim().slice(0, 36);
-      }
+function bindSettings() {
+  // اتصال
+  els.provVal.innerHTML = Object.entries(PROVIDERS)
+    .map(([id, p]) => `<option value="${id}">${p.label}</option>`).join('');
+  els.provVal.value = st.settings.provider || 'atria';
+  els.keyVal.value = st.settings.api_key || '';
+  els.modelVal.value = st.settings.model || '';
+  els.baseVal.value = st.settings.base_url || '';
+  els.kindVal.value = st.settings.api_kind || 'anthropic';
+
+  els.provVal.onchange = () => {
+    const p = PROVIDERS[els.provVal.value];
+    st.settings.provider = els.provVal.value;
+    if (p) {
+      if (els.provVal.value !== 'custom' || !els.baseVal.value) els.baseVal.value = p.base;
+      if (p.model && (!els.modelVal.value || els.provVal.value !== 'custom')) els.modelVal.value = p.model;
+      els.kindVal.value = p.kind;
+      st.settings.api_kind = p.kind;
     }
+    st.settings.base_url = els.baseVal.value;
+    st.settings.model = els.modelVal.value;
+    saveSettings();
+  };
+  els.keyVal.oninput = () => { st.settings.api_key = els.keyVal.value.trim(); saveSettings(); };
+  els.modelVal.oninput = () => { st.settings.model = els.modelVal.value.trim(); saveSettings(); };
+  els.baseVal.oninput = () => { st.settings.base_url = els.baseVal.value.trim(); saveSettings(); };
+  els.kindVal.onchange = () => { st.settings.api_kind = els.kindVal.value; saveSettings(); };
+
+  // رفتار
+  els.tempVal.value = st.settings.temp;
+  els.tempOut.textContent = Number(st.settings.temp).toFixed(1);
+  els.thinkVal.checked = !!st.settings.thinking;
+  els.memVal.checked = !!st.settings.mem;
+  els.streamVal.checked = !!st.settings.stream;
+  els.tempVal.oninput = () => {
+    st.settings.temp = Number(els.tempVal.value);
+    els.tempOut.textContent = st.settings.temp.toFixed(1);
+    saveSettings();
+  };
+  els.thinkVal.onchange = () => { st.settings.thinking = els.thinkVal.checked; saveSettings(); };
+  els.memVal.onchange = () => { st.settings.mem = els.memVal.checked; saveSettings(); };
+  els.streamVal.onchange = () => { st.settings.stream = els.streamVal.checked; saveSettings(); };
+
+  // سیستم
+  els.sysVal.value = st.settings.system || '';
+  els.maxTokVal.value = st.settings.max_tokens || 4096;
+  els.toolsVal.checked = !!st.settings.tools_enabled;
+  els.fileToolsVal.checked = !!st.settings.file_tools;
+  els.wsVal.value = st.settings.workspace || '';
+  els.sysVal.oninput = () => { st.settings.system = els.sysVal.value; saveSettings(); };
+  els.maxTokVal.onchange = () => {
+    st.settings.max_tokens = Math.max(256, Number(els.maxTokVal.value) || 4096);
+    els.maxTokVal.value = st.settings.max_tokens;
+    saveSettings();
+  };
+  els.toolsVal.onchange = () => { st.settings.tools_enabled = els.toolsVal.checked; saveSettings(); };
+  els.fileToolsVal.onchange = () => { st.settings.file_tools = els.fileToolsVal.checked; saveSettings(); };
+  els.wsVal.oninput = () => { st.settings.workspace = els.wsVal.value.trim(); saveSettings(); };
+
+  // تب‌های تنظیمات
+  $$('.stab').forEach((b) => b.addEventListener('click', () => {
+    $$('.stab').forEach((x) => x.classList.toggle('active', x === b));
+    $$('.stab-body').forEach((x) => x.classList.toggle('active', x.dataset.tab === b.dataset.tab));
+  }));
+}
+
+function openSettings() {
+  els.settingsPanel.classList.add('open');
+  els.hint.classList.add('open');
+}
+function closeSettings() {
+  els.settingsPanel.classList.remove('open');
+  els.hint.classList.remove('open');
+}
+
+/* ---------------- chat list ---------------- */
+
+function renderChatList() {
+  els.chatList.innerHTML = '';
+  if (!st.chats.length) {
+    els.chatList.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:10px 12px">هنوز گفتگویی نیست</div>';
+    return;
   }
-  return 'گفتگوی جدید';
-}
-
-function relDate(ts) {
-  const d = Date.now() - ts;
-  const m = Math.floor(d / 60000);
-  if (m < 1) return 'همین حالا';
-  if (m < 60) return `${m} دقیقه پیش`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} ساعت پیش`;
-  if (h < 48) return 'دیروز';
-  return new Date(ts).toLocaleDateString('fa-IR');
-}
-
-/* ============================ toasts ============================ */
-function toast(msg, kind = '') {
-  const el = document.createElement('div');
-  el.className = `toast ${kind}`;
-  el.textContent = msg;
-  $('#toasts').appendChild(el);
-  setTimeout(() => {
-    el.classList.add('out');
-    setTimeout(() => el.remove(), 350);
-  }, 3400);
-}
-
-/* ============================ window controls ============================ */
-function initWindow() {
-  try {
-    const w = T.window?.getCurrentWindow ? T.window.getCurrentWindow() : null;
-    if (!w) return;
-    $('#btnMin')?.addEventListener('click', () => w.minimize());
-    $('#btnMax')?.addEventListener('click', () => w.toggleMaximize());
-    $('#btnClose')?.addEventListener('click', () => w.close());
-  } catch { /* running in a plain browser */ }
-}
-
-/* ============================ stars ============================ */
-function initStars() {
-  const box = $('#stars');
-  for (let i = 0; i < 46; i++) {
-    const s = document.createElement('i');
-    const size = (Math.random() * 1.8 + 0.7).toFixed(1);
-    s.style.cssText =
-      `left:${(Math.random() * 100).toFixed(2)}%;top:${(Math.random() * 100).toFixed(2)}%;` +
-      `width:${size}px;height:${size}px;animation-delay:${(Math.random() * 4).toFixed(2)}s;` +
-      `animation-duration:${(3 + Math.random() * 4).toFixed(2)}s`;
-    box.appendChild(s);
+  for (const c of st.chats) {
+    const item = document.createElement('div');
+    item.className = 'chat-item' + (c.id === st.currentId ? ' active' : '');
+    const t = document.createElement('span');
+    t.className = 'title';
+    t.textContent = c.title;
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.title = 'حذف';
+    del.textContent = '✕';
+    del.onclick = (e) => { e.stopPropagation(); deleteChat(c.id); };
+    item.appendChild(t);
+    item.appendChild(del);
+    item.onclick = () => switchChat(c.id);
+    els.chatList.appendChild(item);
   }
 }
 
-/* ============================ rendering: sidebar ============================ */
-function renderSidebar() {
-  const list = $('#convList');
-  list.innerHTML = '';
-  for (const c of convs) {
-    const el = document.createElement('div');
-    el.className = 'conv' + (c.id === curId ? ' active' : '');
-    el.innerHTML =
-      `<span class="conv-title"></span>` +
-      `<span class="conv-date"></span>` +
-      `<button class="conv-del" title="حذف گفتگو">✕</button>`;
-    el.querySelector('.conv-title').textContent = c.title;
-    el.querySelector('.conv-date').textContent = relDate(c.ts);
-    el.addEventListener('click', () => selectConv(c.id));
-    el.querySelector('.conv-del').addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      deleteConv(c.id);
-    });
-    list.appendChild(el);
+function newChat(silent) {
+  const chat = {
+    id: 'c' + Date.now(),
+    title: 'گفتگوی جدید',
+    createdAt: Date.now(),
+    messages: [],
+  };
+  st.chats.unshift(chat);
+  st.currentId = chat.id;
+  saveChats();
+  localStorage.setItem(LS_CURRENT, chat.id);
+  renderChatList();
+  renderHistory();
+  if (!silent) els.input.focus();
+}
+
+function switchChat(id) {
+  if (st.sending) return toast('ابتدا تولید را متوقف کن');
+  st.currentId = id;
+  localStorage.setItem(LS_CURRENT, id);
+  renderChatList();
+  renderHistory();
+  closeCmdk();
+}
+
+function deleteChat(id) {
+  st.chats = st.chats.filter((c) => c.id !== id);
+  saveChats();
+  if (st.currentId === id) {
+    st.currentId = st.chats[0] ? st.chats[0].id : null;
+    if (!st.currentId) newChat(true);
+    else localStorage.setItem(LS_CURRENT, st.currentId);
   }
+  renderChatList();
+  renderHistory();
 }
 
-function selectConv(id) {
-  if (running) { toast('صبر کنید پاسخ فعلی تمام شود', 'warn'); return; }
-  curId = id;
-  localStorage.setItem('atria.cur', id);
-  renderAll();
-}
+/* ---------------- rendering ---------------- */
 
-function deleteConv(id) {
-  convs = convs.filter((c) => c.id !== id);
-  if (curId === id) {
-    curId = convs[0]?.id || null;
-    if (curId) localStorage.setItem('atria.cur', curId);
-    else localStorage.removeItem('atria.cur');
-  }
-  persistConvs();
-  renderAll();
-  toast('گفتگو حذف شد', 'ok');
-}
-
-function newConv() {
-  if (running) { toast('صبر کنید پاسخ فعلی تمام شود', 'warn'); return; }
-  curId = null;
-  localStorage.removeItem('atria.cur');
-  renderAll();
-  $('#input').focus();
-}
-
-/* ============================ rendering: messages ============================ */
-
-/** Build one AI turn display (think box + tool cards + text). */
-function aiTurnEl() {
+function bubbleEl(role, text, animate) {
   const wrap = document.createElement('div');
-  wrap.className = 'msg ai';
-  wrap.innerHTML =
-    '<div class="avatar atri"><img src="assets/logo.png" alt="آتریا"/></div>' +
-    '<div class="stack">' +
-    '  <div class="think-box hidden"><button type="button" class="think-head">' +
-    '    <span class="think-ic">🧠</span><span class="think-title">در حال تفکر…</span><span class="chev">⌄</span>' +
-    '  </button><div class="think-body"></div></div>' +
-    '  <div class="tools"></div>' +
-    '  <div class="bubble md hidden"><div class="md-text"></div></div>' +
-    '  <div class="status-line hidden"><span class="dots"><i></i><i></i><i></i></span><span class="status-text"></span></div>' +
-    '  <div class="msg-meta hidden"></div>' +
-    '</div>';
-  const thinkBox = wrap.querySelector('.think-box');
-  thinkBox.querySelector('.think-head').addEventListener('click', () => thinkBox.classList.toggle('open'));
+  wrap.className = 'msg ' + role + (animate ? ' pop-in' : '');
+  const b = document.createElement('div');
+  b.className = 'bubble';
+  md.renderAll(b, text);
+  wrap.appendChild(b);
   return wrap;
 }
 
-function toolCardEl({ id, name, label, input }) {
-  const el = document.createElement('div');
-  el.className = 'tool-card';
-  el.dataset.id = id;
-  const inputStr = typeof input === 'string' ? input : JSON.stringify(input ?? {});
-  el.innerHTML =
-    '<div class="tool-head">' +
-    '  <span class="tool-ic">⚙️</span><span class="tool-label"></span>' +
-    '  <span class="tool-chip" dir="ltr"></span><span class="tool-state">در حال اجرا…</span>' +
-    '</div>' +
-    '<div class="tool-io"><div class="tool-in"></div><div class="tool-out hidden"></div></div>';
-  el.querySelector('.tool-label').textContent = label || name || 'ابزار';
-  el.querySelector('.tool-chip').textContent = name || '';
-  el.querySelector('.tool-in').textContent = inputStr;
-  return el;
+function toolChip(label, ok, output) {
+  const chip = document.createElement('div');
+  chip.className = 'tool-chip' + (ok === false ? ' err' : '');
+  chip.innerHTML = '<span class="tool-dot"></span><b>' + md.renderInline(label) + '</b>';
+  chip.title = (output || '').slice(0, 400);
+  chip.onclick = () => toast((output || '').slice(0, 220) || '…');
+  return chip;
 }
 
-function toolCardDone(card, ok, output) {
-  card.classList.add(ok ? 'done' : 'failed');
-  card.querySelector('.tool-state').textContent = ok ? '✓ موفق' : '✕ خطا';
-  const out = card.querySelector('.tool-out');
-  out.textContent = output || '';
-  out.classList.remove('hidden');
+function thinkingBubble(text) {
+  const d = document.createElement('div');
+  d.className = 'think-bubble';
+  d.textContent = text;
+  return d;
 }
 
-function renderHistory(messages) {
-  const box = $('#messages');
-  box.innerHTML = '';
-  const toolsPending = new Map(); // tool_use_id -> card element
-
-  const flushUserText = (blocks) => {
-    const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-    if (!text.trim()) return;
-    const wrap = document.createElement('div');
-    wrap.className = 'msg user';
-    wrap.innerHTML = '<div class="bubble md"><div class="md-text"></div></div>' +
-      '<div class="avatar you">شما</div>';
-    wrap.querySelector('.md-text').innerHTML = window.md.render(text);
-    box.appendChild(wrap);
-  };
-
-  const isToolResults = (m) =>
-    m.role === 'user' && (m.content || []).length > 0 &&
-    m.content.every((b) => b.type === 'tool_result');
-
-  let i = 0;
-  while (i < messages.length) {
-    let m = messages[i];
-
-    if (m.role === 'user' && isToolResults(m)) {
-      for (const b of m.content) {
-        const card = toolsPending.get(b.tool_use_id);
-        if (card) toolCardDone(card, !b.is_error, b.content || '');
-      }
-      i++;
-      continue;
-    }
-
-    if (m.role === 'user') {
-      flushUserText(m.content || []);
-      i++;
-      continue;
-    }
-
-    // ---- assistant turn (may span several messages around tool results) ----
-    const wrap = aiTurnEl();
-    const thinkBox = wrap.querySelector('.think-box');
-    const thinkBody = wrap.querySelector('.think-body');
-    const toolsBox = wrap.querySelector('.tools');
-    const bubble = wrap.querySelector('.bubble');
-    const mdText = wrap.querySelector('.md-text');
-    const meta = wrap.querySelector('.msg-meta');
-    let textParts = [];
-    let thinkParts = [];
-    let hasTools = false;
-
-    for (;;) {
-      for (const b of m.content || []) {
-        if (b.type === 'thinking') {
-          thinkParts.push(b.thinking);
-        } else if (b.type === 'tool_use') {
-          const card = toolCardEl({ id: b.id, name: b.name, label: toolLabel(b.name), input: b.input });
-          toolsBox.appendChild(card);
-          toolsPending.set(b.id, card);
-          hasTools = true;
-        } else if (b.type === 'text') {
-          textParts.push(b.text);
-        }
-      }
-      i++;
-      // attach following tool results (and continue with next assistant msg)
-      if (i < messages.length && isToolResults(messages[i])) {
-        for (const b of messages[i].content) {
-          const card = toolsPending.get(b.tool_use_id);
-          if (card) toolCardDone(card, !b.is_error, b.content || '');
-        }
-        i++;
-        if (i < messages.length && messages[i].role === 'assistant') {
-          m = messages[i];
-          continue;
-        }
-      }
-      break;
-    }
-
-    const thinking = thinkParts.join('\n\n');
-    if (thinking && cfg.show_thinking) {
-      thinkBox.classList.remove('hidden');
-      thinkBody.textContent = thinking;
-      thinkBox.classList.add('has', 'open');
-    }
-    const text = textParts.join('\n\n').trim();
-    if (text) {
-      bubble.classList.remove('hidden');
-      mdText.innerHTML = window.md.render(text);
-      addMetaActions(meta, text, i >= messages.length);
-      meta.classList.remove('hidden');
-    }
-    box.appendChild(wrap);
-    void hasTools;
-  }
-  scrollBottom(true);
-}
-
-function addMetaActions(meta, text, withRegen = false) {
-  const copy = document.createElement('button');
-  copy.className = 'meta-btn';
-  copy.textContent = '📋 کپی';
-  copy.addEventListener('click', () => copyText(text, copy));
-  meta.appendChild(copy);
-  if (withRegen) {
-    const regen = document.createElement('button');
-    regen.className = 'meta-btn';
-    regen.textContent = '🔄 بازتولید';
-    regen.addEventListener('click', regenLast);
-    meta.appendChild(regen);
-  }
-}
-
-function toolLabel(name) {
-  return { calculator: 'ماشین‌حساب', current_time: 'ساعت و تاریخ', remember: 'ذخیره در حافظه', recall: 'جست‌وجوی حافظه' }[name] || 'ابزار';
-}
-
-function copyText(text, btn) {
-  navigator.clipboard.writeText(text).then(
-    () => {
-      if (btn) {
-        const old = btn.textContent;
-        btn.textContent = '✓ کپی شد';
-        setTimeout(() => (btn.textContent = old), 1200);
-      }
-      toast('کپی شد', 'ok');
-    },
-    () => toast('کپی ممکن نشد', 'err')
-  );
-}
-
-function renderAll() {
-  renderSidebar();
-  const conv = currentConv(false);
-  const msgs = conv?.messages || [];
-  renderHistory(msgs);
-  $('#empty').classList.toggle('hidden', msgs.length > 0 || running);
-  $('#modelBadge').textContent = cfg.model;
-}
-
-/* ============================ scroll helpers ============================ */
-function nearBottom() {
-  const box = $('#messages');
-  return box.scrollHeight - box.scrollTop - box.clientHeight < 220;
-}
-function scrollBottom(force = false) {
-  const box = $('#messages');
-  if (force || nearBottom()) box.scrollTop = box.scrollHeight;
-}
-
-/* ============================ live generation ============================ */
-let running = false;
-let live = null;
-let queued = false;
-
-function setStatus(text) {
-  if (!live) return;
-  live.statusText.textContent = text;
-  live.status.classList.remove('hidden');
-}
-
-function scheduleLiveRender() {
-  if (queued) return;
-  queued = true;
-  requestAnimationFrame(() => {
-    queued = false;
-    if (!live) return;
-    if (live.thinking) {
-      if (cfg.show_thinking) {
-        live.thinkBox.classList.remove('hidden');
-        live.thinkBox.classList.add('has');
-        live.thinkBody.textContent = live.thinking;
-      }
-    }
-    if (live.text) {
-      live.bubble.classList.remove('hidden');
-      live.bubble.classList.add('streaming');
-      live.mdText.innerHTML = window.md.render(live.text) + '<span class="cursor"></span>';
-    }
-    scrollBottom();
-  });
-}
-
-function startLive() {
-  const wrap = aiTurnEl();
-  $('#empty').classList.add('hidden');
-  $('#messages').appendChild(wrap);
-  live = {
-    wrap,
-    thinkBox: wrap.querySelector('.think-box'),
-    thinkBody: wrap.querySelector('.think-body'),
-    toolsBox: wrap.querySelector('.tools'),
-    bubble: wrap.querySelector('.bubble'),
-    mdText: wrap.querySelector('.md-text'),
-    status: wrap.querySelector('.status-line'),
-    statusText: wrap.querySelector('.status-text'),
-    meta: wrap.querySelector('.msg-meta'),
-    thinking: '',
-    text: '',
-  };
-  live.thinkTitle = wrap.querySelector('.think-title');
-  setStatus('در حال اتصال به آتریا…');
-  scrollBottom(true);
-}
-
-function finishLive() {
-  if (!live) return;
-  live.bubble.classList.remove('streaming');
-  const cursor = live.mdText.querySelector('.cursor');
-  if (cursor) cursor.remove();
-  if (live.text) {
-    live.mdText.innerHTML = window.md.render(live.text);
-    addMetaActions(live.meta, live.text, true);
-  }
-  live.status.classList.add('hidden');
-  live = null;
-}
-
-function setRunning(v) {
-  running = v;
-  $('#sendBtn').classList.toggle('hidden', v);
-  $('#stopBtn').classList.toggle('hidden', !v);
-  $('#input').disabled = false;
-}
-
-/* ============================ sending ============================ */
-async function send(text) {
-  text = (text || '').trim();
-  if (!text || running) return;
-  if (!cfg.api_key) {
-    toast('کلید API را در تنظیمات وارد کنید', 'warn');
-    openModal('settingsModal');
+function renderHistory() {
+  const chat = currentChat();
+  els.chat.innerHTML = '';
+  if (!chat || !chat.messages.length) {
+    els.empty.style.display = 'flex';
+    els.chatTitle.textContent = chat ? chat.title : '';
     return;
   }
-
-  const conv = currentConv();
-  conv.messages.push({ role: 'user', content: [{ type: 'text', text }] });
-  conv.ts = Date.now();
-  if (conv.title === 'گفتگوی جدید') conv.title = makeTitle(conv);
-  persistConvs();
-  renderSidebar();
-
-  // draw the user bubble + AI shell
-  $('#empty').classList.add('hidden');
-  renderHistory(conv.messages); // includes the just-pushed user msg
-  startLive();
-  setRunning(true);
-
-  try {
-    await T.core.invoke('chat_send', {
-      payload: {
-        api_key: cfg.api_key,
-        base_url: cfg.base_url,
-        model: cfg.model,
-        max_tokens: cfg.max_tokens,
-        temperature: cfg.temperature,
-        system: cfg.system,
-        tools_enabled: cfg.tools_enabled,
-        stream: cfg.stream,
-        messages: conv.messages,
-      },
-    });
-  } catch (e) {
-    finishLive();
-    setRunning(false);
-    toast('خطا در شروع گفتگو: ' + e, 'err');
-    renderAll();
+  els.empty.style.display = 'none';
+  els.chatTitle.textContent = chat.title;
+  for (const m of chat.messages) {
+    els.chat.appendChild(bubbleEl(m.role === 'user' ? 'user' : 'assistant', m.plain || '…', false));
   }
+  scrollBottom(true);
 }
 
-function sendPartial(text) {
-  const conv = currentConv(false);
-  if (live && live.text.trim()) {
-    conv.messages.push({ role: 'assistant', content: [{ type: 'text', text: live.text }] });
-    persistConvs();
-  }
-  finishLive();
-  setRunning(false);
-  void text;
-  renderAll();
+function scrollBottom(instant) {
+  if (instant) els.chat.scrollTop = els.chat.scrollHeight;
+  else els.chat.scrollTo({ top: els.chat.scrollHeight, behavior: 'smooth' });
 }
 
-function regenLast() {
-  if (running) return;
-  const conv = currentConv(false);
-  if (!conv || !conv.messages.length) return;
-  // find last user text message and truncate back to it
-  let idx = -1;
-  for (let i = conv.messages.length - 1; i >= 0; i--) {
-    const m = conv.messages[i];
-    if (m.role === 'user' && (m.content || []).some((b) => b.type === 'text')) { idx = i; break; }
+/* ---------------- send flow ---------------- */
+
+function send() {
+  const text = els.input.value.trim();
+  if (!text || st.sending) return;
+  const chat = currentChat();
+  if (!chat) { newChat(true); return send(); }
+
+  if (!st.settings.api_key) {
+    openSettings();
+    return toast('ابتدا کلید API خودت را در تنظیمات وارد کن');
   }
-  if (idx < 0) return;
-  const text = conv.messages[idx].content.find((b) => b.type === 'text').text;
-  conv.messages = conv.messages.slice(0, idx);
-  persistConvs();
-  renderAll();
-  send(text);
+
+  // user bubble
+  chat.messages.push({ role: 'user', text, plain: text, ts: Date.now() });
+  if (chat.title === 'گفتگوی جدید') {
+    chat.title = text.slice(0, 42) + (text.length > 42 ? '…' : '');
+    els.chatTitle.textContent = chat.title;
+    renderChatList();
+  }
+  els.empty.style.display = 'none';
+  els.chat.appendChild(bubbleEl('user', text, true));
+  els.input.value = '';
+  autosize();
+  scrollBottom();
+
+  // assistant placeholder + live renderer
+  const wrap = document.createElement('div');
+  wrap.className = 'msg assistant pop-in';
+  const bub = document.createElement('div');
+  bub.className = 'bubble streaming';
+  wrap.appendChild(bub);
+  els.chat.appendChild(wrap);
+  scrollBottom();
+
+  st.sending = true;
+  st.runText = '';
+  st.runThink = '';
+  st.live = null;         // current live answer section (md.createLiveStream)
+  st.streamEl = bub;      // whole bubble (thinking + tools + answers)
+  startBlink(bub);
+
+  const history = chat.messages.map((m) => ({ role: m.role, content: m.text }));
+
+  window.__atria.chat_send({
+    payload: {
+      api_key: st.settings.api_key,
+      base_url: st.settings.base_url || 'https://api.atria-asi.ai',
+      model: st.settings.model || 'Atria-Dawn-Preview',
+      max_tokens: Number(st.settings.max_tokens) || 4096,
+      temperature: Number(st.settings.temp),
+      system: st.settings.mem ? st.settings.system : (st.settings.system || ''),
+      tools_enabled: !!st.settings.tools_enabled,
+      stream: st.settings.stream !== false,
+      kind: st.settings.api_kind || 'anthropic',
+      file_tools: !!st.settings.file_tools,
+      workspace: st.settings.workspace || '',
+      messages: history,
+    },
+  }).catch((e) => {
+    failRun(e && e.message ? e.message : String(e));
+  });
 }
 
-/* ============================ Tauri events ============================ */
+function stop() { window.__atria.chat_stop(); }
+
+function startBlink(bub) {
+  const c = document.createElement('span');
+  c.className = 'cursor';
+  st.cursorEl = c;
+  const holder = document.createElement('div');
+  holder.className = 'para';
+  holder.appendChild(c);
+  bub.appendChild(holder);
+  st.cursorHolder = holder;
+}
+function stopBlink() {
+  if (st.cursorHolder && st.cursorHolder.parentNode) st.cursorHolder.parentNode.removeChild(st.cursorHolder);
+  st.cursorHolder = null;
+}
+
+function ensureLive() {
+  if (!st.live) {
+    if (st.cursorHolder) stopBlink();
+    const sec = document.createElement('div');
+    sec.className = 'stream-answer';
+    st.streamEl.appendChild(sec);
+    st.live = md.createLiveStream(sec);
+  }
+  return st.live;
+}
+function closeLive() {
+  if (st.live) { st.live.done(); st.live = null; }
+}
+
+function onThinking(delta) {
+  if (!st.settings.thinking) return;
+  closeLive();
+  st.runThink += delta;
+  // فقط append — هیچ رندر مجددی رخ نمی‌دهد
+  let tb = st.streamEl.querySelector('.think-bubble:last-of-type');
+  const last = st.streamEl.lastElementChild;
+  if (!tb || (last && !last.classList.contains('think-bubble'))) {
+    tb = thinkingBubble('');
+    st.streamEl.appendChild(tb);
+  }
+  tb.textContent += delta;
+  scrollBottom(true);
+}
+
+function onText(delta) {
+  if (st.cursorHolder) stopBlink();
+  st.runText += delta;
+  ensureLive().push(delta);
+  scrollBottom(true);
+}
+
+function onToolStart(label) {
+  closeLive();
+  if (st.cursorHolder) stopBlink();
+  st.streamEl.appendChild(toolChip(label + ' …', true, 'در حال اجرا…'));
+  scrollBottom(true);
+}
+
+function onToolEnd(label, ok, output) {
+  closeLive();
+  st.streamEl.appendChild(toolChip(label, ok, output));
+  scrollBottom(true);
+}
+
+function failRun(msg) {
+  stopBlink();
+  closeLive();
+  st.sending = false;
+  const e = document.createElement('div');
+  e.className = 'stream-error';
+  e.textContent = 'خطا: ' + msg;
+  st.streamEl.appendChild(e);
+  st.streamEl.classList.remove('streaming');
+  scrollBottom();
+}
+
+function finishRun(newMessages, finalText) {
+  stopBlink();
+  closeLive();
+  st.sending = false;
+  st.streamEl.classList.remove('streaming');
+  const chat = currentChat();
+  const plain = finalText && finalText.trim() ? finalText : st.runText || '(پاسخ خالی)';
+  if (newMessages && newMessages.length) {
+    for (const m of newMessages) chat.messages.push({ role: m.role === 'user' ? 'user' : 'assistant', text: m.text || m.plain || '', plain: m.plain || m.text || '', ts: Date.now() });
+  } else {
+    chat.messages.push({ role: 'assistant', text: st.runText || plain, plain, ts: Date.now() });
+  }
+  saveChats();
+  scrollBottom();
+}
+
+/* ---------------- events from Rust ---------------- */
+
 function listenEvents() {
-  const on = (name, fn) => T.event?.listen(name, fn).catch?.(() => {});
-  on('atria:thinking', (e) => {
-    if (!live) return;
-    live.thinking += e.payload.delta;
-    live.thinkTitle.textContent = 'در حال تفکر…';
-    scheduleLiveRender();
-  });
-  on('atria:text', (e) => {
-    if (!live) return;
-    live.text += e.payload.delta;
-    setStatus('در حال نوشتن پاسخ…');
-    scheduleLiveRender();
-  });
-  on('atria:round', (e) => {
-    if (!live) return;
-    if (e.payload.round > 1) setStatus(`مرحله ${e.payload.round} — ادامهٔ تحلیل…`);
-  });
-  on('atria:tool_start', (e) => {
-    if (!live) return;
-    const p = e.payload;
-    const card = toolCardEl(p);
-    live.toolsBox.appendChild(card);
-    live.toolsBox.dataset.pending = p.id;
-    setStatus(`در حال اجرای ابزار: ${p.label}…`);
-    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  });
-  on('atria:tool_end', (e) => {
-    if (!live) return;
-    const card = live.toolsBox.querySelector(`[data-id="${e.payload.id}"]`);
-    if (card) toolCardDone(card, e.payload.ok, e.payload.output);
-    setStatus('در حال ادامهٔ تحلیل…');
-  });
-  on('atria:done', (e) => {
-    const p = e.payload;
-    const conv = currentConv();
-    for (const m of p.new_messages || []) conv.messages.push(m);
-    conv.ts = Date.now();
-    persistConvs();
-    finishLive();
-    setRunning(false);
-    renderAll();
-    if (p.rounds > 1 || p.output_tokens) {
-      toast(`آتریا پاسخ داد ✨ (${p.rounds} مرحله · ${p.output_tokens} توکن)`, 'ok');
+  const t = window.__atria;
+  t.listen('atria:thinking', (e) => onThinking(e.payload.delta));
+  t.listen('atria:text', (e) => onText(e.payload.delta));
+  t.listen('atria:round', (e) => {
+    if (e.payload.round > 1) {
+      closeLive();
+      const r = document.createElement('div');
+      r.className = 'round-chip';
+      r.textContent = '↻ مرحلهٔ ابزار ' + e.payload.round;
+      st.streamEl.appendChild(r);
+      scrollBottom(true);
     }
   });
-  on('atria:stopped', () => {
-    toast('تولید متوقف شد', 'warn');
-    sendPartial();
-  });
-  on('atria:error', (e) => {
-    const msg = e.payload?.message || 'خطای ناشناخته';
-    toast('خطا: ' + msg, 'err');
-    sendPartial();
+  t.listen('atria:tool_start', (e) => onToolStart(e.payload.label || e.payload.name));
+  t.listen('atria:tool_end', (e) => onToolEnd(e.payload.label || e.payload.name, e.payload.ok, e.payload.output));
+  t.listen('atria:done', (e) => finishRun(e.payload.new_messages, e.payload.final_text));
+  t.listen('atria:error', (e) => failRun(e.payload.message || 'unknown'));
+  t.listen('atria:stopped', () => {
+    failRun('متوقف شد');
+    toast('تولید متوقف شد');
   });
 }
 
-/* ============================ settings ============================ */
-function openModal(id) {
-  $('#' + id).classList.remove('hidden');
-}
-function closeModal(id) {
-  $('#' + id).classList.add('hidden');
-}
+/* ---------------- memory modal ---------------- */
 
-function fillSettings() {
-  $('#setApiKey').value = cfg.api_key;
-  $('#setBase').value = cfg.base_url;
-  $('#setModel').value = cfg.model;
-  $('#setMaxTokens').value = cfg.max_tokens;
-  $('#setTemp').value = cfg.temperature;
-  $('#maxTokensVal').textContent = cfg.max_tokens;
-  $('#tempVal').textContent = Number(cfg.temperature).toFixed(2);
-  $('#setTools').checked = !!cfg.tools_enabled;
-  $('#setStream').checked = !!cfg.stream;
-  $('#setThink').checked = !!cfg.show_thinking;
-  $('#setSystem').value = cfg.system;
-}
-
-function bindSettings() {
-  $('#settingsBtn').addEventListener('click', () => { fillSettings(); openModal('settingsModal'); });
-  $('#setMaxTokens').addEventListener('input', (e) => ($('#maxTokensVal').textContent = e.target.value));
-  $('#setTemp').addEventListener('input', (e) => ($('#tempVal').textContent = Number(e.target.value).toFixed(2)));
-  $('#eyeBtn').addEventListener('click', () => {
-    const inp = $('#setApiKey');
-    inp.type = inp.type === 'password' ? 'text' : 'password';
-  });
-  $('#saveCfg').addEventListener('click', () => {
-    cfg.api_key = $('#setApiKey').value.trim();
-    cfg.base_url = $('#setBase').value.trim() || DEFAULTS.base_url;
-    cfg.model = $('#setModel').value.trim() || DEFAULTS.model;
-    cfg.max_tokens = Number($('#setMaxTokens').value) || DEFAULTS.max_tokens;
-    cfg.temperature = Number($('#setTemp').value);
-    cfg.tools_enabled = $('#setTools').checked;
-    cfg.stream = $('#setStream').checked;
-    cfg.show_thinking = $('#setThink').checked;
-    cfg.system = $('#setSystem').value;
-    persistCfg();
-    closeModal('settingsModal');
-    renderAll();
-    toast('تنظیمات ذخیره شد ✓', 'ok');
-  });
-  $('#resetCfg').addEventListener('click', () => {
-    cfg = { ...DEFAULTS };
-    persistCfg();
-    fillSettings();
-    toast('به پیش‌فرض‌ها بازنشانی شد', 'ok');
-  });
-  document.querySelectorAll('[data-close]').forEach((b) =>
-    b.addEventListener('click', () => closeModal(b.dataset.close))
-  );
-  document.querySelectorAll('.modal-backdrop').forEach((b) =>
-    b.addEventListener('click', (e) => { if (e.target === b) b.classList.add('hidden'); })
-  );
-}
-
-/* ============================ memory ============================ */
 async function openMemory() {
-  openModal('memoryModal');
-  const list = $('#memList');
-  list.innerHTML = '<div class="mem-empty">در حال بارگذاری…</div>';
+  els.memoryPanel.classList.add('open');
+  els.memList.innerHTML = '<div class="spinner"></div>';
   try {
-    const notes = (await T.core.invoke('memory_list')) || [];
-    list.innerHTML = '';
-    if (!notes.length) {
-      list.innerHTML = '<div class="mem-empty">هنوز چیزی ذخیره نشده — به آتریا بگویید «یادت باشد…»</div>';
+    const notes = await window.__atria.memory_list();
+    els.memList.innerHTML = '';
+    if (!notes || !notes.length) {
+      els.memList.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px 2px">حافظه خالی است</div>';
       return;
     }
     for (const n of notes) {
       const el = document.createElement('div');
-      el.className = 'mem-note';
-      el.innerHTML = '<div class="mem-title"></div><div class="mem-content"></div><div class="mem-ts"></div>';
-      el.querySelector('.mem-title').textContent = n.title;
-      el.querySelector('.mem-content').textContent = n.content;
-      el.querySelector('.mem-ts').textContent = n.ts;
-      list.appendChild(el);
+      el.className = 'note';
+      el.innerHTML = '<div class="note-title"></div><div class="note-content"></div><div class="note-ts"></div>';
+      el.querySelector('.note-title').textContent = n.title;
+      el.querySelector('.note-content').textContent = n.content;
+      el.querySelector('.note-ts').textContent = n.ts;
+      els.memList.appendChild(el);
     }
   } catch (e) {
-    list.innerHTML = '<div class="mem-empty">خطا در بارگذاری حافظه</div>';
-    void e;
+    els.memList.innerHTML = '<div class="stream-error">خطا در بارگذاری حافظه</div>';
   }
 }
 
-/* ============================ init ============================ */
-function bindMain() {
-  $('#newChatBtn').addEventListener('click', newConv);
-  $('#sideToggle').addEventListener('click', () => $('#messages').closest('.frame').classList.toggle('side-hidden'));
-  $('#memoryBtn').addEventListener('click', openMemory);
-  $('#memClear').addEventListener('click', async () => {
-    await T.core.invoke('memory_clear');
-    openMemory();
-    toast('حافظه پاک شد', 'ok');
-  });
+/* ---------------- cmd-k ---------------- */
 
-  const input = $('#input');
-  const composer = $('#composer');
-  composer.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const text = input.value;
-    input.value = '';
-    autoGrow();
-    send(text);
-  });
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      composer.requestSubmit();
-    }
-  });
-  function autoGrow() {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+function openCmdk() {
+  els.cmdk.classList.add('open');
+  els.cmdkInput.value = '';
+  renderCmdkList('');
+  els.cmdkInput.focus();
+}
+function closeCmdk() { els.cmdk.classList.remove('open'); }
+function renderCmdkList(q) {
+  const list = st.chats.filter((c) => !q || c.title.includes(q));
+  els.cmdkList.innerHTML = '';
+  if (!list.length) {
+    els.cmdkList.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px 10px">چیزی پیدا نشد</div>';
+    return;
   }
-  input.addEventListener('input', autoGrow);
-
-  $('#stopBtn').addEventListener('click', async () => {
-    try { await T.core.invoke('chat_stop'); } catch { /* ignore */ }
-  });
-
-  $('#scrollBtn').addEventListener('click', () => {
-    $('#messages').scrollTop = $('#messages').scrollHeight;
-  });
-  $('#messages').addEventListener('scroll', () => {
-    $('#scrollBtn').classList.toggle('hidden', nearBottom());
-  });
-
-  $('#suggestions').addEventListener('click', (e) => {
-    const chip = e.target.closest('.chip');
-    if (chip) send(chip.textContent.trim());
-  });
-
-  document.addEventListener('click', (e) => {
-    const copy = e.target.closest('.code-copy');
-    if (copy) {
-      copyText(copy.dataset.code || '', copy);
-      return;
-    }
-    const lnk = e.target.closest('.lnk');
-    if (lnk && lnk.dataset.href) {
-      e.preventDefault();
-      copyText(lnk.dataset.href);
-    }
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); newConv(); }
-    if (e.key === 'Escape') {
-      document.querySelectorAll('.modal-backdrop').forEach((m) => m.classList.add('hidden'));
-    }
-  });
+  for (const c of list) {
+    const item = document.createElement('div');
+    item.className = 'cmdk-item' + (c.id === st.currentId ? ' active' : '');
+    item.textContent = c.title;
+    item.onclick = () => switchChat(c.id);
+    els.cmdkList.appendChild(item);
+  }
 }
 
-/* ============================ demo mode ============================ */
-function maybeSeedDemo() {
-  if (!/[?&]demo/.test(location.search)) return;
-  if (!convs.some((c) => c.id === 'demo')) {
-    convs.unshift({
-      id: 'demo',
-      title: 'گفتگوی نمونه',
-      ts: Date.now(),
-      messages: [
-        { role: 'user', content: [{ type: 'text', text: '(17*24+3) رو حساب کن و یادت باشه نتیجه ۴۱۱ است.' }] },
-        { role: 'assistant', content: [
-          { type: 'thinking', thinking: 'The user wants me to calculate 17*24+3 and remember it.\nI should call the calculator tool first, then save it with remember.', signature: 'demo-sig-1' },
-          { type: 'tool_use', id: 'demo-t1', name: 'calculator', input: { expression: '17*24+3' } },
-        ]},
-        { role: 'user', content: [
-          { type: 'tool_result', tool_use_id: 'demo-t1', content: '17*24+3 = 411', is_error: false },
-        ]},
-        { role: 'assistant', content: [
-          { type: 'thinking', thinking: 'Now I save the result to memory.', signature: 'demo-sig-2' },
-          { type: 'tool_use', id: 'demo-t2', name: 'remember', input: { title: 'محاسبه', content: '17*24+3 = 411' } },
-        ]},
-        { role: 'user', content: [
-          { type: 'tool_result', tool_use_id: 'demo-t2', content: 'Saved note "محاسبه" to memory.', is_error: false },
-        ]},
-        { role: 'assistant', content: [
-          { type: 'thinking', thinking: 'Compose the final Persian answer with Markdown.', signature: 'demo-sig-3' },
-          { type: 'text', text: '**۴۱۱** ✨\n\nنحوهٔ محاسبه:\n\n- `17 × 24 = 408`\n- `408 + 3 = 411`\n\nنتیجه در **حافظهٔ آتریا** هم ذخیره شد.\n\n```python\nresult = 17 * 24 + 3  # 411\n```' },
-        ]},
-      ],
-    });
-    persistConvs();
-  }
-  curId = 'demo';
-  localStorage.setItem('atria.cur', 'demo');
+/* ---------------- misc ui ---------------- */
+
+let toastTimer = null;
+function toast(msg) {
+  els.toast.textContent = msg;
+  els.toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2600);
 }
 
-async function init() {
-  initStars();
-  initWindow();
-  bindMain();
+function autosize() {
+  els.input.style.height = 'auto';
+  els.input.style.height = Math.min(220, els.input.scrollHeight) + 'px';
+  els.send.disabled = !els.input.value.trim() || st.sending;
+  els.send.classList.toggle('loading', st.sending);
+  els.send.textContent = st.sending ? '■' : '➤';
+}
+
+/* ---------------- boot ---------------- */
+
+function boot() {
+  cacheEls();
   bindSettings();
+  saveSettings(); // refresh model chip
+
+  els.newChat.onclick = () => { if (!st.sending) { newChat(); } };
+  els.clearBtn.onclick = () => {
+    const chat = currentChat();
+    if (chat && chat.messages.length) { chat.messages = []; saveChats(); renderHistory(); toast('گفتگو پاک شد'); }
+  };
+  els.settingsBtn.onclick = (e) => { e.stopPropagation(); els.settingsPanel.classList.toggle('open'); els.hint.classList.toggle('open'); };
+  els.closeSettings.onclick = closeSettings;
+  els.wipe.onclick = () => {
+    if (confirm('همهٔ گفتگوها حذف شوند؟')) {
+      st.chats = [];
+      saveChats();
+      newChat(true);
+      toast('همه گفتگوها حذف شدند');
+    }
+  };
+  els.memoryBtn.onclick = openMemory;
+  els.closeMemory.onclick = () => els.memoryPanel.classList.remove('open');
+  els.memClear.onclick = async () => {
+    await window.__atria.memory_clear();
+    openMemory();
+    toast('حافظه پاک شد');
+  };
+  document.addEventListener('click', (e) => {
+    if (els.settingsPanel.classList.contains('open') && !els.settingsPanel.contains(e.target) && e.target !== els.settingsBtn) {
+      closeSettings();
+    }
+  });
+
+  els.input.addEventListener('input', autosize);
+  els.input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  els.send.onclick = () => (st.sending ? stop() : send());
+  autosize();
+
   listenEvents();
-  maybeSeedDemo();
-  renderAll();
-  try {
-    const meta = await T.core.invoke('app_meta');
-    if (meta?.version) $('.engine-note').innerHTML = `<span class="dot-live"></span> موتور Rust · v${meta.version}`;
-  } catch { /* ignore */ }
-  $('#input').focus();
+
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      els.cmdk.classList.contains('open') ? closeCmdk() : openCmdk();
+    }
+    if (e.key === 'Escape') { closeCmdk(); els.memoryPanel.classList.remove('open'); closeSettings(); }
+  });
+  els.cmdk.addEventListener('click', (e) => { if (e.target === els.cmdk) closeCmdk(); });
+  els.cmdkInput.addEventListener('input', () => renderCmdkList(els.cmdkInput.value.trim()));
+  els.memoryPanel.addEventListener('click', (e) => { if (e.target === els.memoryPanel) els.memoryPanel.classList.remove('open'); });
+
+  if (!st.currentId || !currentChat()) newChat(true);
+  else { renderChatList(); renderHistory(); }
+
+  // اولین اجرا: کلیدی تعبیه نشده — تنظیمات را باز کن
+  if (!st.settings.api_key) {
+    openSettings();
+    setTimeout(() => toast('برای شروع، کلید API خودت را وارد کن'), 400);
+  }
 }
 
-init();
+document.addEventListener('DOMContentLoaded', boot);

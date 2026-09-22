@@ -1,7 +1,7 @@
 //! IPC layer between the webview UI and the `atria-core` engine.
 
 use atria_core::{
-    run_agent, AgentEvent, AtriaClient, ClientConfig, CoreError, MemoryStore, Message, Note,
+    run_agent, AgentEvent, ApiKind, ClientConfig, CoreError, MemoryStore, Message, Note,
     StreamEvent,
 };
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,15 @@ pub struct ChatPayload {
     pub tools_enabled: bool,
     pub stream: bool,
     pub messages: Vec<Message>,
+    /// "anthropic" (Messages API) or "openai" (Chat Completions).
+    #[serde(default)]
+    pub kind: String,
+    /// Enable local file tools inside the workspace folder.
+    #[serde(default)]
+    pub file_tools: bool,
+    /// Workspace root for the file tools.
+    #[serde(default)]
+    pub workspace: String,
 }
 
 /// Payload of the `atria:done` event.
@@ -98,12 +107,13 @@ pub async fn chat_send(
             system: payload.system,
             stream: payload.stream,
             tools: payload.tools_enabled,
+            kind: ApiKind::parse(&payload.kind),
+            file_tools: payload.file_tools,
+            workspace: payload.workspace,
         };
-        let client = AtriaClient::new();
         let mut mem = MemoryStore::open(&mem_path);
 
         let result = run_agent(
-            &client,
             &cfg,
             payload.messages,
             &mut mem,
