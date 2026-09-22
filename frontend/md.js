@@ -6,6 +6,8 @@
  * - Streaming: `createLiveStream(el)` grows a message **incrementally** —
  *   finished blocks are frozen, code lines are appended one-by-one with a
  *   line-in animation and never re-rendered (no full-block refresh).
+ * - Markup matches the Dawn CSS contract: `.md p/h1..h4/ul/ol/blockquote`,
+ *   `code.ic`, `a.lnk`, and `.code-block > .code-head + .code-lines`.
  */
 (function (global) {
   'use strict';
@@ -35,15 +37,15 @@
 
     // links [text](url) — only http(s)
     s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-      '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+      '<a class="lnk" href="$2" target="_blank" rel="noreferrer">$1</a>');
 
     // bare URLs
     s = s.replace(/(^|[\s(])((?:https?:\/\/)[^\s<)]+)/g,
-      '$1<a href="$2" target="_blank" rel="noreferrer">$2</a>');
+      '$1<a class="lnk" href="$2" target="_blank" rel="noreferrer">$2</a>');
 
     // restore inline code
     s = s.replace(/\u0000CODE(\d+)\u0000/g, function (_, i) {
-      return '<code>' + codes[+i] + '</code>';
+      return '<code class="ic">' + codes[+i] + '</code>';
     });
     return s;
   }
@@ -53,16 +55,15 @@
   const KW = [
     'fn','let','mut','const','struct','enum','impl','trait','pub','use','mod','match',
     'if','else','while','for','loop','return','break','continue','in','as','where',
-    'async','await','move|','dyn','ref','type','static','crate','self','super','true','false',
+    'async','await','move','dyn','ref','type','static','crate','self','super','true','false',
     'def','class','import','from','export','function','var','new','this','try','catch',
     'finally','throw','switch','case','default','do','elif','except','lambda','yield',
     'None','True','False','null','undefined','void','int','float','str','bool','string',
-    'long','double','char','unsigned','signed','struct','public','private','protected',
+    'long','double','char','unsigned','signed','public','private','protected',
   ];
-  const KW_RE = new RegExp('\\b(' + KW.join('|').replace(/\|\\|/g, '|') + ')\\b', 'g');
+  const KW_SET = new Set(KW);
 
   function highlightLine(src) {
-    // tokenize: comments | strings | numbers | keywords | idents
     let out = '';
     const re = /(\/\/.*$|#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)/gm;
     let last = 0, m;
@@ -72,8 +73,7 @@
       else if (m[2]) out += '<span class="c-str">' + esc(m[2]) + '</span>';
       else if (m[3]) out += '<span class="c-num">' + esc(m[3]) + '</span>';
       else if (m[4]) {
-        KW_RE.lastIndex = 0;
-        out += KW_RE.test(m[4])
+        out += KW_SET.has(m[4])
           ? '<span class="c-kw">' + esc(m[4]) + '</span>'
           : /^[A-Z]/.test(m[4])
             ? '<span class="c-typ">' + esc(m[4]) + '</span>'
@@ -118,17 +118,18 @@
     return parseBlocks(text).filter(function (b) { return b.t === 'code'; });
   }
 
-  /* ---------------- block rendering (one-shot) ---------------- */
+  /* ---------------- block rendering ---------------- */
 
   function codeShell(lang) {
     const el = document.createElement('div');
-    el.className = 'code';
+    el.className = 'code-block';
     const head = document.createElement('div');
     head.className = 'code-head';
-    head.innerHTML = '<span class="code-dots"><i></i><i></i><i></i></span>' +
-      '<span class="code-lang">' + esc(lang || 'code') + '</span>';
+    const langEl = document.createElement('span');
+    langEl.className = 'code-lang';
+    langEl.textContent = lang || 'code';
     const copy = document.createElement('button');
-    copy.className = 'copy-btn';
+    copy.className = 'code-copy';
     copy.textContent = 'کپی';
     copy.addEventListener('click', function () {
       const code = Array.prototype.map.call(
@@ -137,9 +138,11 @@
       ).join('\n');
       navigator.clipboard.writeText(code).then(function () {
         copy.textContent = 'کپی شد ✓';
-        setTimeout(function () { copy.textContent = 'کپی'; }, 1200);
+        copy.classList.add('ok');
+        setTimeout(function () { copy.textContent = 'کپی'; copy.classList.remove('ok'); }, 1200);
       });
     });
+    head.appendChild(langEl);
     head.appendChild(copy);
     el.appendChild(head);
     const lines = document.createElement('div');
@@ -162,37 +165,41 @@
     return line;
   }
 
-  function buildCode(block, animate) {
-    const el = codeShell(block.lang);
-    const lines = el.querySelector('.code-lines');
+  function codeLineList(block) {
     let list = block.text.split('\n');
     if (block.closed && list[list.length - 1] === '') list = list.slice(0, -1);
     if (!list.length) list = [''];
-    list.forEach(function (src, i) {
-      lines.appendChild(lineEl(src, i + 1, animate));
+    return list;
+  }
+
+  function buildCode(block, animate) {
+    const el = codeShell(block.lang);
+    const lines = el.querySelector('.code-lines');
+    codeLineList(block).forEach(function (src, i) {
+      const lel = lineEl(src, i + 1, animate);
+      if (!block.closed && i === codeLineList(block).length - 1) lel.classList.add('partial');
+      lines.appendChild(lel);
     });
     return el;
   }
 
-  function renderPara(text, animate) {
+  function renderPara(text) {
     const el = document.createElement('div');
     el.className = 'para';
     const chunks = text.split(/\n{2,}/);
     for (const chunk of chunks) {
       const t = chunk.trim();
       if (!t) continue;
-      if (/^---+$/.test(t)) { el.appendChild(Object.assign(document.createElement('hr'), { className: 'md-hr' })); continue; }
+      if (/^---+$/.test(t)) { el.appendChild(document.createElement('hr')); continue; }
       if (/^#{1,6}\s/.test(t)) {
         const level = Math.min(6, (t.match(/^#+/) || ['#'])[0].length);
         const h = document.createElement('h' + level);
-        h.className = 'md-h' + level + (animate ? ' thinking-anim' : '');
         h.innerHTML = renderInline(t.replace(/^#+\s*/, ''));
         el.appendChild(h);
         continue;
       }
       if (/^>\s?/.test(t)) {
         const q = document.createElement('blockquote');
-        q.className = 'md-quote' + (animate ? ' thinking-anim' : '');
         q.innerHTML = renderInline(t.replace(/^>\s?/gm, ''));
         el.appendChild(q);
         continue;
@@ -202,7 +209,6 @@
       if (isList && lines.some(function (l) { return /^\s*([-*+]|\d+[.)])\s+/.test(l); })) {
         const ordered = /^\s*\d+[.)]\s+/.test(lines.find(function (l) { return l.trim(); }) || '');
         const ul = document.createElement(ordered ? 'ol' : 'ul');
-        ul.className = 'md-list' + (animate ? ' thinking-anim' : '');
         lines.forEach(function (l) {
           const m = l.match(/^\s*(?:[-*+]|\d+[.)])\s+(.*)$/);
           if (m) {
@@ -215,7 +221,6 @@
         continue;
       }
       const p = document.createElement('p');
-      if (animate) p.className = 'thinking-anim';
       p.innerHTML = renderInline(t).replace(/\n/g, '<br>');
       el.appendChild(p);
     }
@@ -223,15 +228,17 @@
   }
 
   function renderBlock(block, animate) {
-    return block.t === 'code' ? buildCode(block, animate) : renderPara(block.text, animate);
+    return block.t === 'code' ? buildCode(block, animate) : renderPara(block.text);
   }
 
   /* ---------------- public API ---------------- */
 
-  // Full render (history / final).
+  function render(el, text) { el.innerHTML = renderInline(text); }
+
+  // Full render (history / final). `el` should sit inside a `.bubble`.
   function renderAll(el, text) {
     el.innerHTML = '';
-    el.classList.remove('streaming');
+    el.classList.add('md');
     const blocks = parseBlocks(text);
     if (!blocks.length) return;
     blocks.forEach(function (b) { el.appendChild(renderBlock(b, true)); });
@@ -239,33 +246,30 @@
 
   // Incremental live renderer: push deltas as they arrive.
   // Completed blocks are frozen; code lines are appended one-by-one —
-  // existing lines are never touched (no per-line refresh).
+  // existing lines are never re-rendered (no per-line refresh).
   function createLiveStream(el) {
+    el.classList.add('md');
     let text = '';
-    const parts = []; // [{block, el, nLines, dirty}]
+    const parts = []; // per-block: {el, t, raw}
 
-    function ensure(block, i) {
-      if (!parts[i]) {
-        const bel = renderBlock(block, true);
-        el.appendChild(bel);
-        parts[i] = {
-          el: bel, t: block.t,
-          nLines: block.t === 'code' ? block.el === undefined ? countLines(block) : 0 : 0,
-          raw: block.text,
-        };
-        if (block.t === 'code') {
-          // lines already rendered by buildCode; remember how many
-          parts[i].nLines = parts[i].el.querySelectorAll('.code-line').length;
-        }
-        return parts[i];
+    function syncCode(part, block) {
+      const linesBox = part.el.querySelector('.code-lines');
+      const list = codeLineList(block);
+      const hasPartial = !block.closed;
+      // create missing line elements (with anim)
+      while (linesBox.children.length < list.length) {
+        linesBox.appendChild(lineEl(list[linesBox.children.length], linesBox.children.length + 1, true));
       }
-      return parts[i];
-    }
-
-    function countLines(block) {
-      let list = block.text.split('\n');
-      if (block.closed && list[list.length - 1] === '') list = list.slice(0, -1);
-      return Math.max(1, list.length);
+      // drop excess (rare: block closed and trailing blank trimmed)
+      while (linesBox.children.length > list.length) {
+        linesBox.removeChild(linesBox.lastChild);
+      }
+      // only the trailing line can still change
+      const lastEl = linesBox.children[list.length - 1];
+      lastEl.querySelector('.lc').innerHTML = highlightLine(list[list.length - 1]);
+      for (let k = 0; k < linesBox.children.length; k++) {
+        linesBox.children[k].classList.toggle('partial', hasPartial && k === list.length - 1);
+      }
     }
 
     function push(delta) {
@@ -276,51 +280,32 @@
         if (p && p.el.parentNode) p.el.parentNode.removeChild(p.el);
       }
       blocks.forEach(function (block, i) {
-        const part = ensure(block, i);
+        let part = parts[i];
+        if (!part) {
+          const bel = renderBlock(block, true);
+          el.appendChild(bel);
+          part = parts[i] = { el: bel, t: block.t, raw: block.text };
+          return;
+        }
         if (part.raw === block.text) return;
         part.raw = block.text;
         if (block.t === 'prose') {
           // paragraphs: cheap re-render inside this block only
-          const fresh = renderPara(block.text, false);
-          fresh.className = part.el.className;
+          const fresh = renderPara(block.text);
           part.el.innerHTML = fresh.innerHTML;
         } else {
-          // code: append ONLY the new lines; update the trailing partial line
-          const linesBox = part.el.querySelector('.code-lines');
-          let list = block.text.split('\n');
-          const hasPartial = !block.closed;
-          if (!hasPartial && list[list.length - 1] === '') list = list.slice(0, -1);
-          if (!list.length) list = [''];
-          // update existing last line if it is the partial one
-          const existing = linesBox.querySelectorAll('.code-line');
-          if (hasPartial && existing.length && existing.length === list.length) {
-            const lastEl = existing[existing.length - 1];
-            lastEl.querySelector('.lc').innerHTML = highlightLine(list[list.length - 1]);
-          }
-          for (let k = part.nLines; k < list.length; k++) {
-            const isLast = hasPartial && k === list.length - 1;
-            const lel = lineEl(list[k], k + 1, true);
-            if (isLast) lel.classList.add('partial');
-            linesBox.appendChild(lel);
-          }
-          // keep partial marker on the final line while streaming
-          const all = linesBox.querySelectorAll('.code-line');
-          for (let k = 0; k < all.length; k++) all[k].classList.toggle('partial', hasPartial && k === all.length - 1);
-          part.nLines = list.length;
+          syncCode(part, block);
         }
       });
     }
 
     function done() {
-      // settle any trailing partial line
       const pendings = el.querySelectorAll('.code-line.partial');
-      for (const p of pendings) p.classList.remove('partial');
+      for (let i = 0; i < pendings.length; i++) pendings[i].classList.remove('partial');
     }
 
     return { push: push, done: done, isEmpty: function () { return !text.trim(); } };
   }
-
-  function render(el, text) { el.innerHTML = renderInline(text); }
 
   global.md = {
     render: render,

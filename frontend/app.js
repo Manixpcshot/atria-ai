@@ -1,37 +1,33 @@
-/* Atria — UI controller */
+/* Atria — UI controller (v0.2 — matches the Dawn CSS contract) */
 'use strict';
 
 const $ = (s) => document.querySelector(s);
-const $$ = (s) => document.querySelectorAll(s);
 
 /* ---------------- providers ---------------- */
 
 const PROVIDERS = {
-  'atria':       { label: 'آتریا — Messages API',      base: 'https://api.atria-asi.ai',                                        kind: 'anthropic', model: 'Atria-Dawn-Preview' },
-  'atria-cc':    { label: 'آتریا — Chat Completions',  base: 'https://api.atria-asi.ai',                                        kind: 'openai',    model: 'Atria-Dawn-Preview' },
-  'openai':      { label: 'OpenAI',                    base: 'https://api.openai.com/v1',                                       kind: 'openai',    model: 'gpt-4o-mini' },
-  'gemini':      { label: 'Google Gemini',             base: 'https://generativelanguage.googleapis.com/v1beta/openai',         kind: 'openai',    model: 'gemini-2.5-flash' },
-  'groq':        { label: 'Groq',                      base: 'https://api.groq.com/openai/v1',                                  kind: 'openai',    model: 'llama-3.3-70b-versatile' },
-  'deepseek':    { label: 'DeepSeek',                  base: 'https://api.deepseek.com/v1',                                     kind: 'openai',    model: 'deepseek-chat' },
-  'openrouter':  { label: 'OpenRouter',                base: 'https://openrouter.ai/api/v1',                                    kind: 'openai',    model: 'openrouter/auto' },
-  'custom':      { label: 'سفارشی…',                    base: '',                                                                kind: 'openai',    model: '' },
+  'atria':      { label: 'آتریا — Messages API',     base: 'https://api.atria-asi.ai',                                kind: 'anthropic', model: 'Atria-Dawn-Preview' },
+  'atria-cc':   { label: 'آتریا — Chat Completions', base: 'https://api.atria-asi.ai',                                kind: 'openai',    model: 'Atria-Dawn-Preview' },
+  'openai':     { label: 'OpenAI',                   base: 'https://api.openai.com/v1',                               kind: 'openai',    model: 'gpt-4o-mini' },
+  'gemini':     { label: 'Google Gemini',            base: 'https://generativelanguage.googleapis.com/v1beta/openai', kind: 'openai',    model: 'gemini-2.5-flash' },
+  'groq':       { label: 'Groq',                     base: 'https://api.groq.com/openai/v1',                          kind: 'openai',    model: 'llama-3.3-70b-versatile' },
+  'deepseek':   { label: 'DeepSeek',                 base: 'https://api.deepseek.com/v1',                             kind: 'openai',    model: 'deepseek-chat' },
+  'openrouter': { label: 'OpenRouter',               base: 'https://openrouter.ai/api/v1',                            kind: 'openai',    model: 'openrouter/auto' },
+  'custom':     { label: 'سفارشی…',                   base: '',                                                        kind: 'openai',    model: '' },
 };
 
 /* ---------------- state ---------------- */
 
 const DEFAULTS = {
-  // اتصال — کلید API دیگر در برنامه تعبیه نشده؛ کاربر آن را وارد می‌کند
   provider: 'atria',
   api_key: '',
   base_url: 'https://api.atria-asi.ai',
   api_kind: 'anthropic',
   model: 'Atria-Dawn-Preview',
-  // رفتار
   thinking: true,
   mem: true,
   temp: 0.7,
   stream: true,
-  // سیستم
   system: '',
   max_tokens: 4096,
   tools_enabled: true,
@@ -48,52 +44,91 @@ const st = {
   currentId: localStorage.getItem(LS_CURRENT) || null,
   sending: false,
   runText: '',
-  runThink: '',
-  timers: { blink: null, type: null },
+  live: null,
+  streamEl: null,
+  stackEl: null,
+  thinkEl: null,
+  cursorHolder: null,
 };
 
 function loadSettings() {
-  try {
-    const s = JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}');
-    // migration from v1: keep values, drop any legacy embedded key if user never set one
-    return { ...DEFAULTS, ...s };
-  } catch { return { ...DEFAULTS }; }
+  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}') }; }
+  catch { return { ...DEFAULTS }; }
 }
 function saveSettings() {
   localStorage.setItem(LS_SETTINGS, JSON.stringify(st.settings));
-  els.modelChip.textContent = 'مدل: ' + (st.settings.model || '—');
+  els.modelChip.textContent = st.settings.model || '—';
 }
 function loadChats() {
   try { return JSON.parse(localStorage.getItem(LS_CHATS) || '[]'); } catch { return []; }
 }
 function saveChats() { localStorage.setItem(LS_CHATS, JSON.stringify(st.chats)); }
-
 function currentChat() { return st.chats.find((c) => c.id === st.currentId) || null; }
 
-/* ---------------- dom refs ---------------- */
+/* ---------------- dom ---------------- */
 
 let els = {};
 function cacheEls() {
   els = {
-    chatList: $('#chatList'), chatTitle: $('#chatTitle'), modelChip: $('#modelChip'),
-    chat: $('#chat'), empty: $('#empty'), input: $('#input'), send: $('#send'),
-    newChat: $('#newChat'), clearBtn: $('#clearBtn'), settingsBtn: $('#settingsBtn'),
-    settingsPanel: $('#settingsPanel'), keyVal: $('#keyVal'), modelVal: $('#modelVal'),
-    baseVal: $('#baseVal'), kindVal: $('#kindVal'), provVal: $('#provVal'),
-    tempVal: $('#tempVal'), tempOut: $('#tempOut'), thinkVal: $('#thinkVal'),
-    memVal: $('#memVal'), streamVal: $('#streamVal'), sysVal: $('#sysVal'),
-    maxTokVal: $('#maxTokVal'), toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'),
-    wsVal: $('#wsVal'), closeSettings: $('#closeSettings'), wipe: $('#wipe'),
-    hint: $('#hint'), memoryBtn: $('#memoryBtn'), memoryPanel: $('#memoryPanel'),
-    closeMemory: $('#closeMemory'), memList: $('#memList'), memClear: $('#memClear'),
-    toast: $('#toast'), cmdk: $('#cmdk'), cmdkInput: $('#cmdkInput'), cmdkList: $('#cmdkList'),
+    frame: $('#frame'), messages: $('#messages'), empty: $('#empty'),
+    input: $('#input'), btnSend: $('#btnSend'), btnStop: $('#btnStop'),
+    btnNew: $('#btnNew'), convList: $('#convList'),
+    btnSettings: $('#btnSettings'), btnMemory: $('#btnMemory'), btnSide: $('#btnSide'),
+    btnMin: $('#btnMin'), btnMax: $('#btnMax'), btnClose: $('#btnClose'),
+    btnScroll: $('#btnScroll'),
+    modelChip: $('#modelChip'),
+    settingsModal: $('#settingsModal'), settingsX: $('#settingsX'), settingsClose: $('#settingsClose'),
+    memoryModal: $('#memoryModal'), memoryX: $('#memoryX'), memoryClose: $('#memoryClose'),
+    memList: $('#memList'), memClear: $('#memClear'), btnWipe: $('#btnWipe'),
+    cmdk: $('#cmdk'), cmdkInput: $('#cmdkInput'), cmdkList: $('#cmdkList'), cmdkX: $('#cmdkX'),
+    toasts: $('#toasts'),
+    provVal: $('#provVal'), keyVal: $('#keyVal'), keyEye: $('#keyEye'),
+    modelVal: $('#modelVal'), baseVal: $('#baseVal'), kindVal: $('#kindVal'),
+    tempVal: $('#tempVal'), tempOut: $('#tempOut'),
+    thinkVal: $('#thinkVal'), memVal: $('#memVal'), streamVal: $('#streamVal'),
+    sysVal: $('#sysVal'), maxTokVal: $('#maxTokVal'),
+    toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'),
   };
+}
+
+/* ---------------- helpers ---------------- */
+
+function invokeCmd(name, args) {
+  return window.__atria.invoke(name, args || {}).catch((e) => { toast(String(e), 'err'); });
+}
+
+function toast(msg, kind) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (kind ? ' ' + kind : '');
+  t.textContent = msg;
+  els.toasts.appendChild(t);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 350); }, 2800);
+}
+
+function stars() {
+  const box = $('#stars');
+  for (let i = 0; i < 46; i++) {
+    const s = document.createElement('i');
+    const size = Math.random() * 2.2 + 0.8;
+    s.style.cssText = `width:${size}px;height:${size}px;left:${Math.random() * 100}%;top:${Math.random() * 100}%;animation-delay:${(Math.random() * 4).toFixed(2)}s`;
+    box.appendChild(s);
+  }
+}
+
+function autosize() {
+  els.input.style.height = 'auto';
+  els.input.style.height = Math.min(180, els.input.scrollHeight) + 'px';
+  els.btnSend.disabled = !els.input.value.trim();
+}
+
+function scrollBottom(instant) {
+  if (instant) els.messages.scrollTop = els.messages.scrollHeight;
+  else els.messages.scrollTo({ top: els.messages.scrollHeight, behavior: 'smooth' });
 }
 
 /* ---------------- settings ---------------- */
 
 function bindSettings() {
-  // اتصال
   els.provVal.innerHTML = Object.entries(PROVIDERS)
     .map(([id, p]) => `<option value="${id}">${p.label}</option>`).join('');
   els.provVal.value = st.settings.provider || 'atria';
@@ -107,20 +142,24 @@ function bindSettings() {
     st.settings.provider = els.provVal.value;
     if (p) {
       if (els.provVal.value !== 'custom' || !els.baseVal.value) els.baseVal.value = p.base;
-      if (p.model && (!els.modelVal.value || els.provVal.value !== 'custom')) els.modelVal.value = p.model;
+      if (p.model && els.provVal.value !== 'custom') els.modelVal.value = p.model;
       els.kindVal.value = p.kind;
       st.settings.api_kind = p.kind;
     }
-    st.settings.base_url = els.baseVal.value;
-    st.settings.model = els.modelVal.value;
+    st.settings.base_url = els.baseVal.value.trim();
+    st.settings.model = els.modelVal.value.trim();
     saveSettings();
   };
   els.keyVal.oninput = () => { st.settings.api_key = els.keyVal.value.trim(); saveSettings(); };
   els.modelVal.oninput = () => { st.settings.model = els.modelVal.value.trim(); saveSettings(); };
   els.baseVal.oninput = () => { st.settings.base_url = els.baseVal.value.trim(); saveSettings(); };
   els.kindVal.onchange = () => { st.settings.api_kind = els.kindVal.value; saveSettings(); };
+  els.keyEye.onclick = () => {
+    const show = els.keyVal.type === 'password';
+    els.keyVal.type = show ? 'text' : 'password';
+    els.keyEye.textContent = show ? '🙈' : '👁';
+  };
 
-  // رفتار
   els.tempVal.value = st.settings.temp;
   els.tempOut.textContent = Number(st.settings.temp).toFixed(1);
   els.thinkVal.checked = !!st.settings.thinking;
@@ -135,7 +174,6 @@ function bindSettings() {
   els.memVal.onchange = () => { st.settings.mem = els.memVal.checked; saveSettings(); };
   els.streamVal.onchange = () => { st.settings.stream = els.streamVal.checked; saveSettings(); };
 
-  // سیستم
   els.sysVal.value = st.settings.system || '';
   els.maxTokVal.value = st.settings.max_tokens || 4096;
   els.toolsVal.checked = !!st.settings.tools_enabled;
@@ -151,71 +189,65 @@ function bindSettings() {
   els.fileToolsVal.onchange = () => { st.settings.file_tools = els.fileToolsVal.checked; saveSettings(); };
   els.wsVal.oninput = () => { st.settings.workspace = els.wsVal.value.trim(); saveSettings(); };
 
-  // تب‌های تنظیمات
-  $$('.stab').forEach((b) => b.addEventListener('click', () => {
-    $$('.stab').forEach((x) => x.classList.toggle('active', x === b));
-    $$('.stab-body').forEach((x) => x.classList.toggle('active', x.dataset.tab === b.dataset.tab));
+  document.querySelectorAll('.stab').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('.stab').forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.stab-body').forEach((x) =>
+      x.classList.toggle('active', x.dataset.tab === b.dataset.tab));
   }));
 }
 
-function openSettings() {
-  els.settingsPanel.classList.add('open');
-  els.hint.classList.add('open');
-}
-function closeSettings() {
-  els.settingsPanel.classList.remove('open');
-  els.hint.classList.remove('open');
-}
+function openModal(m) { m.classList.remove('hidden'); }
+function closeModal(m) { m.classList.add('hidden'); }
 
-/* ---------------- chat list ---------------- */
+/* ---------------- conversations ---------------- */
 
-function renderChatList() {
-  els.chatList.innerHTML = '';
+function renderConvList() {
+  els.convList.innerHTML = '';
   if (!st.chats.length) {
-    els.chatList.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:10px 12px">هنوز گفتگویی نیست</div>';
+    const e = document.createElement('div');
+    e.className = 'mem-empty';
+    e.textContent = 'هنوز گفتگویی نیست';
+    els.convList.appendChild(e);
     return;
   }
   for (const c of st.chats) {
     const item = document.createElement('div');
-    item.className = 'chat-item' + (c.id === st.currentId ? ' active' : '');
-    const t = document.createElement('span');
-    t.className = 'title';
+    item.className = 'conv' + (c.id === st.currentId ? ' active' : '');
+    const t = document.createElement('div');
+    t.className = 'conv-title';
     t.textContent = c.title;
+    const d = document.createElement('div');
+    d.className = 'conv-date';
+    d.textContent = new Date(c.createdAt).toLocaleDateString('fa-IR');
     const del = document.createElement('button');
-    del.className = 'del';
+    del.className = 'conv-del';
     del.title = 'حذف';
     del.textContent = '✕';
     del.onclick = (e) => { e.stopPropagation(); deleteChat(c.id); };
-    item.appendChild(t);
-    item.appendChild(del);
+    item.appendChild(t); item.appendChild(d); item.appendChild(del);
     item.onclick = () => switchChat(c.id);
-    els.chatList.appendChild(item);
+    els.convList.appendChild(item);
   }
 }
 
 function newChat(silent) {
-  const chat = {
-    id: 'c' + Date.now(),
-    title: 'گفتگوی جدید',
-    createdAt: Date.now(),
-    messages: [],
-  };
+  const chat = { id: 'c' + Date.now(), title: 'گفتگوی جدید', createdAt: Date.now(), messages: [] };
   st.chats.unshift(chat);
   st.currentId = chat.id;
   saveChats();
   localStorage.setItem(LS_CURRENT, chat.id);
-  renderChatList();
+  renderConvList();
   renderHistory();
   if (!silent) els.input.focus();
 }
 
 function switchChat(id) {
-  if (st.sending) return toast('ابتدا تولید را متوقف کن');
+  if (st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
   st.currentId = id;
   localStorage.setItem(LS_CURRENT, id);
-  renderChatList();
+  renderConvList();
   renderHistory();
-  closeCmdk();
+  closeModal(els.cmdk);
 }
 
 function deleteChat(id) {
@@ -226,57 +258,138 @@ function deleteChat(id) {
     if (!st.currentId) newChat(true);
     else localStorage.setItem(LS_CURRENT, st.currentId);
   }
-  renderChatList();
+  renderConvList();
   renderHistory();
 }
 
 /* ---------------- rendering ---------------- */
 
-function bubbleEl(role, text, animate) {
+function avatarEl(role) {
+  const a = document.createElement('div');
+  a.className = 'avatar ' + (role === 'user' ? 'you' : 'atri');
+  if (role === 'user') a.textContent = 'شما';
+  else { const img = document.createElement('img'); img.src = 'logo.svg'; img.alt = ''; a.appendChild(img); }
+  return a;
+}
+
+function bubbleEl(role, text) {
   const wrap = document.createElement('div');
-  wrap.className = 'msg ' + role + (animate ? ' pop-in' : '');
+  wrap.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
+  wrap.appendChild(avatarEl(role));
+  const stack = document.createElement('div');
+  stack.className = 'stack';
   const b = document.createElement('div');
   b.className = 'bubble';
-  md.renderAll(b, text);
-  wrap.appendChild(b);
+  const md = document.createElement('div');
+  md.className = 'md';
+  b.appendChild(md);
+  stack.appendChild(b);
+  wrap.appendChild(stack);
+  // render markdown into md container
+  (window.md.renderAll)(md, text || '…');
   return wrap;
-}
-
-function toolChip(label, ok, output) {
-  const chip = document.createElement('div');
-  chip.className = 'tool-chip' + (ok === false ? ' err' : '');
-  chip.innerHTML = '<span class="tool-dot"></span><b>' + md.renderInline(label) + '</b>';
-  chip.title = (output || '').slice(0, 400);
-  chip.onclick = () => toast((output || '').slice(0, 220) || '…');
-  return chip;
-}
-
-function thinkingBubble(text) {
-  const d = document.createElement('div');
-  d.className = 'think-bubble';
-  d.textContent = text;
-  return d;
 }
 
 function renderHistory() {
   const chat = currentChat();
-  els.chat.innerHTML = '';
-  if (!chat || !chat.messages.length) {
-    els.empty.style.display = 'flex';
-    els.chatTitle.textContent = chat ? chat.title : '';
-    return;
-  }
-  els.empty.style.display = 'none';
-  els.chatTitle.textContent = chat.title;
+  els.messages.innerHTML = '';
+  els.empty.classList.toggle('hidden', !!(chat && chat.messages.length));
+  els.empty.classList.toggle('off', !!(chat && chat.messages.length));
+  if (!chat) return;
   for (const m of chat.messages) {
-    els.chat.appendChild(bubbleEl(m.role === 'user' ? 'user' : 'assistant', m.plain || '…', false));
+    els.messages.appendChild(bubbleEl(m.role === 'user' ? 'user' : 'ai', m.plain || m.text || '…'));
   }
   scrollBottom(true);
 }
 
-function scrollBottom(instant) {
-  if (instant) els.chat.scrollTop = els.chat.scrollHeight;
-  else els.chat.scrollTo({ top: els.chat.scrollHeight, behavior: 'smooth' });
+/* ------- live pieces: thinking box / tool cards / cursor ------- */
+
+function ensureThink() {
+  if (st.thinkEl && st.thinkEl.isConnected) return st.thinkEl;
+  const box = document.createElement('div');
+  box.className = 'think-box has';
+  box.innerHTML =
+    '<button class="think-head"><span class="chev">▾</span><span class="think-title">در حال فکر کردن…</span></button>' +
+    '<div class="think-body"></div>';
+  box.querySelector('.think-head').onclick = () => box.classList.toggle('open');
+  st.stackEl.appendChild(box);
+  st.thinkEl = box;
+  return box;
+}
+
+function finishThink() {
+  if (st.thinkEl) {
+    st.thinkEl.classList.remove('has');
+    st.thinkEl.querySelector('.think-title').textContent = 'تفکر مدل';
+    st.thinkEl = null;
+  }
+}
+
+function toolCardEl(label, name, input) {
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+  card.innerHTML =
+    '<div class="tool-head"><span class="tool-ic">⚙️</span><span class="tool-label"></span>' +
+    '<span class="tool-chip"></span><span class="tool-state">در حال اجرا…</span></div>' +
+    '<div class="tool-io"><div class="tool-in"></div><div class="tool-out hidden"></div></div>';
+  card.querySelector('.tool-label').textContent = label || name || 'ابزار';
+  card.querySelector('.tool-chip').textContent = name || '';
+  card.querySelector('.tool-in').textContent = JSON.stringify(input ?? {}, null, 2);
+  return card;
+}
+
+function startBlink() {
+  stopBlink();
+  const holder = document.createElement('div');
+  holder.className = 'para';
+  const c = document.createElement('span');
+  c.className = 'cursor';
+  holder.appendChild(c);
+  st.liveEl().appendChild(holder);
+  st.cursorHolder = holder;
+}
+function stopBlink() {
+  if (st.cursorHolder && st.cursorHolder.parentNode) st.cursorHolder.parentNode.removeChild(st.cursorHolder);
+  st.cursorHolder = null;
+}
+
+function liveMdEl() {
+  if (!st.streamEl) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ai';
+    wrap.appendChild(avatarEl('ai'));
+    const stack = document.createElement('div');
+    stack.className = 'stack';
+    const bub = document.createElement('div');
+    bub.className = 'bubble streaming';
+    const md = document.createElement('div');
+    md.className = 'md';
+    bub.appendChild(md);
+    stack.appendChild(bub);
+    wrap.appendChild(stack);
+    els.messages.appendChild(wrap);
+    st.streamEl = bub;
+    st.stackEl = stack;
+    st.mdEl = md;
+    scrollBottom();
+  }
+  return st.mdEl;
+}
+
+st.liveEl = function () { return liveMdEl(); };
+
+function ensureLive() {
+  if (!st.live) {
+    stopBlink();
+    const sec = document.createElement('div');
+    sec.className = 'stream-answer';
+    liveMdEl().appendChild(sec);
+    st.live = md.createLiveStream(sec);
+  }
+  return st.live;
+}
+function closeLive() {
+  if (st.live) { st.live.done(); st.live = null; }
 }
 
 /* ---------------- send flow ---------------- */
@@ -288,41 +401,33 @@ function send() {
   if (!chat) { newChat(true); return send(); }
 
   if (!st.settings.api_key) {
-    openSettings();
-    return toast('ابتدا کلید API خودت را در تنظیمات وارد کن');
+    openModal(els.settingsModal);
+    return toast('ابتدا کلید API خودت را در تنظیمات وارد کن', 'warn');
   }
 
-  // user bubble
   chat.messages.push({ role: 'user', text, plain: text, ts: Date.now() });
   if (chat.title === 'گفتگوی جدید') {
     chat.title = text.slice(0, 42) + (text.length > 42 ? '…' : '');
-    els.chatTitle.textContent = chat.title;
-    renderChatList();
+    renderConvList();
   }
-  els.empty.style.display = 'none';
-  els.chat.appendChild(bubbleEl('user', text, true));
+  els.empty.classList.add('hidden', 'off');
+  els.messages.appendChild(bubbleEl('user', text));
   els.input.value = '';
   autosize();
   scrollBottom();
 
-  // assistant placeholder + live renderer
-  const wrap = document.createElement('div');
-  wrap.className = 'msg assistant pop-in';
-  const bub = document.createElement('div');
-  bub.className = 'bubble streaming';
-  wrap.appendChild(bub);
-  els.chat.appendChild(wrap);
-  scrollBottom();
-
   st.sending = true;
   st.runText = '';
-  st.runThink = '';
-  st.live = null;         // current live answer section (md.createLiveStream)
-  st.streamEl = bub;      // whole bubble (thinking + tools + answers)
-  startBlink(bub);
+  st.streamEl = null;
+  st.stackEl = null;
+  st.thinkEl = null;
+  st.live = null;
+  liveMdEl(); // create the live ai message shell
+  startBlink();
+  els.btnSend.classList.add('hidden');
+  els.btnStop.classList.remove('hidden');
 
   const history = chat.messages.map((m) => ({ role: m.role, content: m.text }));
-
   window.__atria.chat_send({
     payload: {
       api_key: st.settings.api_key,
@@ -330,7 +435,7 @@ function send() {
       model: st.settings.model || 'Atria-Dawn-Preview',
       max_tokens: Number(st.settings.max_tokens) || 4096,
       temperature: Number(st.settings.temp),
-      system: st.settings.mem ? st.settings.system : (st.settings.system || ''),
+      system: st.settings.system || '',
       tools_enabled: !!st.settings.tools_enabled,
       stream: st.settings.stream !== false,
       kind: st.settings.api_kind || 'anthropic',
@@ -338,100 +443,86 @@ function send() {
       workspace: st.settings.workspace || '',
       messages: history,
     },
-  }).catch((e) => {
-    failRun(e && e.message ? e.message : String(e));
-  });
+  }).catch((e) => failRun(e && e.message ? e.message : String(e)));
 }
 
 function stop() { window.__atria.chat_stop(); }
 
-function startBlink(bub) {
-  const c = document.createElement('span');
-  c.className = 'cursor';
-  st.cursorEl = c;
-  const holder = document.createElement('div');
-  holder.className = 'para';
-  holder.appendChild(c);
-  bub.appendChild(holder);
-  st.cursorHolder = holder;
-}
-function stopBlink() {
-  if (st.cursorHolder && st.cursorHolder.parentNode) st.cursorHolder.parentNode.removeChild(st.cursorHolder);
-  st.cursorHolder = null;
-}
-
-function ensureLive() {
-  if (!st.live) {
-    if (st.cursorHolder) stopBlink();
-    const sec = document.createElement('div');
-    sec.className = 'stream-answer';
-    st.streamEl.appendChild(sec);
-    st.live = md.createLiveStream(sec);
-  }
-  return st.live;
-}
-function closeLive() {
-  if (st.live) { st.live.done(); st.live = null; }
-}
+/* ------- live event handlers ------- */
 
 function onThinking(delta) {
   if (!st.settings.thinking) return;
   closeLive();
-  st.runThink += delta;
-  // فقط append — هیچ رندر مجددی رخ نمی‌دهد
-  let tb = st.streamEl.querySelector('.think-bubble:last-of-type');
-  const last = st.streamEl.lastElementChild;
-  if (!tb || (last && !last.classList.contains('think-bubble'))) {
-    tb = thinkingBubble('');
-    st.streamEl.appendChild(tb);
-  }
-  tb.textContent += delta;
+  const box = ensureThink();
+  box.querySelector('.think-body').textContent += delta;
   scrollBottom(true);
 }
 
 function onText(delta) {
-  if (st.cursorHolder) stopBlink();
   st.runText += delta;
+  if (st.cursorHolder) stopBlink();
   ensureLive().push(delta);
   scrollBottom(true);
 }
 
-function onToolStart(label) {
+function onToolStart(label, name, input) {
   closeLive();
-  if (st.cursorHolder) stopBlink();
-  st.streamEl.appendChild(toolChip(label + ' …', true, 'در حال اجرا…'));
+  stopBlink();
+  st.stackEl.appendChild(toolCardEl(label, name, input));
   scrollBottom(true);
 }
 
-function onToolEnd(label, ok, output) {
+function onToolEnd(card, ok, output) {
   closeLive();
-  st.streamEl.appendChild(toolChip(label, ok, output));
+  if (!card) return;
+  card.classList.add(ok ? 'done' : 'failed');
+  card.querySelector('.tool-state').textContent = ok ? '✓ انجام شد' : '✕ خطا';
+  const out = card.querySelector('.tool-out');
+  out.classList.remove('hidden');
+  out.textContent = (output || '').slice(0, 4000);
   scrollBottom(true);
 }
 
 function failRun(msg) {
   stopBlink();
   closeLive();
+  finishThink();
   st.sending = false;
-  const e = document.createElement('div');
-  e.className = 'stream-error';
-  e.textContent = 'خطا: ' + msg;
-  st.streamEl.appendChild(e);
-  st.streamEl.classList.remove('streaming');
-  scrollBottom();
+  els.btnSend.classList.remove('hidden');
+  els.btnStop.classList.add('hidden');
+  if (st.streamEl) {
+    st.streamEl.classList.remove('streaming');
+    const e = document.createElement('div');
+    e.className = 'tool-out';
+    e.style.borderColor = 'rgba(248,113,113,.35)';
+    e.textContent = 'خطا: ' + msg;
+    st.stackEl.appendChild(e);
+    scrollBottom();
+  }
+  toast('خطا: ' + msg, 'err');
 }
 
 function finishRun(newMessages, finalText) {
   stopBlink();
   closeLive();
+  finishThink();
   st.sending = false;
-  st.streamEl.classList.remove('streaming');
+  els.btnSend.classList.remove('hidden');
+  els.btnStop.classList.add('hidden');
+  if (st.streamEl) st.streamEl.classList.remove('streaming');
   const chat = currentChat();
   const plain = finalText && finalText.trim() ? finalText : st.runText || '(پاسخ خالی)';
   if (newMessages && newMessages.length) {
-    for (const m of newMessages) chat.messages.push({ role: m.role === 'user' ? 'user' : 'assistant', text: m.text || m.plain || '', plain: m.plain || m.text || '', ts: Date.now() });
+    for (const m of newMessages) {
+      chat.messages.push({
+        role: m.role === 'user' ? 'user' : 'ai',
+        text: m.text || m.plain || '',
+        plain: m.plain || m.text || '',
+        ts: Date.now(),
+      });
+    }
   } else {
-    chat.messages.push({ role: 'assistant', text: st.runText || plain, plain, ts: Date.now() });
+    chat.messages.push({ role: 'ai', text: st.runText || plain, plain, ts: Date.now() });
   }
   saveChats();
   scrollBottom();
@@ -446,63 +537,64 @@ function listenEvents() {
   t.listen('atria:round', (e) => {
     if (e.payload.round > 1) {
       closeLive();
+      finishThink();
       const r = document.createElement('div');
       r.className = 'round-chip';
       r.textContent = '↻ مرحلهٔ ابزار ' + e.payload.round;
-      st.streamEl.appendChild(r);
+      st.stackEl.appendChild(r);
       scrollBottom(true);
     }
   });
-  t.listen('atria:tool_start', (e) => onToolStart(e.payload.label || e.payload.name));
-  t.listen('atria:tool_end', (e) => onToolEnd(e.payload.label || e.payload.name, e.payload.ok, e.payload.output));
+  let lastCard = null;
+  t.listen('atria:tool_start', (e) => {
+    onToolStart(e.payload.label || e.payload.name, e.payload.name, e.payload.input);
+    lastCard = st.stackEl.lastElementChild;
+  });
+  t.listen('atria:tool_end', (e) => onToolEnd(lastCard, e.payload.ok, e.payload.output));
   t.listen('atria:done', (e) => finishRun(e.payload.new_messages, e.payload.final_text));
   t.listen('atria:error', (e) => failRun(e.payload.message || 'unknown'));
-  t.listen('atria:stopped', () => {
-    failRun('متوقف شد');
-    toast('تولید متوقف شد');
-  });
+  t.listen('atria:stopped', () => { failRun('متوقف شد'); toast('تولید متوقف شد', 'warn'); });
 }
 
 /* ---------------- memory modal ---------------- */
 
 async function openMemory() {
-  els.memoryPanel.classList.add('open');
-  els.memList.innerHTML = '<div class="spinner"></div>';
+  openModal(els.memoryModal);
+  els.memList.innerHTML = '<div class="mem-empty">…</div>';
   try {
     const notes = await window.__atria.memory_list();
     els.memList.innerHTML = '';
     if (!notes || !notes.length) {
-      els.memList.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px 2px">حافظه خالی است</div>';
+      els.memList.innerHTML = '<div class="mem-empty">حافظه خالی است</div>';
       return;
     }
     for (const n of notes) {
       const el = document.createElement('div');
-      el.className = 'note';
-      el.innerHTML = '<div class="note-title"></div><div class="note-content"></div><div class="note-ts"></div>';
-      el.querySelector('.note-title').textContent = n.title;
-      el.querySelector('.note-content').textContent = n.content;
-      el.querySelector('.note-ts').textContent = n.ts;
+      el.className = 'mem-note';
+      el.innerHTML = '<div class="mem-title"></div><div class="mem-content"></div><div class="mem-ts"></div>';
+      el.querySelector('.mem-title').textContent = n.title;
+      el.querySelector('.mem-content').textContent = n.content;
+      el.querySelector('.mem-ts').textContent = n.ts;
       els.memList.appendChild(el);
     }
-  } catch (e) {
-    els.memList.innerHTML = '<div class="stream-error">خطا در بارگذاری حافظه</div>';
+  } catch {
+    els.memList.innerHTML = '<div class="mem-empty">خطا در بارگذاری حافظه</div>';
   }
 }
 
 /* ---------------- cmd-k ---------------- */
 
 function openCmdk() {
-  els.cmdk.classList.add('open');
+  openModal(els.cmdk);
   els.cmdkInput.value = '';
   renderCmdkList('');
   els.cmdkInput.focus();
 }
-function closeCmdk() { els.cmdk.classList.remove('open'); }
 function renderCmdkList(q) {
   const list = st.chats.filter((c) => !q || c.title.includes(q));
   els.cmdkList.innerHTML = '';
   if (!list.length) {
-    els.cmdkList.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px 10px">چیزی پیدا نشد</div>';
+    els.cmdkList.innerHTML = '<div class="mem-empty">چیزی پیدا نشد</div>';
     return;
   }
   for (const c of list) {
@@ -514,64 +606,65 @@ function renderCmdkList(q) {
   }
 }
 
-/* ---------------- misc ui ---------------- */
-
-let toastTimer = null;
-function toast(msg) {
-  els.toast.textContent = msg;
-  els.toast.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2600);
-}
-
-function autosize() {
-  els.input.style.height = 'auto';
-  els.input.style.height = Math.min(220, els.input.scrollHeight) + 'px';
-  els.send.disabled = !els.input.value.trim() || st.sending;
-  els.send.classList.toggle('loading', st.sending);
-  els.send.textContent = st.sending ? '■' : '➤';
-}
-
 /* ---------------- boot ---------------- */
 
 function boot() {
   cacheEls();
+  stars();
   bindSettings();
-  saveSettings(); // refresh model chip
+  saveSettings();
+  renderConvList();
+  renderHistory();
 
-  els.newChat.onclick = () => { if (!st.sending) { newChat(); } };
-  els.clearBtn.onclick = () => {
-    const chat = currentChat();
-    if (chat && chat.messages.length) { chat.messages = []; saveChats(); renderHistory(); toast('گفتگو پاک شد'); }
-  };
-  els.settingsBtn.onclick = (e) => { e.stopPropagation(); els.settingsPanel.classList.toggle('open'); els.hint.classList.toggle('open'); };
-  els.closeSettings.onclick = closeSettings;
-  els.wipe.onclick = () => {
+  els.btnNew.onclick = () => { if (!st.sending) newChat(); };
+  els.btnSettings.onclick = () => openModal(els.settingsModal);
+  els.btnMemory.onclick = openMemory;
+  els.btnSide.onclick = () => els.frame.classList.toggle('side-hidden');
+  els.btnMin.onclick = () => invokeCmd('minimize_win');
+  els.btnMax.onclick = () => invokeCmd('maximize_win');
+  els.btnClose.onclick = () => invokeCmd('close_win');
+
+  els.settingsX.onclick = () => closeModal(els.settingsModal);
+  els.settingsClose.onclick = () => closeModal(els.settingsModal);
+  els.memoryX.onclick = () => closeModal(els.memoryModal);
+  els.memoryClose.onclick = () => closeModal(els.memoryModal);
+  els.cmdkX.onclick = () => closeModal(els.cmdk);
+  els.btnWipe.onclick = () => {
     if (confirm('همهٔ گفتگوها حذف شوند؟')) {
       st.chats = [];
       saveChats();
       newChat(true);
-      toast('همه گفتگوها حذف شدند');
+      toast('همه گفتگوها حذف شدند', 'ok');
     }
   };
-  els.memoryBtn.onclick = openMemory;
-  els.closeMemory.onclick = () => els.memoryPanel.classList.remove('open');
   els.memClear.onclick = async () => {
     await window.__atria.memory_clear();
     openMemory();
-    toast('حافظه پاک شد');
+    toast('حافظه پاک شد', 'ok');
   };
-  document.addEventListener('click', (e) => {
-    if (els.settingsPanel.classList.contains('open') && !els.settingsPanel.contains(e.target) && e.target !== els.settingsBtn) {
-      closeSettings();
-    }
+  els.settingsModal.onclick = (e) => { if (e.target === els.settingsModal) closeModal(els.settingsModal); };
+  els.memoryModal.onclick = (e) => { if (e.target === els.memoryModal) closeModal(els.memoryModal); };
+  els.cmdk.onclick = (e) => { if (e.target === els.cmdk) closeModal(els.cmdk); };
+  els.cmdkInput.oninput = () => renderCmdkList(els.cmdkInput.value.trim());
+
+  // suggestion chips
+  document.querySelectorAll('.chip[data-q]').forEach((c) => c.onclick = () => {
+    els.input.value = c.dataset.q;
+    autosize();
+    els.input.focus();
   });
 
   els.input.addEventListener('input', autosize);
   els.input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
-  els.send.onclick = () => (st.sending ? stop() : send());
+  els.btnSend.onclick = send;
+  els.btnStop.onclick = stop;
+  els.btnScroll.onclick = () => scrollBottom();
+  els.messages.addEventListener('scroll', () => {
+    const far = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight > 240;
+    els.btnScroll.classList.toggle('hidden', !far);
+  });
   autosize();
 
   listenEvents();
@@ -579,21 +672,19 @@ function boot() {
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      els.cmdk.classList.contains('open') ? closeCmdk() : openCmdk();
+      els.cmdk.classList.contains('hidden') ? openCmdk() : closeModal(els.cmdk);
     }
-    if (e.key === 'Escape') { closeCmdk(); els.memoryPanel.classList.remove('open'); closeSettings(); }
+    if (e.key === 'Escape') {
+      closeModal(els.cmdk);
+      closeModal(els.settingsModal);
+      closeModal(els.memoryModal);
+    }
   });
-  els.cmdk.addEventListener('click', (e) => { if (e.target === els.cmdk) closeCmdk(); });
-  els.cmdkInput.addEventListener('input', () => renderCmdkList(els.cmdkInput.value.trim()));
-  els.memoryPanel.addEventListener('click', (e) => { if (e.target === els.memoryPanel) els.memoryPanel.classList.remove('open'); });
-
-  if (!st.currentId || !currentChat()) newChat(true);
-  else { renderChatList(); renderHistory(); }
 
   // اولین اجرا: کلیدی تعبیه نشده — تنظیمات را باز کن
   if (!st.settings.api_key) {
-    openSettings();
-    setTimeout(() => toast('برای شروع، کلید API خودت را وارد کن'), 400);
+    openModal(els.settingsModal);
+    setTimeout(() => toast('برای شروع، کلید API خودت را وارد کن', 'warn'), 400);
   }
 }
 

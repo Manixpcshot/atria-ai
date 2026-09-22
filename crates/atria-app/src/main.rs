@@ -55,6 +55,9 @@ fn main() {
             commands::memory_list,
             commands::memory_clear,
             commands::app_meta,
+            commands::close_win,
+            commands::minimize_win,
+            commands::maximize_win,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Atria app");

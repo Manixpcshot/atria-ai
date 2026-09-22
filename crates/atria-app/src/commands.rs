@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Shared app state (managed in `main.rs`).
 pub struct AppState {
@@ -146,6 +146,32 @@ pub async fn chat_send(
     });
 
     Ok(())
+}
+
+/// Window controls for the frameless titlebar.
+#[tauri::command]
+pub fn close_win(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.close();
+    }
+}
+
+#[tauri::command]
+pub fn minimize_win(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.minimize();
+    }
+}
+
+#[tauri::command]
+pub fn maximize_win(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        if w.is_maximized().unwrap_or(false) {
+            let _ = w.unmaximize();
+        } else {
+            let _ = w.maximize();
+        }
+    }
 }
 
 fn emit_agent_event(app: &AppHandle, ev: AgentEvent) {
