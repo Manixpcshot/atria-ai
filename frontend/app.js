@@ -62,6 +62,7 @@ function loadSettings() {
 function saveSettings() {
   localStorage.setItem(LS_SETTINGS, JSON.stringify(st.settings));
   els.modelChip.textContent = st.settings.model || '—';
+  if (els.mpName) els.mpName.textContent = st.settings.model || '—';
 }
 function loadChats() {
   try { return JSON.parse(localStorage.getItem(LS_CHATS) || '[]'); } catch { return []; }
@@ -81,6 +82,8 @@ function cacheEls() {
     btnMin: $('#btnMin'), btnMax: $('#btnMax'), btnClose: $('#btnClose'),
     btnScroll: $('#btnScroll'),
     modelChip: $('#modelChip'),
+    modelPick: $('#modelPick'), mpName: $('#mpName'), modelMenu: $('#modelMenu'),
+    chipAgent: $('#chipAgent'), chipThink: $('#chipThink'), chipFiles: $('#chipFiles'),
     settingsModal: $('#settingsModal'), settingsX: $('#settingsX'), settingsClose: $('#settingsClose'),
     memoryModal: $('#memoryModal'), memoryX: $('#memoryX'), memoryClose: $('#memoryClose'),
     memList: $('#memList'), memClear: $('#memClear'), btnWipe: $('#btnWipe'),
@@ -179,7 +182,7 @@ function bindSettings() {
     els.tempOut.textContent = st.settings.temp.toFixed(1);
     saveSettings();
   };
-  els.thinkVal.onchange = () => { st.settings.thinking = els.thinkVal.checked; saveSettings(); };
+  els.thinkVal.onchange = () => { st.settings.thinking = els.thinkVal.checked; saveSettings(); syncChips(); };
   els.memVal.onchange = () => { st.settings.mem = els.memVal.checked; saveSettings(); };
   els.streamVal.onchange = () => { st.settings.stream = els.streamVal.checked; saveSettings(); };
 
@@ -194,8 +197,8 @@ function bindSettings() {
     els.maxTokVal.value = st.settings.max_tokens;
     saveSettings();
   };
-  els.toolsVal.onchange = () => { st.settings.tools_enabled = els.toolsVal.checked; saveSettings(); };
-  els.fileToolsVal.onchange = () => { st.settings.file_tools = els.fileToolsVal.checked; saveSettings(); };
+  els.toolsVal.onchange = () => { st.settings.tools_enabled = els.toolsVal.checked; saveSettings(); syncChips(); };
+  els.fileToolsVal.onchange = () => { st.settings.file_tools = els.fileToolsVal.checked; saveSettings(); syncChips(); };
   els.wsVal.oninput = () => { st.settings.workspace = els.wsVal.value.trim(); saveSettings(); };
 
   document.querySelectorAll('.stab').forEach((b) => b.addEventListener('click', () => {
@@ -318,9 +321,9 @@ function ensureThink() {
   const box = document.createElement('div');
   box.className = 'think-box has';
   box.innerHTML =
-    '<button class="think-head"><span class="think-orb"></span><span class="chev">▾</span>' +
-    '<span class="think-title">در حال فکر کردن…</span>' +
-    '<span class="dots"><i></i><i></i><i></i></span></button>' +
+    '<button class="think-head"><span class="think-orb"><i></i></span>' +
+    '<span class="think-title">در حال اندیشیدن…</span>' +
+    '<span class="think-wave"><i></i><i></i><i></i></span></button>' +
     '<div class="think-body"></div>';
   box.querySelector('.think-head').onclick = () => box.classList.toggle('open');
   st.stackEl.appendChild(box);
@@ -640,6 +643,76 @@ function renderCmdkList(q) {
 
 /* ---------------- boot ---------------- */
 
+
+/* ---------------- model picker + mode chips (Claude-like bar) ---------------- */
+
+function updateModelPick() {
+  els.mpName.textContent = st.settings.model || '—';
+}
+
+function closeModelMenu() { els.modelMenu.classList.add('hidden'); }
+
+function renderModelMenu() {
+  els.modelMenu.innerHTML = '';
+  const groups = [
+    ['آتریا', [
+      ['atria', 'Atria-Dawn-Preview', 'Messages API'],
+      ['atria-cc', 'Atria-Dawn-Preview', 'Chat Completions'],
+    ]],
+    ['پروایدرهای جهانی', [
+      ['openai', 'gpt-4o-mini', 'OpenAI'],
+      ['gemini', 'gemini-2.5-flash', 'Google Gemini'],
+      ['groq', 'llama-3.3-70b-versatile', 'Groq'],
+      ['deepseek', 'deepseek-chat', 'DeepSeek'],
+      ['openrouter', 'openrouter/auto', 'OpenRouter'],
+    ]],
+  ];
+  for (const [title, items] of groups) {
+    const h = document.createElement('div');
+    h.className = 'mm-head';
+    h.textContent = title;
+    els.modelMenu.appendChild(h);
+    for (const [pid, model, label] of items) {
+      const it = document.createElement('button');
+      it.className = 'mm-item' + (st.settings.model === model && st.settings.provider === pid ? ' active' : '');
+      it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
+      it.querySelector('.mm-model').textContent = model;
+      it.querySelector('.mm-src').textContent = label;
+      it.onclick = () => pickProvider(pid, model);
+      els.modelMenu.appendChild(it);
+    }
+  }
+  const custom = document.createElement('button');
+  custom.className = 'mm-item mm-custom';
+  custom.textContent = '⚙︎ مدل سفارشی و همهٔ تنظیمات…';
+  custom.onclick = () => { closeModelMenu(); openModal(els.settingsModal); };
+  els.modelMenu.appendChild(custom);
+}
+
+function pickProvider(pid, model) {
+  const p = PROVIDERS[pid];
+  st.settings.provider = pid;
+  st.settings.model = model;
+  if (p) {
+    st.settings.api_kind = p.kind;
+    st.settings.base_url = p.base;
+    els.provVal.value = pid;
+    els.modelVal.value = model;
+    els.baseVal.value = p.base;
+    els.kindVal.value = p.kind;
+  }
+  saveSettings();
+  updateModelPick();
+  closeModelMenu();
+  toast('مدل: ' + model, 'ok');
+}
+
+function syncChips() {
+  els.chipAgent.classList.toggle('on', !!st.settings.tools_enabled);
+  els.chipThink.classList.toggle('on', !!st.settings.thinking);
+  els.chipFiles.classList.toggle('on', !!st.settings.file_tools);
+}
+
 function boot() {
   cacheEls();
   stars();
@@ -695,6 +768,35 @@ function boot() {
   });
   els.btnSend.onclick = send;
   els.btnStop.onclick = stop;
+
+  // نوار مدل/حالت (مثل کلاد)
+  updateModelPick();
+  syncChips();
+  els.modelPick.onclick = (e) => {
+    e.stopPropagation();
+    if (els.modelMenu.classList.contains('hidden')) { renderModelMenu(); els.modelMenu.classList.remove('hidden'); }
+    else closeModelMenu();
+  };
+  document.addEventListener('click', (e) => {
+    if (!els.modelMenu.classList.contains('hidden') &&
+        !els.modelMenu.contains(e.target) && !els.modelPick.contains(e.target)) closeModelMenu();
+  });
+  els.chipAgent.onclick = () => {
+    st.settings.tools_enabled = !st.settings.tools_enabled;
+    els.toolsVal.checked = st.settings.tools_enabled;
+    saveSettings(); syncChips();
+    toast(st.settings.tools_enabled ? '⚡ حالت ایجنت روشن شد' : '⚡ حالت ایجنت خاموش شد', 'ok');
+  };
+  els.chipThink.onclick = () => {
+    st.settings.thinking = !st.settings.thinking;
+    els.thinkVal.checked = st.settings.thinking;
+    saveSettings(); syncChips();
+  };
+  els.chipFiles.onclick = () => {
+    st.settings.file_tools = !st.settings.file_tools;
+    els.fileToolsVal.checked = st.settings.file_tools;
+    saveSettings(); syncChips();
+  };
   els.btnScroll.onclick = () => scrollBottom();
   els.messages.addEventListener('scroll', () => {
     const far = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight > 240;

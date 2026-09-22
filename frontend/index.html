@@ -72,14 +72,28 @@
           </div>
         </div>
 
-        <div class="composer glass">
-          <textarea id="input" rows="1" placeholder="هرچی می‌خوای بپرس…  (Enter: ارسال · Shift+Enter: سطر جدید)"></textarea>
-          <button class="send-btn" id="btnSend" title="ارسال">
-            <svg viewBox="0 0 24 24"><path d="M22 2 L11 13"/><path d="M22 2 L15 22 L11 13 L2 9 Z"/></svg>
-          </button>
-          <button class="stop-btn hidden" id="btnStop" title="توقف">
-            <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-          </button>
+        <div class="composer-zone">
+          <div class="composer glass">
+            <textarea id="input" rows="1" placeholder="هرچی می‌خوای بپرس…  (Enter: ارسال · Shift+Enter: سطر جدید)"></textarea>
+            <button class="send-btn" id="btnSend" title="ارسال">
+              <svg viewBox="0 0 24 24"><path d="M22 2 L11 13"/><path d="M22 2 L15 22 L11 13 L2 9 Z"/></svg>
+            </button>
+            <button class="stop-btn hidden" id="btnStop" title="توقف">
+              <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            </button>
+          </div>
+          <div class="composer-bar">
+            <button class="model-pick" id="modelPick" title="انتخاب مدل">
+              <span class="mp-name" id="mpName">Atria-Dawn-Preview</span>
+              <span class="mp-caret">▾</span>
+            </button>
+            <div class="model-menu hidden" id="modelMenu"></div>
+            <div class="mode-chips">
+              <button class="mode-chip" id="chipAgent">⚡ ایجنت</button>
+              <button class="mode-chip" id="chipThink">🧠 تفکر</button>
+              <button class="mode-chip" id="chipFiles">📂 فایل‌ها</button>
+            </div>
+          </div>
         </div>
 
         <button class="scroll-btn hidden" id="btnScroll" title="پایین">↓</button>
