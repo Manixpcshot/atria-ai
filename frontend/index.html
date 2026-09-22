@@ -29,6 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
+        <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
         <button class="tb-btn" id="btnSide" title="نمایش/پنهان‌سازی نوار کناری">
@@ -54,6 +55,7 @@
         <div class="side-footer">
           <button class="side-btn" id="btnSettings">⚙︎&nbsp; تنظیمات</button>
           <button class="side-btn" id="btnMemory">🧠&nbsp; حافظهٔ بلندمدت</button>
+          <button class="side-btn" id="btnCodeWork">⌨︎&nbsp; کد ورک</button>
           <div class="engine-note"><span class="dot-live"></span> Rust engine · Tauri v2 · v0.2</div>
         </div>
       </aside>
@@ -88,7 +90,7 @@
               <span class="mp-name" id="mpName">Atria-Dawn-Preview</span>
               <span class="mp-caret">▾</span>
             </button>
-            <div class="model-menu hidden" id="modelMenu"></div>
+            
             <div class="mode-chips">
               <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
               <button class="mode-chip" id="btnAttach" title="پیوست تصویر (برای مدل‌های ویژن‌دار)">📎 تصویر</button>
@@ -375,5 +377,24 @@
   </script>
   <script src="md.js"></script>
   <script src="app.js"></script>
+<div class="model-menu hidden" id="modelMenu"></div>
+
+  <!-- ============ Code Work — فضای جدا مثل کلاد ============ -->
+  <div id="codeWork" class="cw hidden">
+    <div class="cw-top">
+      <div class="cw-brand"><b>⌨︎ Code Work</b><span>مثل کلاد — خودش در ورک‌اسپیس می‌نویسد و تحویل می‌دهد</span></div>
+      <button class="cw-model" id="cwModelPick" title="انتخاب مدل از همهٔ سرویس‌ها"><span class="mp-name" id="cwMpName">—</span><span class="mp-caret">▾</span></button>
+      <div class="cw-meter" id="cwMeter">◈ ورودی ۰ · ◇ خروجی ۰ · مجموع نشست: ۰ توکن</div>
+      <button class="cw-x" id="cwClose" title="بازگشت به چت">✕</button>
+    </div>
+    <div class="cw-msgs" id="cwMsgs"></div>
+    <div class="cw-bar">
+      <textarea id="cwInput" rows="1" placeholder="کار را بنویس… مثال: «یک صفحهٔ فرود فارسی با HTML/CSS بساز و در ورک‌اسپیس ذخیره کن»"></textarea>
+      <button class="btn primary" id="cwGo">شروع ▸</button>
+      <button class="btn hidden" id="cwStop">■ توقف</button>
+    </div>
+    <div class="cw-foot">فایل‌ها خودکار در ورک‌اسپیس نوشته می‌شوند · <button class="cw-reveal" id="cwReveal">📂 باز کردن ورک‌اسپیس</button> · مصرف توکن هر اجرا ثبت می‌شود</div>
+  </div>
+
 </body>
 </html>

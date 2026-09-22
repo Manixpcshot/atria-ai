@@ -219,6 +219,7 @@ function normConn(c) {
     base: String(c.base || ''),
     key: String(c.key || ''),
     lastModel: String(c.lastModel || ''),
+    enabled: c.enabled !== false,
     models: Array.isArray(c.models) ? c.models.map(String).filter(Boolean) : [],
   };
 }
@@ -1050,11 +1051,11 @@ function startTurn() {
       max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 4096)),
       temperature: Number(st.settings.temp),
       system: st.settings.system || '',
-      tools_enabled: !!st.settings.tools_enabled,
+      tools_enabled: !!st.settings.tools_enabled || st.mode === 'code',
       stream: st.settings.stream !== false,
       kind: conn ? conn.kind : 'anthropic',
-      file_tools: !!st.settings.file_tools,
-      workspace: st.settings.workspace || '',
+      file_tools: !!st.settings.file_tools || st.mode === 'code',
+      workspace: st.settings.workspace || (st.mode === 'code' && diskDirs && diskDirs.workspace) || '',
       thinking: !!st.settings.thinking,
       web_search: !!st.settings.ds_search,
       session_id: (chat && chat.dsSession) || '',
@@ -1459,6 +1460,7 @@ function listenEvents() {
   });
   t.listen('atria:done', (e) => {
     lastSession = e.payload.session_id || '';
+    onUsage(e.payload.input_tokens || 0, e.payload.output_tokens || 0);
     finishRun(e.payload.new_messages, e.payload.final_text);
   });
   t.listen('atria:error', (e) => failRun(e.payload.message || 'unknown'));
@@ -1531,15 +1533,15 @@ function renderModelMenu() {
   const tools = document.createElement('div');
   tools.className = 'mm-tools';
   tools.innerHTML =
-    '<input class="mm-search" id="mmSearch" placeholder="جست‌وجوی مدل…" spellcheck="false">' +
+    '<input class="mm-search" id="mmSearch" placeholder="جست‌وجوی مدل… (همهٔ سرویس‌ها)" spellcheck="false">' +
     '<button class="mm-fetch" id="mmManage" title="مدیریت اتصال‌ها و مدل‌ها">⚙︎</button>';
   els.modelMenu.appendChild(tools);
 
-  const c = activeConn();
-  const head = document.createElement('div');
-  head.className = 'mm-head mm-conn-head';
+  const act = activeConn();
   if (menuShowConns) {
-    head.textContent = 'انتخاب اتصال:';
+    const head = document.createElement('div');
+    head.className = 'mm-head mm-conn-head';
+    head.textContent = 'اتصال‌ها — چندتایی هم‌زمان در فهرست مدل‌ها:';
     els.modelMenu.appendChild(head);
     if (!st.conns.length) {
       const e2 = document.createElement('div');
@@ -1548,49 +1550,58 @@ function renderModelMenu() {
       els.modelMenu.appendChild(e2);
     }
     for (const cc of st.conns) {
-      const it = document.createElement('button');
-      it.className = 'mm-item' + (c && cc.id === c.id ? ' active' : '');
-      it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
-      it.querySelector('.mm-model').textContent = cc.name;
+      const it = document.createElement('div');
+      it.className = 'mm-item mm-conn-row' + (act && cc.id === act.id ? ' active' : '');
+      it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span><button class="mm-toggle" title="نمایش/پنهان در فهرست مدل‌ها"></button>';
+      it.querySelector('.mm-model').textContent = (cc.enabled !== false ? '● ' : '○ ') + cc.name;
       it.querySelector('.mm-src').textContent =
         kindLabel(cc.kind) + ' · ' + cc.models.length + ' مدل' + (cc.key ? '' : ' · بدون کلید');
+      const tg = it.querySelector('.mm-toggle');
+      tg.textContent = cc.enabled !== false ? 'در فهرست ✓' : 'مخفی';
+      tg.onclick = (e) => { e.stopPropagation(); toggleConnEnabled(cc.id); renderModelMenu(); };
       it.onclick = () => {
         setActiveConn(cc.id);
         menuShowConns = false;
         renderModelMenu();
-        toast('اتصال: ' + cc.name, 'ok');
+        toast('اتصال پیش‌فرض: ' + cc.name, 'ok');
       };
       els.modelMenu.appendChild(it);
     }
   } else {
-    head.innerHTML = '<span class="mm-conn-name"></span><button class="mm-switch" title="تعویض اتصال">↻ تعویض اتصال</button>';
-    head.querySelector('.mm-conn-name').textContent = 'اتصال: ' + (c ? c.name : '—');
-    head.querySelector('.mm-switch').onclick = (e) => {
-      e.stopPropagation();
-      menuShowConns = true;
-      renderModelMenu();
-    };
+    const head = document.createElement('div');
+    head.className = 'mm-head mm-conn-head';
+    head.innerHTML = '<span class="mm-all-title">✨ همهٔ مدل‌های فعال — هم‌زمان</span><button class="mm-switch" title="مدیریت اتصال‌ها">↻ اتصال‌ها</button>';
+    head.querySelector('.mm-switch').onclick = (e) => { e.stopPropagation(); menuShowConns = true; renderModelMenu(); };
     els.modelMenu.appendChild(head);
-    const models = c ? c.models : [];
-    if (!models.length) {
+    let any = false;
+    for (const cc of st.conns) {
+      if (cc.enabled === false || !cc.models.length) continue;
+      any = true;
+      const gh = document.createElement('div');
+      gh.className = 'mm-head mm-group';
+      gh.textContent = '◆ ' + cc.name + ' — ' + kindLabel(cc.kind);
+      els.modelMenu.appendChild(gh);
+      for (const m of cc.models) {
+        const it = document.createElement('button');
+        const isActiveModel = (act && cc.id === act.id && effModel() === m);
+        it.className = 'mm-item' + (isActiveModel ? ' active' : '');
+        it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
+        it.querySelector('.mm-model').textContent = m;
+        it.querySelector('.mm-src').textContent = cc.name;
+        it.onclick = () => chooseModelFor(cc.id, m);
+        els.modelMenu.appendChild(it);
+      }
+    }
+    if (!any) {
       const e2 = document.createElement('div');
       e2.className = 'mem-empty';
-      e2.textContent = 'برای این اتصال هنوز مدلی تعیین نکرده‌ای';
+      e2.textContent = 'اتصال فعالی با مدل نیست — «↻ اتصال‌ها» را بزن';
       els.modelMenu.appendChild(e2);
-    }
-    for (const m of models) {
-      const it = document.createElement('button');
-      it.className = 'mm-item' + (st.settings.model === m ? ' active' : '');
-      it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
-      it.querySelector('.mm-model').textContent = m;
-      it.querySelector('.mm-src').textContent = c ? c.name : '';
-      it.onclick = () => chooseModel(m);
-      els.modelMenu.appendChild(it);
     }
     const addBtn = document.createElement('button');
     addBtn.className = 'mm-item mm-custom';
-    addBtn.textContent = '＋ افزودن/حذف مدل‌های این اتصال…';
-    addBtn.onclick = () => { closeModelMenu(); openConns(c ? c.id : null); };
+    addBtn.textContent = '＋ افزودن/حذف مدل‌ها و اتصال‌ها…';
+    addBtn.onclick = () => { closeModelMenu(); openConns(null); };
     els.modelMenu.appendChild(addBtn);
   }
   const manage = document.createElement('button');
@@ -1613,14 +1624,33 @@ function renderModelMenu() {
   };
 }
 
-function chooseModel(model) {
+function toggleConnEnabled(id) {
+  const cc = st.conns.find((x) => x.id === id);
+  if (!cc) return;
+  cc.enabled = cc.enabled === false;
+  saveConns();
+  toast(cc.enabled ? '«' + cc.name + '» در فهرست مدل‌ها نمایش داده می‌شود' : '«' + cc.name + '» از فهرست مدل‌ها مخفی شد (حذف نشد)', 'ok');
+  if (typeof updateConnTabSoon === 'function') updateConnTabSoon();
+}
+
+function chooseModelFor(connId, model) {
+  st.activeConnId = connId || '';
+  localStorage.setItem(LS_ACTIVE_CONN, st.activeConnId);
   st.settings.model = model;
-  const cc = activeConn();
+  const cc = st.conns.find((x) => x.id === connId);
   if (cc) { cc.lastModel = model; saveConns(); }
   saveSettings();
   updateModelPick();
   closeModelMenu();
-  toast('مدل: ' + model, 'ok');
+  if (typeof cwSyncModel === 'function') cwSyncModel();
+  toast('مدل: ' + model + (cc ? ' — ' + cc.name : ''), 'ok');
+}
+
+function chooseModel(model) {
+  const act = activeConn();
+  if (act && act.models.includes(model)) return chooseModelFor(act.id, model);
+  for (const cc of st.conns) if (cc.models.includes(model)) return chooseModelFor(cc.id, model);
+  chooseModelFor(act ? act.id : '', model);
 }
 
 function syncChips() {
@@ -1766,3 +1796,174 @@ function boot() {
 }
 
 document.addEventListener('DOMContentLoaded', boot);
+
+
+/* ================= Code Work v0.5.0 — فضای جدا مثل کلاد ================= */
+
+const CW = {
+  active: false,
+  saved: null,
+  chat: { id: 'cw', title: 'کد ورک', createdAt: Date.now(), messages: [], code: true },
+  els: {},
+  usageLast: { in: 0, out: 0 },
+  usageTot: { in: 0, out: 0 },
+};
+
+function cwRefs() {
+  CW.els.root = $('#codeWork');
+  CW.els.msgs = $('#cwMsgs');
+  CW.els.input = $('#cwInput');
+  CW.els.go = $('#cwGo');
+  CW.els.stop = $('#cwStop');
+  CW.els.close = $('#cwClose');
+  CW.els.meter = $('#cwMeter');
+  CW.els.modelPick = $('#cwModelPick');
+  CW.els.mpName = $('#cwMpName');
+  CW.els.reveal = $('#cwReveal');
+  CW.els.tokChip = $('#tokChip');
+}
+
+function cwSyncModel() {
+  if (CW.els.mpName) CW.els.mpName.textContent = effModel() || '—';
+}
+
+function cwRender() {
+  const box = CW.els.msgs;
+  box.innerHTML = '';
+  if (!CW.chat.messages.length) {
+    const hero = document.createElement('div');
+    hero.className = 'cw-hero';
+    hero.innerHTML = '<div class="cw-hero-orb"></div><h2>⌨︎ Code Work</h2>' +
+      '<p>کار را بنویس؛ آتریا <b>خودش</b> در ورک‌اسپیس فایل می‌سازد، می‌نویسد و ویرایش می‌کند — درست مثل کلاد.<br>' +
+      'هر اجرا، <b>مصرف توکن</b> ورودی/خروجی‌اش همان بالا ثبت می‌شود.</p>';
+    box.appendChild(hero);
+    return;
+  }
+  for (const m of CW.chat.messages) {
+    box.appendChild(bubbleEl(m.role === 'user' ? 'user' : 'ai', msgText(m), m.flow || null, m.images));
+  }
+}
+
+function cwSave() {
+  try { localStorage.setItem('atria.codework.v1', JSON.stringify(CW.chat.messages)); } catch (e) {}
+}
+function cwLoad() {
+  try {
+    const raw = localStorage.getItem('atria.codework.v1');
+    if (raw) CW.chat.messages = JSON.parse(raw) || [];
+    const u = localStorage.getItem('atria.usage.v1');
+    if (u) CW.usageTot = JSON.parse(u) || { in: 0, out: 0 };
+  } catch (e) {}
+}
+
+function updateMeters() {
+  const f = (n) => Number(n || 0).toLocaleString('fa-IR');
+  if (CW.els.meter) {
+    CW.els.meter.innerHTML =
+      '◈ ورودی <b>' + f(CW.usageLast.in) + '</b> · ◇ خروجی <b>' + f(CW.usageLast.out) +
+      '</b> · مجموع نشست: <b>' + f((CW.usageTot.in || 0) + (CW.usageTot.out || 0)) + '</b> توکن';
+  }
+  if (CW.els.tokChip) {
+    if (CW.usageLast.in || CW.usageLast.out) {
+      CW.els.tokChip.classList.remove('hidden');
+      CW.els.tokChip.textContent = '◈' + fmtN(CW.usageLast.in) + ' ◇' + fmtN(CW.usageLast.out);
+      CW.els.tokChip.title = 'مصرف توکن آخرین اجرا — ورودی ' + f(CW.usageLast.in) + ' / خروجی ' + f(CW.usageLast.out) +
+        ' — مجموع نشست: ' + f(CW.usageTot.in) + ' ورودی + ' + f(CW.usageTot.out) + ' خروجی';
+    }
+  }
+}
+
+function onUsage(i, o) {
+  i = Number(i) || 0; o = Number(o) || 0;
+  CW.usageLast = { in: i, out: o };
+  CW.usageTot.in = (CW.usageTot.in || 0) + i;
+  CW.usageTot.out = (CW.usageTot.out || 0) + o;
+  try { localStorage.setItem('atria.usage.v1', JSON.stringify(CW.usageTot)); } catch (e) {}
+  updateMeters();
+}
+
+function openModelMenuAt(el) {
+  if (!el || !els.modelMenu) return;
+  renderModelMenu();
+  const m = els.modelMenu;
+  const r = el.getBoundingClientRect();
+  m.classList.remove('hidden');
+  m.style.position = 'fixed';
+  m.style.zIndex = '95';
+  const w = m.offsetWidth || 320;
+  const h = m.offsetHeight || 320;
+  let left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
+  let top = r.top - h - 10;
+  if (top < 8) top = Math.min(r.bottom + 10, Math.max(8, window.innerHeight - h - 8));
+  m.style.left = left + 'px';
+  m.style.top = top + 'px';
+  m.style.bottom = 'auto';
+}
+
+function cwEnter() {
+  if (st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
+  if (!CW.active) {
+    CW.saved = { messages: els.messages, input: els.input, btnSend: els.btnSend, btnStop: els.btnStop };
+    els.messages = CW.els.msgs;
+    els.input = CW.els.input;
+    els.btnSend = CW.els.go;
+    els.btnStop = CW.els.stop;
+    CW.active = true;
+    st.mode = 'code';
+  }
+  CW.els.root.classList.remove('hidden');
+  cwSyncModel();
+  cwRender();
+  updateMeters();
+  CW.els.input.focus();
+}
+
+function cwExit() {
+  if (st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
+  if (CW.els.root) CW.els.root.classList.add('hidden');
+  if (CW.active && CW.saved) {
+    els.messages = CW.saved.messages;
+    els.input = CW.saved.input;
+    els.btnSend = CW.saved.btnSend;
+    els.btnStop = CW.saved.btnStop;
+    CW.saved = null;
+    CW.active = false;
+    st.mode = 'chat';
+    renderHistory();
+    scrollBottom(true);
+  }
+}
+
+const _currentChat = currentChat;
+currentChat = function () { return CW.active ? CW.chat : _currentChat(); };
+const _finishRun = finishRun;
+finishRun = function (a, b) { _finishRun(a, b); if (CW.active) { cwSave(); updateMeters(); } };
+const _chooseModel = chooseModel;
+chooseModel = function (m) { _chooseModel(m); if (typeof cwSyncModel === 'function') cwSyncModel(); };
+
+function cwBoot() {
+  cwRefs();
+  cwLoad();
+  const b = $('#btnCodeWork');
+  if (b) b.onclick = cwEnter;
+  if (CW.els.close) CW.els.close.onclick = cwExit;
+  if (CW.els.go) CW.els.go.onclick = send;
+  if (CW.els.stop) CW.els.stop.onclick = stop;
+  if (CW.els.reveal) CW.els.reveal.onclick = () => {
+    if (window.__atria && window.__atria.reveal_dir) window.__atria.reveal_dir().catch(() => {});
+  };
+  if (CW.els.modelPick) CW.els.modelPick.onclick = (e) => { e.stopPropagation(); openModelMenuAt(CW.els.modelPick); };
+  if (els.modelPick) els.modelPick.addEventListener('click', () => {
+    if (!els.modelMenu.classList.contains('hidden')) openModelMenuAt(els.modelPick);
+  });
+  if (CW.els.input) {
+    CW.els.input.addEventListener('input', autosize);
+    CW.els.input.addEventListener('keydown', (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+  }
+  cwSyncModel();
+  updateMeters();
+}
+document.addEventListener('DOMContentLoaded', cwBoot);
