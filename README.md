@@ -1,5 +1,7 @@
 # آتریا — دستیار هوشمند دسکتاپ 🌅
 
+<p align="center"><img src="docs/hero.png" alt="Atria Dawn" width="100%"></p>
+
 **Atria Dawn** یک اپ دسکتاپ ویندوز برای چت و کار با هوش مصنوعی **آتریا** (مدل `Atria-Dawn-Preview`) است —
 ساخته‌شده با **موتور Rust** و پوستهٔ **Tauri v2**، با طراحی انیمیشنی «طلوع» (Dawn).
 
