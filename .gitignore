@@ -1,0 +1,22 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Node / tooling (not used, but just in case)
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets (defaults live in frontend/app.js for this private repo)
+.env
+*.local
+
+# Logs
+*.log
+
+# Editors
+.vscode/
+.idea/

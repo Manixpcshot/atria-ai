@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>آتریا — دستیار هوشمند</title>
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="frame">
+    <!-- ===== animated dawn background ===== -->
+    <div class="bg" aria-hidden="true">
+      <div class="blob b1"></div>
+      <div class="blob b2"></div>
+      <div class="blob b3"></div>
+      <div class="blob b4"></div>
+      <div id="stars"></div>
+      <div class="grid-overlay"></div>
+      <div class="vignette"></div>
+    </div>
+
+    <!-- ===== titlebar ===== -->
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="brand" data-tauri-drag-region>
+        <div class="logo"><img src="assets/logo.png" alt="آتریا" /></div>
+        <div class="brand-text" data-tauri-drag-region>
+          <span class="brand-name">آتریا</span>
+          <span class="brand-sub">Atria&nbsp;Dawn</span>
+        </div>
+        <span class="model-badge" id="modelBadge" dir="ltr">Atria-Dawn-Preview</span>
+      </div>
+      <div class="titlebar-actions">
+        <button class="tb-btn side-toggle" id="sideToggle" title="گفتگوها">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+        </button>
+        <div class="win-controls">
+          <button class="wc" id="btnMin" title="کمینه"><svg viewBox="0 0 12 12"><path d="M2 6h8" /></svg></button>
+          <button class="wc" id="btnMax" title="بیشینه"><svg viewBox="0 0 12 12"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="1" /></svg></button>
+          <button class="wc wc-close" id="btnClose" title="بستن"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" /></svg></button>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- ===== sidebar ===== -->
+      <aside class="sidebar glass" id="sidebar">
+        <button class="new-chat-btn" id="newChatBtn">
+          <span class="nc-plus">＋</span><span>گفتگوی جدید</span>
+          <span class="nc-glow"></span>
+        </button>
+        <div class="conv-list" id="convList"></div>
+        <div class="side-footer">
+          <button class="side-btn" id="memoryBtn"><span>🧠</span><span>حافظهٔ آتریا</span></button>
+          <button class="side-btn" id="settingsBtn"><span>⚙️</span><span>تنظیمات</span></button>
+          <div class="engine-note"><span class="dot-live"></span> موتور Rust · Tauri v2</div>
+        </div>
+      </aside>
+
+      <!-- ===== chat ===== -->
+      <main class="chat">
+        <div class="messages" id="messages"></div>
+
+        <section class="empty" id="empty">
+          <div class="orb"><img src="assets/logo.png" alt="" /></div>
+          <h1>سلام! من <span class="grad-text">آتریا</span> هستم 👋</h1>
+          <p class="empty-sub">دستیار هوشمند شما با موتور Rust — دقیق حساب می‌کنم، چیزها را یاد می‌گیرم و یادم می‌ماند.</p>
+          <div class="suggestions" id="suggestions">
+            <button class="chip">خودت رو برای من معرفی کن ✨</button>
+            <button class="chip">الان ساعت چنده؟ ⏰</button>
+            <button class="chip">(17*24+3) رو حساب کن 🧮</button>
+            <button class="chip">یک ایمیل رسمی فارسی برای درخواست کار بنویس ✍️</button>
+          </div>
+        </section>
+
+        <button class="scroll-btn hidden" id="scrollBtn" title="رفتن به انتها">↓</button>
+
+        <form class="composer glass" id="composer">
+          <textarea id="input" rows="1" placeholder="پیام خود را بنویسید… (Enter ارسال · Shift+Enter سطر جدید)"></textarea>
+          <button type="submit" class="send-btn" id="sendBtn" title="ارسال">
+            <svg viewBox="0 0 24 24"><path d="M12 20V6M6 11l6-6 6 6" /></svg>
+          </button>
+          <button type="button" class="stop-btn hidden" id="stopBtn" title="توقف تولید">
+            <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+          </button>
+        </form>
+      </main>
+    </div>
+  </div>
+
+  <!-- ===== settings modal ===== -->
+  <div class="modal-backdrop hidden" id="settingsModal">
+    <div class="modal glass">
+      <div class="modal-head">
+        <h2>⚙️ تنظیمات</h2>
+        <button class="x" data-close="settingsModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span class="flabel">کلید API</span>
+          <div class="key-row">
+            <input type="password" id="setApiKey" dir="ltr" autocomplete="off" spellcheck="false" />
+            <button type="button" class="eye" id="eyeBtn" title="نمایش">👁</button>
+          </div>
+          <span class="fhint">کلید Atria با پیشوند <b dir="ltr">atr_</b></span>
+        </label>
+        <div class="row2">
+          <label class="field">
+            <span class="flabel">آدرس API</span>
+            <input type="text" id="setBase" dir="ltr" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span class="flabel">مدل</span>
+            <input type="text" id="setModel" dir="ltr" spellcheck="false" />
+          </label>
+        </div>
+        <div class="row2">
+          <label class="field">
+            <span class="flabel">حداکثر توکن پاسخ: <b id="maxTokensVal"></b></span>
+            <input type="range" id="setMaxTokens" min="256" max="16384" step="256" />
+          </label>
+          <label class="field">
+            <span class="flabel">دما (خلاقیت): <b id="tempVal"></b></span>
+            <input type="range" id="setTemp" min="0" max="1" step="0.05" />
+          </label>
+        </div>
+        <div class="row3">
+          <label class="switch-field"><input type="checkbox" id="setTools" /><span class="switch"></span><span>حالت ایجنت (ابزارها)</span></label>
+          <label class="switch-field"><input type="checkbox" id="setStream" /><span class="switch"></span><span>پاسخ زنده (استریم)</span></label>
+          <label class="switch-field"><input type="checkbox" id="setThink" /><span class="switch"></span><span>نمایش تفکر</span></label>
+        </div>
+        <label class="field">
+          <span class="flabel">پرامپت سیستم</span>
+          <textarea id="setSystem" rows="6" spellcheck="false"></textarea>
+        </label>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" id="resetCfg">بازنشانی پیش‌فرض‌ها</button>
+        <div class="spacer"></div>
+        <button class="btn ghost" data-close="settingsModal">انصراف</button>
+        <button class="btn primary" id="saveCfg">ذخیره</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== memory modal ===== -->
+  <div class="modal-backdrop hidden" id="memoryModal">
+    <div class="modal glass">
+      <div class="modal-head">
+        <h2>🧠 حافظهٔ آتریا</h2>
+        <button class="x" data-close="memoryModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="fhint">یادداشت‌هایی که آتریا با ابزار <b>remember</b> ذخیره کرده — با <b>recall</b> بازیابی می‌شوند.</p>
+        <div id="memList" class="mem-list"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn danger" id="memClear">پاک کردن همه</button>
+        <div class="spacer"></div>
+        <button class="btn ghost" data-close="memoryModal">بستن</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script src="md.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

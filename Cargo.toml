@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/atria-core", "crates/atria-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Atria Desktop contributors"]
+repository = "https://github.com/Manixpcshot/atria-ai"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
+panic = "abort"
