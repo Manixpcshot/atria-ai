@@ -192,6 +192,12 @@ fn emit_agent_event(app: &AppHandle, ev: AgentEvent) {
                 serde_json::json!({ "id": id, "name": name, "label": label, "input": input }),
             );
         }
+        AgentEvent::Retry { attempt, message } => {
+            let _ = app.emit(
+                "atria:retry",
+                serde_json::json!({ "attempt": attempt, "message": message }),
+            );
+        }
         AgentEvent::ToolEnd { id, name, label, ok, output } => {
             let _ = app.emit(
                 "atria:tool_end",

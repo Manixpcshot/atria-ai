@@ -8,10 +8,13 @@ const $ = (s) => document.querySelector(s);
 const PROVIDERS = {
   'atria':      { label: 'آتریا — Messages API',     base: 'https://api.atria-asi.ai',                                kind: 'anthropic', model: 'Atria-Dawn-Preview' },
   'atria-cc':   { label: 'آتریا — Chat Completions', base: 'https://api.atria-asi.ai',                                kind: 'openai',    model: 'Atria-Dawn-Preview' },
+  'claude':     { label: 'Anthropic (Claude)',       base: 'https://api.anthropic.com',                               kind: 'anthropic', model: 'claude-sonnet-4-6' },
   'openai':     { label: 'OpenAI',                   base: 'https://api.openai.com/v1',                               kind: 'openai',    model: 'gpt-4o-mini' },
-  'gemini':     { label: 'Google Gemini',            base: 'https://generativelanguage.googleapis.com/v1beta/openai', kind: 'openai',    model: 'gemini-2.5-flash' },
+  'gemini':     { label: 'Google Gemini',            base: 'https://generativelanguage.googleapis.com/v1beta/openai', kind: 'openai',    model: 'gemini-3.8-flash' },
   'groq':       { label: 'Groq',                     base: 'https://api.groq.com/openai/v1',                          kind: 'openai',    model: 'llama-3.3-70b-versatile' },
+  'xai':        { label: 'xAI (Grok)',               base: 'https://api.x.ai/v1',                                     kind: 'openai',    model: 'grok-4' },
   'deepseek':   { label: 'DeepSeek',                 base: 'https://api.deepseek.com/v1',                             kind: 'openai',    model: 'deepseek-chat' },
+  'mistral':    { label: 'Mistral',                  base: 'https://api.mistral.ai/v1',                               kind: 'openai',    model: 'mistral-large-latest' },
   'openrouter': { label: 'OpenRouter',               base: 'https://openrouter.ai/api/v1',                            kind: 'openai',    model: 'openrouter/auto' },
   'custom':     { label: 'سفارشی…',                   base: '',                                                        kind: 'openai',    model: '' },
 };
@@ -448,6 +451,10 @@ function send() {
   autosize();
   scrollBottom();
 
+  startTurn();
+}
+
+function startTurn() {
   st.sending = true;
   st.runText = '';
   st.streamEl = null;
@@ -459,6 +466,7 @@ function send() {
   els.btnSend.classList.add('hidden');
   els.btnStop.classList.remove('hidden');
 
+  const chat = currentChat();
   const history = chat.messages.map((m) => ({
     role: m.role === 'user' ? 'user' : 'assistant',
     content: [{ type: 'text', text: msgText(m) }],
@@ -482,6 +490,17 @@ function send() {
       messages: history,
     },
   }).catch((e) => failRun(e && e.message ? e.message : String(e)));
+}
+
+function retryLast() {
+  if (st.sending) return;
+  if (st.failedWrap && st.failedWrap.parentNode) st.failedWrap.parentNode.removeChild(st.failedWrap);
+  st.failedWrap = null;
+  if (st.streamEl) {
+    const msg = st.streamEl.closest('.msg');
+    if (msg && msg.parentNode) msg.parentNode.removeChild(msg);
+  }
+  startTurn();
 }
 
 function stop() { window.__atria.chat_stop(); }
@@ -531,10 +550,12 @@ function failRun(msg) {
   if (st.streamEl) {
     st.streamEl.classList.remove('streaming');
     const e = document.createElement('div');
-    e.className = 'tool-out';
-    e.style.borderColor = 'rgba(248,113,113,.35)';
-    e.textContent = 'خطا: ' + msg;
+    e.className = 'err-card';
+    e.innerHTML = '<div class="err-text"></div><button class="btn primary retry-btn">🔄 تلاش مجدد</button>';
+    e.querySelector('.err-text').textContent = 'خطا: ' + msg;
+    e.querySelector('.retry-btn').onclick = retryLast;
     st.stackEl.appendChild(e);
+    st.failedWrap = e;
     scrollBottom();
   }
   toast('خطا: ' + msg, 'err');
@@ -586,6 +607,16 @@ function listenEvents() {
     lastCard = st.stackEl.lastElementChild;
   });
   t.listen('atria:tool_end', (e) => onToolEnd(lastCard, e.payload.ok, e.payload.output));
+  t.listen('atria:retry', (e) => {
+    closeLive();
+    if (st.stackEl) {
+      const r = document.createElement('div');
+      r.className = 'round-chip';
+      r.textContent = '↻ تلاش مجدد (' + e.payload.attempt + ' از ۳)…';
+      st.stackEl.appendChild(r);
+      scrollBottom(true);
+    }
+  });
   t.listen('atria:done', (e) => finishRun(e.payload.new_messages, e.payload.final_text));
   t.listen('atria:error', (e) => failRun(e.payload.message || 'unknown'));
   t.listen('atria:stopped', () => { failRun('متوقف شد'); toast('تولید متوقف شد', 'warn'); });
@@ -659,11 +690,14 @@ function renderModelMenu() {
       ['atria', 'Atria-Dawn-Preview', 'Messages API'],
       ['atria-cc', 'Atria-Dawn-Preview', 'Chat Completions'],
     ]],
-    ['پروایدرهای جهانی', [
+    ['کلاد و پروایدرهای جهانی', [
+      ['claude', 'claude-sonnet-4-6', 'Anthropic'],
       ['openai', 'gpt-4o-mini', 'OpenAI'],
-      ['gemini', 'gemini-2.5-flash', 'Google Gemini'],
+      ['gemini', 'gemini-3.8-flash', 'Google Gemini'],
       ['groq', 'llama-3.3-70b-versatile', 'Groq'],
+      ['xai', 'grok-4', 'xAI Grok'],
       ['deepseek', 'deepseek-chat', 'DeepSeek'],
+      ['mistral', 'mistral-large-latest', 'Mistral'],
       ['openrouter', 'openrouter/auto', 'OpenRouter'],
     ]],
   ];
