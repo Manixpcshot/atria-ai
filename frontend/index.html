@@ -220,6 +220,30 @@
 
   <div class="toasts" id="toasts"></div>
 
+  <script>
+  /* Tauri IPC bridge — window.__atria (v0.2.2) */
+  (function () {
+    var T = window.__TAURI__ || {};
+    function invoke(cmd, args) {
+      return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+    }
+    function listen(name, cb) {
+      return T.event.listen(name, function (e) { cb({ payload: e.payload }); });
+    }
+    window.__atria = {
+      invoke: invoke,
+      listen: listen,
+      chat_send: function (a) { return invoke('chat_send', a); },
+      chat_stop: function () { return invoke('chat_stop'); },
+      memory_list: function () { return invoke('memory_list'); },
+      memory_clear: function () { return invoke('memory_clear'); },
+      app_meta: function () { return invoke('app_meta'); },
+      minimize_win: function () { return invoke('minimize_win'); },
+      maximize_win: function () { return invoke('maximize_win'); },
+      close_win: function () { return invoke('close_win'); }
+    };
+  })();
+  </script>
   <script src="md.js"></script>
   <script src="app.js"></script>
 </body>

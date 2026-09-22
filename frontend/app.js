@@ -94,7 +94,12 @@ function cacheEls() {
 /* ---------------- helpers ---------------- */
 
 function invokeCmd(name, args) {
-  return window.__atria.invoke(name, args || {}).catch((e) => { toast(String(e), 'err'); });
+  try {
+    return window.__atria.invoke(name, args || {}).catch((e) => { toast(String(e), 'err'); });
+  } catch (e) {
+    toast('پل ارتباطی IPC آماده نیست: ' + e, 'err');
+    return Promise.reject(e);
+  }
 }
 
 function toast(msg, kind) {
@@ -309,7 +314,9 @@ function ensureThink() {
   const box = document.createElement('div');
   box.className = 'think-box has';
   box.innerHTML =
-    '<button class="think-head"><span class="chev">▾</span><span class="think-title">در حال فکر کردن…</span></button>' +
+    '<button class="think-head"><span class="think-orb"></span><span class="chev">▾</span>' +
+    '<span class="think-title">در حال فکر کردن…</span>' +
+    '<span class="dots"><i></i><i></i><i></i></span></button>' +
     '<div class="think-body"></div>';
   box.querySelector('.think-head').onclick = () => box.classList.toggle('open');
   st.stackEl.appendChild(box);
@@ -428,6 +435,9 @@ function send() {
   els.btnStop.classList.remove('hidden');
 
   const history = chat.messages.map((m) => ({ role: m.role, content: m.text }));
+  if (!window.__atria || !window.__atria.chat_send) {
+    return failRun('پل ارتباطی IPC آماده نیست — برنامه را دوباره باز کن');
+  }
   window.__atria.chat_send({
     payload: {
       api_key: st.settings.api_key,
@@ -623,6 +633,9 @@ function boot() {
   els.btnMin.onclick = () => invokeCmd('minimize_win');
   els.btnMax.onclick = () => invokeCmd('maximize_win');
   els.btnClose.onclick = () => invokeCmd('close_win');
+  // جلوگیری از بلعیده‌شدن کلیک توسط ناحیهٔ drag تایتل‌بار
+  document.querySelectorAll('.win-controls, .titlebar-actions, .brand').forEach((el) =>
+    el.addEventListener('mousedown', (e) => e.stopPropagation()));
 
   els.settingsX.onclick = () => closeModal(els.settingsModal);
   els.settingsClose.onclick = () => closeModal(els.settingsModal);
@@ -667,7 +680,10 @@ function boot() {
   });
   autosize();
 
-  listenEvents();
+  try { listenEvents(); } catch (e) {
+    console.error(e);
+    toast('پل ارتباطی IPC آماده نیست — برنامه را دوباره باز کن', 'err');
+  }
 
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {

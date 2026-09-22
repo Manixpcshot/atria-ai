@@ -108,6 +108,8 @@ impl AtriaClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
             .pool_idle_timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(12))
+            .read_timeout(std::time::Duration::from_secs(45))
             .build()
             .expect("build http client");
         Self { http }
