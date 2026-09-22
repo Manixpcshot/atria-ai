@@ -399,6 +399,24 @@ function closeLive() {
   if (st.live) { st.live.done(); st.live = null; }
 }
 
+/* ---------------- wire helpers ---------------- */
+
+// Extract visible text from either a stored message ({plain|text}) or a
+// wire message from Rust ({content:[{type:'text',...}]}).
+function msgText(m) {
+  if (!m) return '';
+  if (typeof m === 'string') return m;
+  if (typeof m.plain === 'string' && m.plain) return m.plain;
+  if (typeof m.text === 'string' && m.text) return m.text;
+  if (Array.isArray(m.content)) {
+    return m.content
+      .filter((b) => b && b.type === 'text')
+      .map((b) => b.text || '')
+      .join('\n');
+  }
+  return '';
+}
+
 /* ---------------- send flow ---------------- */
 
 function send() {
@@ -434,7 +452,10 @@ function send() {
   els.btnSend.classList.add('hidden');
   els.btnStop.classList.remove('hidden');
 
-  const history = chat.messages.map((m) => ({ role: m.role, content: m.text }));
+  const history = chat.messages.map((m) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: [{ type: 'text', text: msgText(m) }],
+  }));
   if (!window.__atria || !window.__atria.chat_send) {
     return failRun('پل ارتباطی IPC آماده نیست — برنامه را دوباره باز کن');
   }
@@ -524,12 +545,9 @@ function finishRun(newMessages, finalText) {
   const plain = finalText && finalText.trim() ? finalText : st.runText || '(پاسخ خالی)';
   if (newMessages && newMessages.length) {
     for (const m of newMessages) {
-      chat.messages.push({
-        role: m.role === 'user' ? 'user' : 'ai',
-        text: m.text || m.plain || '',
-        plain: m.plain || m.text || '',
-        ts: Date.now(),
-      });
+      const t = msgText(m);
+      if (!t.trim()) continue; // skip tool/think-only messages
+      chat.messages.push({ role: m.role === 'user' ? 'user' : 'ai', text: t, plain: t, ts: Date.now() });
     }
   } else {
     chat.messages.push({ role: 'ai', text: st.runText || plain, plain, ts: Date.now() });

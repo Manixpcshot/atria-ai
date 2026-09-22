@@ -84,7 +84,18 @@ impl Block {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Message {
     pub role: Role,
+    /// Block array on the wire; a plain string is accepted too (lenient).
+    #[serde(deserialize_with = "de_blocks")]
     pub content: Vec<Block>,
+}
+
+/// Accept `content` as either a block array or a plain string.
+fn de_blocks<'de, D>(d: D) -> Result<Vec<Block>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(Block::from_api_array(&v))
 }
 
 impl Message {
