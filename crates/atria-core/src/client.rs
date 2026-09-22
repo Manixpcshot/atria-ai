@@ -144,7 +144,7 @@ impl AtriaClient {
             body["stream"] = Value::Bool(true);
         }
 
-        let url = format!("{}/v1/messages", cfg.base_url.trim_end_matches('/'));
+        let url = messages_url(&cfg.base_url);
         let resp = self
             .http
             .post(&url)
@@ -160,7 +160,7 @@ impl AtriaClient {
             let text = resp.text().await.unwrap_or_default();
             return Err(CoreError::Api {
                 status: status.as_u16(),
-                message: extract_error(&text),
+                message: format!("{} [{}]", extract_error(&text), url),
             });
         }
 
@@ -335,6 +335,21 @@ fn turn_from_value(v: &Value) -> Turn {
     }
 }
 
+/// Normalize a user-entered base URL to the full Messages endpoint.
+/// Accepts `https://host`, `https://host/`, `https://host/v1`,
+/// `https://host/v1/messages`, `https://host/messages` — all resolve to
+/// `https://host/v1/messages`.
+pub fn messages_url(base: &str) -> String {
+    let mut b = base.trim().trim_end_matches('/').to_string();
+    for suffix in ["/v1/messages", "/messages", "/v1"] {
+        if b.ends_with(suffix) {
+            b.truncate(b.len() - suffix.len());
+            break;
+        }
+    }
+    format!("{}/v1/messages", b.trim_end_matches('/'))
+}
+
 pub(crate) fn extract_error(text: &str) -> String {
     if let Ok(v) = serde_json::from_str::<Value>(text) {
         if let Some(m) = v.pointer("/error/message").and_then(Value::as_str) {
@@ -375,5 +390,47 @@ pub fn strip_thinking(messages: &mut [Message]) {
         if m.content.is_empty() {
             m.content.push(Block::Text { text: "(continue)".to_string() });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn messages_url_normalizes() {
+        for base in [
+            "https://api.atria-asi.ai",
+            "https://api.atria-asi.ai/",
+            "https://api.atria-asi.ai/v1",
+            "https://api.atria-asi.ai/v1/messages",
+            "https://api.atria-asi.ai/messages",
+        ] {
+            assert_eq!(messages_url(base), "https://api.atria-asi.ai/v1/messages", "{base}");
+        }
+    }
+
+    #[test]
+    fn chat_url_normalizes() {
+        assert_eq!(
+            crate::openai::chat_completions_url("https://api.atria-asi.ai"),
+            "https://api.atria-asi.ai/v1/chat/completions"
+        );
+        assert_eq!(
+            crate::openai::chat_completions_url("https://api.atria-asi.ai/v1"),
+            "https://api.atria-asi.ai/v1/chat/completions"
+        );
+        assert_eq!(
+            crate::openai::chat_completions_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            crate::openai::chat_completions_url("https://api.atria-asi.ai/v1/chat/completions"),
+            "https://api.atria-asi.ai/v1/chat/completions"
+        );
+        assert_eq!(
+            crate::openai::chat_completions_url("https://generativelanguage.googleapis.com/v1beta/openai"),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
     }
 }

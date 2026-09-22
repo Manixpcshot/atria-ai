@@ -19,6 +19,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// HTTP client for `POST /v1/chat/completions`.
+/// Normalize a user-entered base URL to the full Chat Completions endpoint.
+/// Accepts bare hosts (`https://api.atria-asi.ai` → `/v1/chat/completions`),
+/// versioned bases (`https://api.openai.com/v1`, Gemini's `/v1beta/openai`),
+/// and full endpoints (kept as-is).
+pub fn chat_completions_url(base: &str) -> String {
+    let b = base.trim().trim_end_matches('/').to_string();
+    if b.ends_with("/chat/completions") {
+        return b;
+    }
+    let after_scheme = b.split_once("://").map(|(_, r)| r).unwrap_or(&b);
+    if !after_scheme.contains('/') {
+        // bare host — assume the standard /v1 prefix
+        return format!("{b}/v1/chat/completions");
+    }
+    format!("{b}/chat/completions")
+}
+
+/// HTTP client for `POST /chat/completions`.
 pub struct OpenAiClient {
     http: reqwest::Client,
 }
@@ -68,7 +86,7 @@ impl OpenAiClient {
             body["stream"] = Value::Bool(true);
         }
 
-        let url = format!("{}/v1/chat/completions", cfg.base_url.trim_end_matches('/'));
+        let url = chat_completions_url(&cfg.base_url);
         let resp = self
             .http
             .post(&url)
@@ -83,7 +101,7 @@ impl OpenAiClient {
             let text = resp.text().await.unwrap_or_default();
             return Err(CoreError::Api {
                 status: status.as_u16(),
-                message: extract_error(&text),
+                message: format!("{} [{}]", extract_error(&text), url),
             });
         }
 
