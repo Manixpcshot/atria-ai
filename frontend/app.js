@@ -75,8 +75,8 @@ function loadSettings() {
 }
 function saveSettings() {
   localStorage.setItem(LS_SETTINGS, JSON.stringify(st.settings));
-  els.modelChip.textContent = st.settings.model || '—';
-  if (els.mpName) els.mpName.textContent = st.settings.model || '—';
+  els.modelChip.textContent = effModel() || '—';
+  if (els.mpName) els.mpName.textContent = effModel() || '—';
 }
 function loadChats() {
   try { return JSON.parse(localStorage.getItem(LS_CHATS) || '[]'); } catch { return []; }
@@ -97,9 +97,13 @@ async function flushChats() {
   for (const c of st.chats) if (dirtyChats.has(c.id)) files.push({ id: c.id, data: JSON.stringify(c) });
   const remove = Array.from(goneChats);
   if (!files.length && !remove.length) return;
-  dirtyChats.clear();
-  goneChats.clear();
-  try { await window.__atria.chats_sync({ files, remove }); } catch {}
+  try {
+    await window.__atria.chats_sync({ files, remove });
+    for (const f of files) dirtyChats.delete(f.id);
+    for (const id of remove) goneChats.delete(id);
+  } catch {
+    setTimeout(() => { if (!flushTimer) scheduleFlush(); }, 2500);
+  }
 }
 function removeChatFile(id) { goneChats.add(id); dirtyChats.delete(id); scheduleFlush(); }
 function wipeChats() {
@@ -195,6 +199,7 @@ function normConn(c) {
     kind: c.kind === 'deepseek_web' ? 'deepseek_web' : c.kind === 'openai' ? 'openai' : 'anthropic',
     base: String(c.base || ''),
     key: String(c.key || ''),
+    lastModel: String(c.lastModel || ''),
     models: Array.isArray(c.models) ? c.models.map(String).filter(Boolean) : [],
   };
 }
@@ -233,9 +238,12 @@ function setActiveConn(id) {
   st.activeConnId = id || '';
   localStorage.setItem(LS_ACTIVE_CONN, st.activeConnId);
   const c = activeConn();
-  if (c && c.models.length && !c.models.includes(st.settings.model)) {
-    st.settings.model = c.models[0];
-    saveSettings();
+  if (c) {
+    const m = (c.lastModel && c.models.includes(c.lastModel)) ? c.lastModel : (c.models[0] || '');
+    if (m !== st.settings.model) {
+      st.settings.model = m;
+      saveSettings();
+    }
   }
   updateModelPick();
   updateConnTab();
@@ -827,6 +835,41 @@ function msgText(m) {
   return '';
 }
 
+/* ---------------- effective model + history window ---------------- */
+
+// مدل مؤثرِ اتصال فعال: انتخاب فعلی اگر مجاز باشد، وگرنه آخرین مدل همین اتصال، وگرنه اولی
+function effModel() {
+  const conn = activeConn();
+  if (!conn) return st.settings.model || '';
+  if (st.settings.model && conn.models.includes(st.settings.model)) return st.settings.model;
+  if (conn.lastModel && conn.models.includes(conn.lastModel)) return conn.lastModel;
+  return conn.models[0] || '';
+}
+
+// پنجرهٔ تاریخچه: چت‌های بلند را سبک می‌کند تا صف/مهلت گیت‌وی‌های محلی (OmniRoute) نفس بکشد
+const MAX_CTX_CHARS = 120000;
+const MAX_CTX_MSGS = 48;
+function buildHistory(chat) {
+  const all = chat.messages.map((m) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: [{ type: 'text', text: msgText(m) }],
+  }));
+  let chars = 0;
+  const kept = [];
+  for (let i = all.length - 1; i >= 0; i--) {
+    const len = ((all[i].content[0] && all[i].content[0].text) || '').length;
+    if (kept.length && (kept.length >= MAX_CTX_MSGS || chars + len > MAX_CTX_CHARS)) break;
+    kept.unshift(all[i]);
+    chars += len;
+  }
+  // نقش آغازین باید user باشد
+  while (kept.length > 1 && kept[0].role !== 'user') kept.shift();
+  return { hist: kept, dropped: all.length - kept.length };
+}
+
+// خطاهای موقت (شلوغی صف/مهلت گیت‌وی) که ارزش راهنمای «تلاش دوباره» را دارند
+const TRANSIENT_RE = /(maxwaitms|rate.?limit|ratelimit|queue|expiration|timeout|timed out|overloaded|temporarily|try again|too many requests|\[50[234]\]|\[429\])/i;
+
 /* ---------------- send flow ---------------- */
 
 function send() {
@@ -843,6 +886,14 @@ function send() {
   if (!conn.key) {
     openConns(conn.id);
     return toast('کلید/توکن اتصال «' + conn.name + '» را وارد کن', 'warn');
+  }
+  if (conn.kind === 'openai' && !conn.base) {
+    openConns(conn.id);
+    return toast('آدرس پایه (Base URL) اتصال «' + conn.name + '» خالی است', 'warn');
+  }
+  if (conn.kind !== 'deepseek_web' && !effModel()) {
+    openConns(conn.id);
+    return toast('برای اتصال «' + conn.name + '» هنوز مدلی تعیین نکرده‌ای', 'warn');
   }
 
   chat.messages.push({ role: 'user', text, plain: text, ts: Date.now() });
@@ -874,10 +925,10 @@ function startTurn() {
   els.btnStop.classList.remove('hidden');
 
   const chat = currentChat();
-  const history = chat.messages.map((m) => ({
-    role: m.role === 'user' ? 'user' : 'assistant',
-    content: [{ type: 'text', text: msgText(m) }],
-  }));
+  const { hist: history, dropped } = buildHistory(chat);
+  if (dropped > 0) {
+    toast('به‌خاطر طول گفتگو، ' + dropped + ' پیام قدیمی‌تر برای مدل فرستاده نشد (متن‌ها در برنامه می‌مانند)', 'warn');
+  }
   if (!window.__atria || !window.__atria.chat_send) {
     return failRun('پل ارتباطی IPC آماده نیست — برنامه را دوباره باز کن');
   }
@@ -885,8 +936,8 @@ function startTurn() {
   window.__atria.chat_send({
     payload: {
       api_key: conn ? conn.key : '',
-      base_url: conn ? conn.base : '',
-      model: st.settings.model || (conn && conn.models[0]) || 'Atria-Dawn-Preview',
+      base_url: (conn && conn.base) || (conn && conn.kind === 'anthropic' ? 'https://api.anthropic.com' : conn && conn.kind === 'deepseek_web' ? 'https://chat.deepseek.com' : ''),
+      model: effModel() || 'Atria-Dawn-Preview',
       max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 4096)),
       temperature: Number(st.settings.temp),
       system: st.settings.system || '',
@@ -1224,7 +1275,11 @@ function failRun(msg) {
     const e = document.createElement('div');
     e.className = 'err-card';
     e.innerHTML = '<div class="err-text"></div><button class="btn primary retry-btn">🔄 تلاش مجدد</button>';
-    e.querySelector('.err-text').textContent = 'خطا: ' + msg;
+    let shown = 'خطا: ' + msg;
+    if (TRANSIENT_RE.test(String(msg))) {
+      shown += '\n\n💡 این خطا معمولاً موقتی است (شلوغی صف/مهلت گیت‌وی) — «تلاش مجدد» بزن. اگر باز هم تکرار شد، گفتگوی جدید باز کن تا تاریخچه سبک شود.';
+    }
+    e.querySelector('.err-text').textContent = shown;
     e.querySelector('.retry-btn').onclick = retryLast;
     st.stackEl.appendChild(e);
     st.failedWrap = e;
@@ -1253,6 +1308,10 @@ function finishRun(newMessages, finalText) {
       pushed.push(chat.messages[chat.messages.length - 1]);
     }
   } else {
+    chat.messages.push({ role: 'ai', text: st.runText || plain, plain, ts: Date.now() });
+    pushed.push(chat.messages[chat.messages.length - 1]);
+  }
+  if (!pushed.length) {
     chat.messages.push({ role: 'ai', text: st.runText || plain, plain, ts: Date.now() });
     pushed.push(chat.messages[chat.messages.length - 1]);
   }
@@ -1348,7 +1407,7 @@ function renderCmdkList(q) {
 /* ---------------- model picker + mode chips (Claude-like bar) ---------------- */
 
 function updateModelPick() {
-  els.mpName.textContent = st.settings.model || '—';
+  els.mpName.textContent = effModel() || '—';
 }
 
 function closeModelMenu() { els.modelMenu.classList.add('hidden'); }
@@ -1442,6 +1501,8 @@ function renderModelMenu() {
 
 function chooseModel(model) {
   st.settings.model = model;
+  const cc = activeConn();
+  if (cc) { cc.lastModel = model; saveConns(); }
   saveSettings();
   updateModelPick();
   closeModelMenu();
@@ -1521,7 +1582,10 @@ function boot() {
   syncChips();
   updateConnTab();
   restoreFromDisk();
-  window.addEventListener('beforeunload', () => { if (flushTimer) { clearTimeout(flushTimer); flushChats(); } });
+  window.addEventListener('beforeunload', () => {
+    try { saveConns(); saveSettings(); } catch {}
+    if (flushTimer) { clearTimeout(flushTimer); flushChats(); }
+  });
   document.addEventListener('visibilitychange', () => { if (document.hidden && (dirtyChats.size || goneChats.size)) flushChats(); });
   els.modelPick.onclick = (e) => {
     e.stopPropagation();

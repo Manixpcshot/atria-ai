@@ -40,11 +40,34 @@ pub struct AgentOutput {
 }
 
 /// Transient failures worth retrying: network errors, timeouts, rate limits
-/// and gateway hiccups (5xx).
+/// and gateway hiccups (5xx) — plus "soft" queue/expiry errors that some
+/// gateways (e.g. OmniRoute) hide behind a misleading HTTP 400:
+/// `[504]: Request exceeded ... requestQueue.maxWaitMs ...`.
 fn is_retryable(e: &CoreError) -> bool {
     match e {
         CoreError::Http(_) => true,
-        CoreError::Api { status, .. } => matches!(status, 408 | 429 | 500 | 502 | 503 | 504),
+        CoreError::Api { status, message } => {
+            if matches!(status, 408 | 425 | 429 | 500 | 502 | 503 | 504 | 522 | 524 | 529) {
+                return true;
+            }
+            let m = message.to_lowercase();
+            m.contains("maxwaitms")
+                || m.contains("rate-limit")
+                || m.contains("rate limit")
+                || m.contains("ratelimit")
+                || m.contains("too many requests")
+                || m.contains("queue")
+                || m.contains("expiration")
+                || m.contains("timeout")
+                || m.contains("timed out")
+                || m.contains("overloaded")
+                || m.contains("temporarily")
+                || m.contains("try again")
+                || m.contains("[502]")
+                || m.contains("[503]")
+                || m.contains("[504]")
+                || m.contains("[429]")
+        }
         CoreError::Stopped => false,
     }
 }
@@ -166,5 +189,40 @@ mod tests {
         strip_thinking(&mut msgs);
         assert!(msgs[0].content.iter().all(|b| !matches!(b, Block::Thinking { .. })));
         assert_eq!(msgs[0].content.len(), 1); // placeholder
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::is_retryable;
+    use crate::client::CoreError;
+
+    fn api(status: u16, message: &str) -> CoreError {
+        CoreError::Api { status, message: message.to_string() }
+    }
+
+    #[test]
+    fn retries_gateway_status_codes() {
+        for st in [408u16, 429, 500, 502, 503, 504] {
+            assert!(is_retryable(&api(st, "x")), "status {st} should retry");
+        }
+    }
+
+    #[test]
+    fn retries_soft_queue_timeouts_hidden_in_400() {
+        // The reported OmniRoute bottleneck error: HTTP 400 wrapping a local [504].
+        let e = api(400, "[504]: Request exceeded OmniRoute's local rate-limit execution expiration (legacy resilienceSettings.requestQueue.maxWaitMs=15000ms)");
+        assert!(is_retryable(&e));
+        assert!(is_retryable(&api(400, "Rate limit exceeded, please try again")));
+        assert!(is_retryable(&api(400, "upstream timeout while waiting in queue")));
+        assert!(is_retryable(&api(503, "The service is temporarily overloaded")));
+    }
+
+    #[test]
+    fn does_not_retry_real_client_errors() {
+        assert!(!is_retryable(&api(400, "invalid model id")));
+        assert!(!is_retryable(&api(401, "invalid api key")));
+        assert!(!is_retryable(&api(404, "model not found")));
+        assert!(!is_retryable(&CoreError::Stopped));
     }
 }

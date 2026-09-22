@@ -1048,3 +1048,5 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   font-size: 10.5px; color: var(--ink); user-select: all;
   word-break: break-all; line-height: 1.7;
 }
+
+.err-text { white-space: pre-line; }
