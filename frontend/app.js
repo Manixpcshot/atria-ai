@@ -23,6 +23,15 @@ const CONN_TEMPLATES = {
 
 /* ---------------- state ---------------- */
 
+// شخصیت پیش‌فرض: هویت «آتریا» + رفتارِ یک مدل واقعی (بدون سلام‌های تکراری و بدون بی‌هویتی)
+const PERSONA = [
+  'من «آتریا» هستم — دستیار هوشمند آتریا (Atria)، ساخته‌شده روی مدل Atria-Dawn.',
+  'اگر نام یا هویتم را پرسیدند، دقیقاً همین را بگو: «آتریا»؛ نگو که بی‌نام یا صرفاً یک دستیار معمولی‌ام، و نام مدل‌های دیگر (مثل ChatGPT یا Claude یا DeepSeek) را برای خودم قبول نکن.',
+  'مثل مدل‌های واقعی رفتار کن: جواب را مستقیم و طبیعی بده. لازم نیست در هر پیام سلام و احوالپرسی یا تعارف تکراری کنی — فقط اگر کاربر در آغاز گفتگو سلام کرد، کوتاه جواب سلام بده و برو سر اصل مطلب.',
+  'خلاصه، دقیق و کاربردی باش؛ به‌جای عذرخواهی‌های مکرر راه‌حل بده و چیزی را که نمی‌دانی ادعا نکن.',
+].join('\n');
+const LS_PERSONA = 'atria.persona.v1';
+
 const DEFAULTS = {
   provider: 'atria',
   api_key: '',
@@ -33,7 +42,7 @@ const DEFAULTS = {
   mem: true,
   temp: 0.7,
   stream: true,
-  system: '',
+  system: PERSONA,
   max_tokens: 4096,
   tools_enabled: true,
   file_tools: true,
@@ -229,6 +238,16 @@ function migrateConns() {
   }
   st.conns = list;
   saveConns();
+}
+
+// یک‌بار: اگر system خالی است، شخصیت آتریا را بگذار (بعداً پاک‌کردنِ عمدیِ کاربر می‌ماند)
+function migratePersona() {
+  if (localStorage.getItem(LS_PERSONA)) return;
+  if (!st.settings.system || !st.settings.system.trim()) {
+    st.settings.system = PERSONA;
+    saveSettings();
+  }
+  localStorage.setItem(LS_PERSONA, '1');
 }
 
 function activeConn() {
@@ -607,6 +626,16 @@ function scrollBottom(instant) {
 /* ---------------- settings ---------------- */
 
 function bindSettings() {
+  // تب‌های بالای تنظیمات (اتصال/رفتار/سیستم) — سیم‌کشی جابه‌جایی پنل‌ها
+  document.querySelectorAll('.stab').forEach((b) => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.stab').forEach((x) => x.classList.remove('active'));
+      document.querySelectorAll('.stab-body').forEach((x) => x.classList.remove('active'));
+      b.classList.add('active');
+      const body = document.querySelector('.stab-body[data-tab="' + b.dataset.tab + '"]');
+      if (body) body.classList.add('active');
+    });
+  });
   els.tempVal.value = st.settings.temp;
   els.tempOut.textContent = Number(st.settings.temp).toFixed(1);
   els.thinkVal.checked = !!st.settings.thinking;
@@ -1519,6 +1548,7 @@ function boot() {
   cacheEls();
   st.conns = loadConns();
   migrateConns();
+  migratePersona();
   st.activeConnId = localStorage.getItem(LS_ACTIVE_CONN) || (st.conns[0] ? st.conns[0].id : '');
   stars();
   bindSettings();
