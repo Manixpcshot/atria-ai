@@ -1,0 +1,48 @@
+name: Windows Build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Build Atria (release)
+        run: cargo build --release -p atria-app
+
+      - name: Run engine tests
+        run: cargo test -p atria-core --release
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist-stage | Out-Null
+          Copy-Item target/release/atria.exe dist-stage/Atria.exe
+          Copy-Item README.md dist-stage/
+          Copy-Item LICENSE dist-stage/
+          Compress-Archive -Path dist-stage/* -DestinationPath Atria-Dawn-win64.zip
+
+      - name: Upload assets to the GitHub release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/atria.exe
+            Atria-Dawn-win64.zip
+          tag_name: ${{ github.ref_name }}
