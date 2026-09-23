@@ -1906,11 +1906,12 @@ function openModelMenuAt(el) {
     const r = el.getBoundingClientRect();
     m.style.position = 'fixed';
     m.style.zIndex = '120';
-    const w = m.offsetWidth || 340;
-    const h = m.offsetHeight || 340;
-    let left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
-    let top = r.bottom + 10;
-    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 10);
+    const w = Math.min(m.offsetWidth || 360, window.innerWidth - 16);
+    const h = Math.min(m.offsetHeight || 360, window.innerHeight - 16);
+    // رابط RTL: لبهٔ راست منو زیر لبهٔ راست دکمه
+    let left = Math.min(Math.max(8, r.right - w), Math.max(8, window.innerWidth - w - 8));
+    let top = r.bottom + 8;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
     m.style.left = left + 'px';
     m.style.top = top + 'px';
     m.style.bottom = 'auto';
