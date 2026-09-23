@@ -1221,3 +1221,66 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   padding: 2px 6px; border-radius: 8px;
 }
 .cw-reveal:hover { background: rgba(56, 130, 246, .15); }
+
+
+/* ================= v0.5.1 — ترمیم Code Work ================= */
+#codeWork.cw { top: 44px; }
+.cw-top-actions { display: flex; align-items: center; gap: 6px; }
+.cw .wc {
+  width: 34px; height: 34px; border-radius: 9px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .12); background: rgba(255, 255, 255, .05);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cw .wc svg { width: 12px; height: 12px; stroke: #cfe4ff; stroke-width: 1.4; fill: none; }
+.cw .wc:hover { background: rgba(255, 255, 255, .12); }
+.cw .wc-close:hover { background: rgba(239, 68, 68, .35); border-color: rgba(239, 68, 68, .6); }
+.cw-tools {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 20px; border-bottom: 1px solid rgba(255, 255, 255, .07);
+}
+.cw-new {
+  padding: 9px 16px; border-radius: 12px; cursor: pointer; font-size: 13px; font-weight: 700;
+  color: #eaf2ff; border: 1px solid rgba(56, 130, 246, .45);
+  background: linear-gradient(180deg, rgba(56, 130, 246, .28), rgba(56, 130, 246, .14));
+}
+.cw-new:hover { box-shadow: 0 0 16px rgba(56, 130, 246, .35); transform: translateY(-1px); }
+.cw-model {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 9px 18px; border-radius: 999px; cursor: pointer;
+  min-width: 240px; font-size: 13.5px; font-weight: 700;
+  color: #eaf2ff; border: 1px solid rgba(167, 139, 250, .45);
+  background: linear-gradient(180deg, rgba(167, 139, 250, .22), rgba(56, 130, 246, .12));
+}
+.cw-model:hover { box-shadow: 0 0 18px rgba(167, 139, 250, .4); transform: translateY(-1px); }
+.cw-model-label {
+  font-size: 10.5px; font-weight: 700; color: #bba7f5; letter-spacing: .4px;
+  padding: 2px 8px; border-radius: 999px; background: rgba(167, 139, 250, .18);
+}
+.cw-model .mp-name { flex: 1 1 auto; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cw-bar { padding: 12px min(8%, 110px) 16px; border-top: 1px solid rgba(255, 255, 255, .07); }
+.cw-input-card {
+  border-radius: 22px; padding: 6px 6px 6px 6px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(255, 255, 255, .06);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .35), 0 0 0 1px rgba(56, 130, 246, .08) inset;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.cw-input-card:focus-within {
+  border-color: rgba(56, 130, 246, .55);
+  box-shadow: 0 12px 38px rgba(0, 0, 0, .4), 0 0 0 3px rgba(56, 130, 246, .18);
+}
+.cw-input-card textarea {
+  width: 100%; min-height: 52px; max-height: 220px; resize: none;
+  padding: 14px 16px 8px; border: 0; background: none; color: #eaf2ff;
+  font: inherit; font-size: 15px; line-height: 1.8; outline: none;
+}
+.cw-bar-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px 8px 14px; }
+.cw-hint { flex: 1 1 auto; font-size: 11px; color: #7f93b3; }
+.cw-bar-btns { display: flex; gap: 8px; }
+.cw-go {
+  padding: 10px 26px !important; border-radius: 14px !important; font-weight: 800; font-size: 14px;
+  background: linear-gradient(135deg, #3882f6, #a78bfa) !important;
+  box-shadow: 0 6px 20px rgba(56, 130, 246, .4);
+}
+.cw-go:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(56, 130, 246, .55); }
+.cw-msgs { padding: 22px min(8%, 110px); }

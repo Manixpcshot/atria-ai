@@ -1834,7 +1834,7 @@ function cwRender() {
     const hero = document.createElement('div');
     hero.className = 'cw-hero';
     hero.innerHTML = '<div class="cw-hero-orb"></div><h2>⌨︎ Code Work</h2>' +
-      '<p>کار را بنویس؛ آتریا <b>خودش</b> در ورک‌اسپیس فایل می‌سازد، می‌نویسد و ویرایش می‌کند — درست مثل کلاد.<br>' +
+      '<p>کار را بنویس؛ آتریا <b>خودش</b> در ورک‌اسپیس فایل می‌سازد، می‌نویسد و ویرایش می‌کند.<br>' +
       'هر اجرا، <b>مصرف توکن</b> ورودی/خروجی‌اش همان بالا ثبت می‌شود.</p>';
     box.appendChild(hero);
     return;
@@ -1858,16 +1858,18 @@ function cwLoad() {
 
 function updateMeters() {
   const f = (n) => Number(n || 0).toLocaleString('fa-IR');
+  const pfx = CW.usageLast.est ? '~' : '';
   if (CW.els.meter) {
     CW.els.meter.innerHTML =
-      '◈ ورودی <b>' + f(CW.usageLast.in) + '</b> · ◇ خروجی <b>' + f(CW.usageLast.out) +
+      '◈ ورودی <b>' + pfx + f(CW.usageLast.in) + '</b> · ◇ خروجی <b>' + pfx + f(CW.usageLast.out) +
       '</b> · مجموع نشست: <b>' + f((CW.usageTot.in || 0) + (CW.usageTot.out || 0)) + '</b> توکن';
   }
   if (CW.els.tokChip) {
     if (CW.usageLast.in || CW.usageLast.out) {
       CW.els.tokChip.classList.remove('hidden');
-      CW.els.tokChip.textContent = '◈' + fmtN(CW.usageLast.in) + ' ◇' + fmtN(CW.usageLast.out);
-      CW.els.tokChip.title = 'مصرف توکن آخرین اجرا — ورودی ' + f(CW.usageLast.in) + ' / خروجی ' + f(CW.usageLast.out) +
+      CW.els.tokChip.textContent = '◈' + pfx + fmtN(CW.usageLast.in) + ' ◇' + pfx + fmtN(CW.usageLast.out);
+      CW.els.tokChip.title = (CW.usageLast.est ? 'مصرف تخمینی (سرور گزارش توکن نداد) — ' : 'مصرف توکن آخرین اجرا — ') +
+        'ورودی ' + f(CW.usageLast.in) + ' / خروجی ' + f(CW.usageLast.out) +
         ' — مجموع نشست: ' + f(CW.usageTot.in) + ' ورودی + ' + f(CW.usageTot.out) + ' خروجی';
     }
   }
@@ -1875,7 +1877,16 @@ function updateMeters() {
 
 function onUsage(i, o) {
   i = Number(i) || 0; o = Number(o) || 0;
-  CW.usageLast = { in: i, out: o };
+  let est = false;
+  if (!i && !o) {
+    // سرور توکن گزارش نداده (وب دیپ‌سیک یا سرویس بدون usage) — تخمین عادلانه: هر ۳ کاراکتر ≈ ۱ توکن
+    const outChars = (st.runText || '').length;
+    const inChars = outChars + (CW.active ? CW.chat.messages.filter((m) => m.role === 'user').reduce((a, m) => a + msgText(m).length, 0) : 0);
+    i = Math.max(1, Math.ceil(inChars / 3));
+    o = Math.max(1, Math.ceil(outChars / 3));
+    est = true;
+  }
+  CW.usageLast = { in: i, out: o, est };
   CW.usageTot.in = (CW.usageTot.in || 0) + i;
   CW.usageTot.out = (CW.usageTot.out || 0) + o;
   try { localStorage.setItem('atria.usage.v1', JSON.stringify(CW.usageTot)); } catch (e) {}
@@ -1883,21 +1894,29 @@ function onUsage(i, o) {
 }
 
 function openModelMenuAt(el) {
-  if (!el || !els.modelMenu) return;
-  renderModelMenu();
-  const m = els.modelMenu;
-  const r = el.getBoundingClientRect();
-  m.classList.remove('hidden');
-  m.style.position = 'fixed';
-  m.style.zIndex = '95';
-  const w = m.offsetWidth || 320;
-  const h = m.offsetHeight || 320;
-  let left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
-  let top = r.top - h - 10;
-  if (top < 8) top = Math.min(r.bottom + 10, Math.max(8, window.innerHeight - h - 8));
-  m.style.left = left + 'px';
-  m.style.top = top + 'px';
-  m.style.bottom = 'auto';
+  if (!el) return;
+  try {
+    if (els.modelMenu && els.modelMenu.parentElement !== document.body) document.body.appendChild(els.modelMenu);
+    if (!els.modelMenu) els.modelMenu = $('#modelMenu');
+    renderModelMenu();
+    const m = els.modelMenu;
+    if (!m) return;
+    m.style.display = '';
+    m.classList.remove('hidden');
+    const r = el.getBoundingClientRect();
+    m.style.position = 'fixed';
+    m.style.zIndex = '120';
+    const w = m.offsetWidth || 340;
+    const h = m.offsetHeight || 340;
+    let left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
+    let top = r.bottom + 10;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 10);
+    m.style.left = left + 'px';
+    m.style.top = top + 'px';
+    m.style.bottom = 'auto';
+  } catch (err) {
+    toast('منوی مدل باز نشد: ' + err, 'err');
+  }
 }
 
 function cwEnter() {
@@ -1941,6 +1960,15 @@ finishRun = function (a, b) { _finishRun(a, b); if (CW.active) { cwSave(); updat
 const _chooseModel = chooseModel;
 chooseModel = function (m) { _chooseModel(m); if (typeof cwSyncModel === 'function') cwSyncModel(); };
 
+function cwNewTask() {
+  if (st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
+  CW.chat.messages = [];
+  cwSave();
+  cwRender();
+  CW.els.input.focus();
+  toast('کار جدید — تاریخچهٔ کار قبلی پاک شد', 'ok');
+}
+
 function cwBoot() {
   cwRefs();
   cwLoad();
@@ -1949,10 +1977,22 @@ function cwBoot() {
   if (CW.els.close) CW.els.close.onclick = cwExit;
   if (CW.els.go) CW.els.go.onclick = send;
   if (CW.els.stop) CW.els.stop.onclick = stop;
+  const cwNew = $('#cwNew');
+  if (cwNew) cwNew.onclick = cwNewTask;
+  const cwMin = $('#cwMin'), cwMax = $('#cwMax'), cwWinClose = $('#cwWinClose');
+  if (cwMin) cwMin.onclick = () => invokeCmd('minimize_win');
+  if (cwMax) cwMax.onclick = () => invokeCmd('maximize_win');
+  if (cwWinClose) cwWinClose.onclick = () => invokeCmd('close_win');
   if (CW.els.reveal) CW.els.reveal.onclick = () => {
     if (window.__atria && window.__atria.reveal_dir) window.__atria.reveal_dir().catch(() => {});
   };
-  if (CW.els.modelPick) CW.els.modelPick.onclick = (e) => { e.stopPropagation(); openModelMenuAt(CW.els.modelPick); };
+  if (CW.els.modelPick) {
+    CW.els.modelPick.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menuShowConns = false;
+      openModelMenuAt(CW.els.modelPick);
+    });
+  }
   if (els.modelPick) els.modelPick.addEventListener('click', () => {
     if (!els.modelMenu.classList.contains('hidden')) openModelMenuAt(els.modelPick);
   });

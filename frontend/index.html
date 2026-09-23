@@ -382,19 +382,33 @@
   <!-- ============ Code Work — فضای جدا مثل کلاد ============ -->
   <div id="codeWork" class="cw hidden">
     <div class="cw-top">
-      <div class="cw-brand"><b>⌨︎ Code Work</b><span>مثل کلاد — خودش در ورک‌اسپیس می‌نویسد و تحویل می‌دهد</span></div>
-      <button class="cw-model" id="cwModelPick" title="انتخاب مدل از همهٔ سرویس‌ها"><span class="mp-name" id="cwMpName">—</span><span class="mp-caret">▾</span></button>
+      <div class="cw-brand"><b>⌨︎ Code Work</b></div>
       <div class="cw-meter" id="cwMeter">◈ ورودی ۰ · ◇ خروجی ۰ · مجموع نشست: ۰ توکن</div>
-      <button class="cw-x" id="cwClose" title="بازگشت به چت">✕</button>
+      <div class="cw-top-actions">
+        <button class="wc wc-min" id="cwMin" title="کوچک‌کردن"><svg viewBox="0 0 12 12"><line x1="1" y1="6" x2="11" y2="6"/></svg></button>
+        <button class="wc wc-max" id="cwMax" title="بزرگ‌کردن"><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" rx="1"/></svg></button>
+        <button class="wc wc-close" id="cwWinClose" title="بستن برنامه"><svg viewBox="0 0 12 12"><line x1="1.5" y1="1.5" x2="10.5" y2="10.5"/><line x1="10.5" y1="1.5" x2="1.5" y2="10.5"/></svg></button>
+        <button class="cw-x" id="cwClose" title="بازگشت به چت">✕</button>
+      </div>
+    </div>
+    <div class="cw-tools">
+      <button class="cw-new" id="cwNew">＋ کار جدید</button>
+      <button class="cw-model" id="cwModelPick" title="انتخاب مدل از همهٔ سرویس‌ها"><span class="cw-model-label">مدل</span><span class="mp-name" id="cwMpName">—</span><span class="mp-caret">▾</span></button>
+      <button class="cw-reveal" id="cwReveal">📂 باز کردن ورک‌اسپیس</button>
     </div>
     <div class="cw-msgs" id="cwMsgs"></div>
     <div class="cw-bar">
-      <textarea id="cwInput" rows="1" placeholder="کار را بنویس… مثال: «یک صفحهٔ فرود فارسی با HTML/CSS بساز و در ورک‌اسپیس ذخیره کن»"></textarea>
-      <button class="btn primary" id="cwGo">شروع ▸</button>
-      <button class="btn hidden" id="cwStop">■ توقف</button>
+      <div class="cw-input-card">
+        <textarea id="cwInput" rows="1" placeholder="کار را بنویس… مثال: «یک صفحهٔ فرود فارسی با HTML/CSS بساز و در ورک‌اسپیس ذخیره کن»"></textarea>
+        <div class="cw-bar-row">
+          <span class="cw-hint">Enter ارسال · Shift+Enter سطر جدید</span>
+          <div class="cw-bar-btns">
+            <button class="btn hidden" id="cwStop">■ توقف</button>
+            <button class="btn primary cw-go" id="cwGo">شروع ▸</button>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="cw-foot">فایل‌ها خودکار در ورک‌اسپیس نوشته می‌شوند · <button class="cw-reveal" id="cwReveal">📂 باز کردن ورک‌اسپیس</button> · مصرف توکن هر اجرا ثبت می‌شود</div>
   </div>
-
-</body>
+  </body>
 </html>

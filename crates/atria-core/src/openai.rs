@@ -108,6 +108,7 @@ impl OpenAiClient {
         }
         if cfg.stream {
             body["stream"] = Value::Bool(true);
+            body["stream_options"] = serde_json::json!({ "include_usage": true });
         }
 
         let url = chat_completions_url(&cfg.base_url);
@@ -178,10 +179,10 @@ impl OpenAiClient {
                     stop_reason = map_finish(fr);
                 }
                 if let Some(u) = v["usage"].as_object() {
-                    if let Some(n) = u.get("prompt_tokens").and_then(Value::as_u64) {
+                    if let Some(n) = u.get("prompt_tokens").or(u.get("input_tokens")).and_then(Value::as_u64) {
                         usage.input_tokens = n as u32;
                     }
-                    if let Some(n) = u.get("completion_tokens").and_then(Value::as_u64) {
+                    if let Some(n) = u.get("completion_tokens").or(u.get("output_tokens")).and_then(Value::as_u64) {
                         usage.output_tokens = n as u32;
                     }
                 }
