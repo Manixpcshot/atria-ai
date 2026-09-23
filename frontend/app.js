@@ -1533,15 +1533,15 @@ function renderModelMenu() {
   const tools = document.createElement('div');
   tools.className = 'mm-tools';
   tools.innerHTML =
-    '<input class="mm-search" id="mmSearch" placeholder="جست‌وجوی مدل… (همهٔ سرویس‌ها)" spellcheck="false">' +
+    '<input class="mm-search" id="mmSearch" placeholder="جست‌وجوی مدل…" spellcheck="false">' +
     '<button class="mm-fetch" id="mmManage" title="مدیریت اتصال‌ها و مدل‌ها">⚙︎</button>';
   els.modelMenu.appendChild(tools);
 
-  const act = activeConn();
+  const c = activeConn();
+  const head = document.createElement('div');
+  head.className = 'mm-head mm-conn-head';
   if (menuShowConns) {
-    const head = document.createElement('div');
-    head.className = 'mm-head mm-conn-head';
-    head.textContent = 'اتصال‌ها — چندتایی هم‌زمان در فهرست مدل‌ها:';
+    head.textContent = 'انتخاب اتصال:';
     els.modelMenu.appendChild(head);
     if (!st.conns.length) {
       const e2 = document.createElement('div');
@@ -1550,57 +1550,53 @@ function renderModelMenu() {
       els.modelMenu.appendChild(e2);
     }
     for (const cc of st.conns) {
-      const it = document.createElement('div');
-      it.className = 'mm-item mm-conn-row' + (act && cc.id === act.id ? ' active' : '');
-      it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span><button class="mm-toggle" title="نمایش/پنهان در فهرست مدل‌ها"></button>';
-      it.querySelector('.mm-model').textContent = (cc.enabled !== false ? '● ' : '○ ') + cc.name;
+      const it = document.createElement('button');
+      it.className = 'mm-item' + (c && cc.id === c.id ? ' active' : '');
+      it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
+      it.querySelector('.mm-model').textContent = cc.name;
       it.querySelector('.mm-src').textContent =
         kindLabel(cc.kind) + ' · ' + cc.models.length + ' مدل' + (cc.key ? '' : ' · بدون کلید');
-      const tg = it.querySelector('.mm-toggle');
-      tg.textContent = cc.enabled !== false ? 'در فهرست ✓' : 'مخفی';
-      tg.onclick = (e) => { e.stopPropagation(); toggleConnEnabled(cc.id); renderModelMenu(); };
       it.onclick = () => {
         setActiveConn(cc.id);
         menuShowConns = false;
         renderModelMenu();
-        toast('اتصال پیش‌فرض: ' + cc.name, 'ok');
+        toast('اتصال: ' + cc.name, 'ok');
       };
       els.modelMenu.appendChild(it);
     }
   } else {
-    const head = document.createElement('div');
-    head.className = 'mm-head mm-conn-head';
-    head.innerHTML = '<span class="mm-all-title">✨ همهٔ مدل‌های فعال — هم‌زمان</span><button class="mm-switch" title="مدیریت اتصال‌ها">↻ اتصال‌ها</button>';
-    head.querySelector('.mm-switch').onclick = (e) => { e.stopPropagation(); menuShowConns = true; renderModelMenu(); };
+    head.innerHTML = '<span class="mm-conn-name"></span><button class="mm-switch" title="تعویض اتصال">↻ تعویض اتصال</button>';
+    head.querySelector('.mm-conn-name').textContent = 'اتصال: ' + (c ? c.name : '—');
+    head.querySelector('.mm-switch').onclick = (e) => {
+      e.stopPropagation();
+      menuShowConns = true;
+      renderModelMenu();
+    };
     els.modelMenu.appendChild(head);
     let any = false;
     for (const cc of st.conns) {
-      if (cc.enabled === false || !cc.models.length) continue;
-      any = true;
-      const gh = document.createElement('div');
-      gh.className = 'mm-head mm-group';
-      gh.textContent = '◆ ' + cc.name + ' — ' + kindLabel(cc.kind);
-      els.modelMenu.appendChild(gh);
+      if (cc.enabled === false) continue;
       for (const m of cc.models) {
         const it = document.createElement('button');
-        const isActiveModel = (act && cc.id === act.id && effModel() === m);
-        it.className = 'mm-item' + (isActiveModel ? ' active' : '');
+        const isAct = (st.settings.model === m && ((c && cc.id === c.id) || (!st.settings.conn && true)));
+        it.className = 'mm-item' + (c && cc.id === c.id && st.settings.model === m ? ' active' : '');
         it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
         it.querySelector('.mm-model').textContent = m;
         it.querySelector('.mm-src').textContent = cc.name;
         it.onclick = () => chooseModelFor(cc.id, m);
         els.modelMenu.appendChild(it);
+        any = true;
       }
     }
     if (!any) {
       const e2 = document.createElement('div');
       e2.className = 'mem-empty';
-      e2.textContent = 'اتصال فعالی با مدل نیست — «↻ اتصال‌ها» را بزن';
+      e2.textContent = 'مدلی تعیین نکرده‌ای — «↻ تعویض اتصال» یا ⚙︎';
       els.modelMenu.appendChild(e2);
     }
     const addBtn = document.createElement('button');
     addBtn.className = 'mm-item mm-custom';
-    addBtn.textContent = '＋ افزودن/حذف مدل‌ها و اتصال‌ها…';
+    addBtn.textContent = '＋ افزودن/حذف مدل‌های اتصال‌ها…';
     addBtn.onclick = () => { closeModelMenu(); openConns(null); };
     els.modelMenu.appendChild(addBtn);
   }
@@ -1622,15 +1618,6 @@ function renderModelMenu() {
     closeModelMenu();
     openConns(null);
   };
-}
-
-function toggleConnEnabled(id) {
-  const cc = st.conns.find((x) => x.id === id);
-  if (!cc) return;
-  cc.enabled = cc.enabled === false;
-  saveConns();
-  toast(cc.enabled ? '«' + cc.name + '» در فهرست مدل‌ها نمایش داده می‌شود' : '«' + cc.name + '» از فهرست مدل‌ها مخفی شد (حذف نشد)', 'ok');
-  if (typeof updateConnTabSoon === 'function') updateConnTabSoon();
 }
 
 function chooseModelFor(connId, model) {
@@ -1906,12 +1893,11 @@ function openModelMenuAt(el) {
     const r = el.getBoundingClientRect();
     m.style.position = 'fixed';
     m.style.zIndex = '120';
-    const w = Math.min(m.offsetWidth || 360, window.innerWidth - 16);
+    const w = Math.min(m.offsetWidth || 340, window.innerWidth - 16);
     const h = Math.min(m.offsetHeight || 360, window.innerHeight - 16);
-    // رابط RTL: لبهٔ راست منو زیر لبهٔ راست دکمه
     let left = Math.min(Math.max(8, r.right - w), Math.max(8, window.innerWidth - w - 8));
-    let top = r.bottom + 8;
-    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+    let top = r.top - h - 8; // بالای دکمه، مثل ورژن ۴
+    if (top < 8) top = Math.min(r.bottom + 8, Math.max(8, window.innerHeight - h - 8));
     m.style.left = left + 'px';
     m.style.top = top + 'px';
     m.style.bottom = 'auto';
