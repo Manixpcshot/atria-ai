@@ -116,7 +116,12 @@ pub async fn run_agent(
             )
             .await;
             match send_res {
-                Ok(t) => break t,
+                Ok(t) => {
+                    for piece in crate::toolfmt::LiveFilter::finish(&mut filt) {
+                        emit(AgentEvent::Stream(crate::client::StreamEvent::Text(piece)));
+                    }
+                    break t
+                }
                 Err(CoreError::Stopped) => return Err(CoreError::Stopped),
                 // Some gateways reject thinking blocks on continuation — retry once
                 // with a stripped history.

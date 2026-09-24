@@ -1419,11 +1419,11 @@ function finishRun(newMessages, finalText) {
       pushed.push(chat.messages[chat.messages.length - 1]);
     }
   } else {
-    chat.messages.push({ role: 'ai', text: st.runText || plain, plain, ts: Date.now() });
+    chat.messages.push({ role: 'ai', text: plain, plain, ts: Date.now() });
     pushed.push(chat.messages[chat.messages.length - 1]);
   }
   if (!pushed.length) {
-    chat.messages.push({ role: 'ai', text: st.runText || plain, plain, ts: Date.now() });
+    chat.messages.push({ role: 'ai', text: plain, plain, ts: Date.now() });
     pushed.push(chat.messages[chat.messages.length - 1]);
   }
   for (let i = pushed.length - 1; i >= 0; i--) {
@@ -1431,6 +1431,7 @@ function finishRun(newMessages, finalText) {
   }
   if (lastSession) chat.dsSession = lastSession;
   saveChats(chat.id);
+  renderHistory(); // نمایش نهایی = متن کامل ذخیره‌شده (نه متن ناقص استریم زنده)
   scrollBottom();
 }
 

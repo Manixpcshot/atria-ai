@@ -393,10 +393,18 @@ impl LiveFilter {
         let mut out = Vec::new();
         loop {
             if !self.holding {
-                let markers = ["<tool", "DSML", "<｜"];
                 let mut at: Option<usize> = None;
-                for m in markers {
+                for m in ["<tool", "<｜"] {
                     if let Some(p) = self.buf.find(m) {
+                        at = Some(match at {
+                            Some(a) if a < p => a,
+                            _ => p,
+                        });
+                    }
+                }
+                // «DSML» فقط نشانه است وقتی پشتش لوله باشد (نویز | | | DSML) — نه در متن عادی
+                if let Some(p) = self.buf.find("DSML") {
+                    if self.buf[..p].contains('|') || self.buf[..p].contains('｜') {
                         at = Some(match at {
                             Some(a) if a < p => a,
                             _ => p,
@@ -453,11 +461,46 @@ impl LiveFilter {
         }
         out
     }
+    /// پایان جریان: باقی‌ماندهٔ بافر را آزاد کن — وگرنه دم متن می‌پرد.
+    pub fn finish(&mut self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.buf.is_empty() {
+            return out;
+        }
+        if self.holding {
+            let (clean, _calls) = parse_tool_markup(&self.buf);
+            let clean = clean.trim().to_string();
+            if !clean.is_empty() {
+                out.push(clean);
+            }
+        } else {
+            out.push(self.buf.clone());
+        }
+        self.buf.clear();
+        self.holding = false;
+        out
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finish_flushes_tail() {
+        let mut f = LiveFilter::default();
+        let mid: String = f.feed("متن عادی تا انتها").into_iter().collect();
+        let rest: String = f.finish().into_iter().collect();
+        assert_eq!(mid + &rest, "متن عادی تا انتها");
+    }
+
+    #[test]
+    fn prose_with_dsml_word_not_held() {
+        let mut f = LiveFilter::default();
+        let mid: String = f.feed("DSML چیست؟ توضیح بده").into_iter().collect();
+        let rest: String = f.finish().into_iter().collect();
+        assert_eq!(mid + &rest, "DSML چیست؟ توضیح بده");
+    }
 
     #[test]
     fn screenshot_tool_with_quoted_json_and_dsml_debris() {
