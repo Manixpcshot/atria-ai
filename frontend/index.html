@@ -381,38 +381,35 @@
 
   <!-- ============ Code Work — فضای جدا مثل کلاد ============ -->
   <div id="codeWork" class="cw hidden">
-    <div class="cw-top">
-      <div class="cw-brand"><b>⌨︎ Code Work</b></div>
-      <div class="cw-meter" id="cwMeter">◈ ورودی ۰ · ◇ خروجی ۰ · مجموع نشست: ۰ توکن</div>
-      <div class="cw-top-actions">
-        <button class="wc wc-min" id="cwMin" title="کوچک‌کردن"><svg viewBox="0 0 12 12"><line x1="1" y1="6" x2="11" y2="6"/></svg></button>
-        <button class="wc wc-max" id="cwMax" title="بزرگ‌کردن"><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" rx="1"/></svg></button>
-        <button class="wc wc-close" id="cwWinClose" title="بستن برنامه"><svg viewBox="0 0 12 12"><line x1="1.5" y1="1.5" x2="10.5" y2="10.5"/><line x1="10.5" y1="1.5" x2="1.5" y2="10.5"/></svg></button>
-        <button class="cw-back" id="cwClose" title="بازگشت به چت">↩ بازگشت</button>
-      </div>
-    </div>
-    <div class="cw-msgs" id="cwMsgs"></div>
-    <div class="composer-zone">
-      <div class="composer glass">
-        <textarea id="cwInput" rows="1" placeholder="کار رو بنویس… (Enter: ارسال · Shift+Enter: سطر جدید)"></textarea>
-        <button class="send-btn" id="cwGo" title="شروع">
-          <svg viewBox="0 0 24 24"><path d="M22 2 L11 13"/><path d="M22 2 L15 22 L11 13 L2 9 Z"/></svg>
-        </button>
-        <button class="stop-btn hidden" id="cwStop" title="توقف">
-          <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-        </button>
-      </div>
-      <div class="composer-bar">
-        <button class="model-pick" id="cwModelPick" title="انتخاب مدل">
-          <span class="mp-name" id="cwMpName">—</span>
-          <span class="mp-caret">▾</span>
-        </button>
-        <div class="mode-chips">
-          <button class="mode-chip" id="cwNew">＋ کار جدید</button>
-          <button class="mode-chip" id="cwReveal">📂 ورک‌اسپیس</button>
+    <header class="cw-top">
+      <div class="cw-brand">⌨︎ Code Work</div>
+      <div class="cw-meter" id="cwMeter">◈ ۰ · ◇ ۰</div>
+      <button class="cw-back" id="cwBack">بازگشت</button>
+    </header>
+    <main class="cw-msgs" id="cwMsgs"></main>
+    <footer class="cw-foot">
+      <div class="composer-zone">
+        <div class="composer glass">
+          <textarea id="cwInput" rows="1" placeholder="کار رو بنویس… (Enter: ارسال · Shift+Enter: سطر جدید)"></textarea>
+          <button class="send-btn" id="cwSend" title="شروع">
+            <svg viewBox="0 0 24 24"><path d="M22 2 L11 13"/><path d="M22 2 L15 22 L11 13 L2 9 Z"/></svg>
+          </button>
+          <button class="stop-btn hidden" id="cwStop" title="توقف">
+            <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          </button>
+        </div>
+        <div class="composer-bar">
+          <button class="model-pick" id="cwModelPick" title="انتخاب مدل">
+            <span class="mp-name" id="cwMpName">—</span>
+            <span class="mp-caret">▾</span>
+          </button>
+          <div class="mode-chips">
+            <button class="mode-chip" id="cwNew">＋ کار جدید</button>
+            <button class="mode-chip" id="cwReveal">📂 ورک‌اسپیس</button>
+          </div>
         </div>
       </div>
-    </div>
+    </footer>
   </div>
   </body>
 </html>
