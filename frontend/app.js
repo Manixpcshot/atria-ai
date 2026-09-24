@@ -1051,11 +1051,11 @@ function startTurn() {
       max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 4096)),
       temperature: Number(st.settings.temp),
       system: st.settings.system || '',
-      tools_enabled: !!st.settings.tools_enabled || st.mode === 'code',
+      tools_enabled: !!st.settings.tools_enabled,
       stream: st.settings.stream !== false,
       kind: conn ? conn.kind : 'anthropic',
-      file_tools: !!st.settings.file_tools || st.mode === 'code',
-      workspace: st.settings.workspace || (st.mode === 'code' && diskDirs && diskDirs.workspace) || '',
+      file_tools: !!st.settings.file_tools,
+      workspace: st.settings.workspace || '',
       thinking: !!st.settings.thinking,
       web_search: !!st.settings.ds_search,
       session_id: (chat && chat.dsSession) || '',
@@ -1438,29 +1438,22 @@ function finishRun(newMessages, finalText) {
 
 function listenEvents() {
   const t = window.__atria;
-  t.listen('atria:thinking', (e) => (CWX.active ? cxThink(e.payload.delta) : onThinking(e.payload.delta)));
-  t.listen('atria:text', (e) => (CWX.active ? cxText(e.payload.delta) : onText(e.payload.delta)));
+  t.listen('atria:thinking', (e) => onThinking(e.payload.delta));
+  t.listen('atria:text', (e) => onText(e.payload.delta));
   t.listen('atria:round', (e) => {
     if (e.payload.round > 1) {
-      if (CWX.active) { cxLiveDone(); cxChip('↻ مرحلهٔ ابزار ' + e.payload.round); return; }
       closeLive();
       ensurePanel();
       st.run.thinkStep = null;
       addChip('↻ مرحلهٔ ابزار ' + e.payload.round);
     }
   });
-  t.listen('atria:tool_pending', (e) =>
-    CWX.active ? cxToolPending(e.payload.id, e.payload.name) : onToolPending(e.payload.id, e.payload.name));
-  t.listen('atria:tool_args', (e) =>
-    CWX.active ? cxToolArgs(e.payload.id, e.payload.n || 0) : onToolArgs(e.payload.id, e.payload.n || 0));
+  t.listen('atria:tool_pending', (e) => onToolPending(e.payload.id, e.payload.name));
+  t.listen('atria:tool_args', (e) => onToolArgs(e.payload.id, e.payload.n || 0));
   t.listen('atria:tool_start', (e) =>
-    CWX.active ? cxToolStart(e.payload.id, e.payload.name, e.payload.label, e.payload.input)
-               : onToolStart(e.payload.id, e.payload.name, e.payload.label, e.payload.input));
-  t.listen('atria:tool_end', (e) =>
-    CWX.active ? cxToolEnd(e.payload.id, e.payload.ok, e.payload.output)
-               : onToolEnd(e.payload.id, e.payload.ok, e.payload.output));
+    onToolStart(e.payload.id, e.payload.name, e.payload.label, e.payload.input));
+  t.listen('atria:tool_end', (e) => onToolEnd(e.payload.id, e.payload.ok, e.payload.output));
   t.listen('atria:retry', (e) => {
-    if (CWX.active) { cxLiveDone(); cxChip('↻ تلاش مجدد (' + e.payload.attempt + ' از ۳)…'); return; }
     closeLive();
     ensurePanel();
     addChip('↻ تلاش مجدد (' + e.payload.attempt + ' از ۳)…');
@@ -1468,16 +1461,10 @@ function listenEvents() {
   t.listen('atria:done', (e) => {
     lastSession = e.payload.session_id || '';
     onUsage(e.payload.input_tokens || 0, e.payload.output_tokens || 0);
-    if (CWX.active) cxFinish(e.payload);
-    else finishRun(e.payload.new_messages, e.payload.final_text);
+    finishRun(e.payload.new_messages, e.payload.final_text);
   });
-  t.listen('atria:error', (e) =>
-    CWX.active ? cxFail(e.payload.message || 'unknown') : failRun(e.payload.message || 'unknown'));
-  t.listen('atria:stopped', () => {
-    if (CWX.active) cxFail('متوقف شد');
-    else failRun('متوقف شد');
-    toast('تولید متوقف شد', 'warn');
-  });
+  t.listen('atria:error', (e) => failRun(e.payload.message || 'unknown'));
+  t.listen('atria:stopped', () => { failRun('متوقف شد'); toast('تولید متوقف شد', 'warn'); });
 }
 
 /* ---------------- memory modal ---------------- */
@@ -1642,7 +1629,6 @@ function chooseModelFor(connId, model) {
   saveSettings();
   updateModelPick();
   closeModelMenu();
-  if (typeof cwxSyncModel === 'function') cwxSyncModel();
   toast('مدل: ' + model + (cc ? ' — ' + cc.name : ''), 'ok');
 }
 
@@ -1800,353 +1786,9 @@ document.addEventListener('DOMContentLoaded', boot);
 
 
 
-/* ============ Code Work v0.6.0 — بازسازی کامل و مستقل (مثل کلاد) ============ */
 
-const CWX = {
-  active: false,
-  sending: false,
-  chat: { id: 'cw', title: 'کد ورک', createdAt: Date.now(), messages: [] },
-  runText: '',
-  host: null, flow: null, streamEl: null, mdEl: null, live: null,
-  cards: null, thinkEl: null, failedWrap: null,
-  usageLast: { in: 0, out: 0, est: false },
-  usageTot: { in: 0, out: 0 },
-};
 
-function cxSave() {
-  try { localStorage.setItem('atria.codework.v1', JSON.stringify(CWX.chat.messages)); } catch (e) {}
-}
-function cxLoad() {
-  try {
-    const raw = localStorage.getItem('atria.codework.v1');
-    if (raw) CWX.chat.messages = JSON.parse(raw) || [];
-    const u = localStorage.getItem('atria.usage.v1');
-    if (u) CWX.usageTot = JSON.parse(u) || { in: 0, out: 0 };
-  } catch (e) {}
-}
-
-function cxU(n) { return Number(n || 0).toLocaleString('fa-IR'); }
-
-function cxMeter() {
-  const pfx = CWX.usageLast.est ? '~' : '';
-  const el = $('#cwMeter');
-  if (el) {
-    el.innerHTML = '◈ ورودی <b>' + pfx + cxU(CWX.usageLast.in) + '</b> · ◇ خروجی <b>' + pfx + cxU(CWX.usageLast.out) +
-      '</b> · مجموع <b>' + cxU((CWX.usageTot.in || 0) + (CWX.usageTot.out || 0)) + '</b>';
-  }
-  const chip = $('#tokChip');
-  if (chip && (CWX.usageLast.in || CWX.usageLast.out)) {
-    chip.classList.remove('hidden');
-    chip.textContent = '◈' + pfx + fmtN(CWX.usageLast.in) + ' ◇' + pfx + fmtN(CWX.usageLast.out);
-    chip.title = 'ورودی ' + cxU(CWX.usageLast.in) + ' / خروجی ' + cxU(CWX.usageLast.out) +
-      ' — مجموع نشست: ' + cxU(CWX.usageTot.in + CWX.usageTot.out) + (CWX.usageLast.est ? ' (تخمین)' : '');
-  }
-}
-
-function onUsage(i, o) {
-  i = Number(i) || 0; o = Number(o) || 0;
-  let est = false;
-  if (!i && !o) {
-    const outChars = (CWX.active ? CWX.runText : (st.runText || '')).length;
-    i = Math.max(1, Math.ceil(outChars * 1.6 / 3));
-    o = Math.max(1, Math.ceil(outChars / 3));
-    est = true;
-  }
-  CWX.usageLast = { in: i, out: o, est };
-  CWX.usageTot.in = (CWX.usageTot.in || 0) + i;
-  CWX.usageTot.out = (CWX.usageTot.out || 0) + o;
-  try { localStorage.setItem('atria.usage.v1', JSON.stringify(CWX.usageTot)); } catch (e) {}
-  cxMeter();
-}
-
-function cxHero() {
-  const h = document.createElement('div');
-  h.className = 'cw-hero';
-  h.innerHTML = '<div class="cw-hero-orb"></div><h2>Code Work</h2>' +
-    '<p>کار را بنویس؛ آتریا خودش در ورک‌اسپیس فایل می‌سازد و ویرایش می‌کند.<br>هر اجرا، مصرف توکنش همان بالا ثبت می‌شود.</p>';
-  return h;
-}
-
-function cxRender() {
-  const box = $('#cwMsgs');
-  box.innerHTML = '';
-  if (!CWX.chat.messages.length) { box.appendChild(cxHero()); return; }
-  for (const m of CWX.chat.messages) {
-    box.appendChild(bubbleEl(m.role === 'user' ? 'user' : 'ai', m.plain || m.text || '…', null, m.images));
-  }
-  box.scrollTop = box.scrollHeight;
-}
-
-function cxScroll() {
-  const box = $('#cwMsgs');
-  if (box) box.scrollTop = box.scrollHeight;
-}
-
-function cxOpenRun() {
-  const box = $('#cwMsgs');
-  const hero = box.querySelector('.cw-hero');
-  if (hero) hero.remove();
-  const wrap = document.createElement('div');
-  wrap.className = 'msg ai';
-  wrap.appendChild(avatarEl('ai'));
-  const stack = document.createElement('div');
-  stack.className = 'stack';
-  wrap.appendChild(stack);
-  const flow = document.createElement('div');
-  flow.className = 'cx-flow';
-  stack.appendChild(flow);
-  box.appendChild(wrap);
-  CWX.host = { wrap, stack };
-  CWX.flow = flow;
-  CWX.streamEl = null;
-  CWX.mdEl = null;
-  CWX.live = null;
-  CWX.thinkEl = null;
-  CWX.cards = new Map();
-  cxScroll();
-}
-
-function cxThink(delta) {
-  if (!delta) return;
-  if (!CWX.thinkEl) {
-    CWX.thinkEl = document.createElement('div');
-    CWX.thinkEl.className = 'think-box';
-    CWX.flow.appendChild(CWX.thinkEl);
-  }
-  CWX.thinkEl.textContent += delta;
-  cxScroll();
-}
-
-function cxLive() {
-  if (!CWX.streamEl) {
-    const bub = document.createElement('div');
-    bub.className = 'bubble streaming';
-    const mdEl = document.createElement('div');
-    mdEl.className = 'md';
-    bub.appendChild(mdEl);
-    CWX.host.stack.appendChild(bub);
-    CWX.streamEl = bub;
-    CWX.mdEl = mdEl;
-  }
-  if (!CWX.live) {
-    const sec = document.createElement('div');
-    sec.className = 'stream-answer';
-    CWX.mdEl.appendChild(sec);
-    CWX.live = md.createLiveStream(sec);
-  }
-  return CWX.live;
-}
-
-function cxLiveDone() {
-  if (CWX.live) { CWX.live.done(); CWX.live = null; }
-  if (CWX.streamEl) CWX.streamEl.classList.remove('streaming');
-}
-
-function cxText(delta) {
-  CWX.runText += delta;
-  cxLive().push(delta);
-  cxScroll();
-}
-
-function cxChip(text) {
-  const d = document.createElement('div');
-  d.className = 'cx-chip';
-  d.textContent = text;
-  CWX.flow.appendChild(d);
-  cxScroll();
-}
-
-function cxCardKey(id, name) { return id ? 'id:' + id : 'n:' + name + ':' + Date.now(); }
-
-function cxToolPending(id, name) {
-  cxLiveDone();
-  const label = faTool(name);
-  const card = toolCardEl(label, name, null, true);
-  card._key = cxCardKey(id, name);
-  card._chars = 0;
-  CWX.cards.set(card._key, card);
-  CWX.flow.appendChild(card);
-  cxScroll();
-}
-
-function cxToolArgs(id, n) {
-  for (const [, card] of CWX.cards) {
-    if (card._key === 'id:' + id) {
-      card._chars = (card._chars || 0) + (Number(n) || 0);
-      card.querySelector('.tool-state').textContent = 'در حال نوشتن محتوا… ' + fmtN(card._chars) + ' کاراکتر';
-    }
-  }
-  cxScroll();
-}
-
-function cxToolStart(id, name, label, input) {
-  cxLiveDone();
-  let card = null;
-  for (const [, c] of CWX.cards) if (c._key === 'id:' + id) card = c;
-  if (!card) {
-    card = toolCardEl(label || faTool(name), name, null, true);
-    card._key = cxCardKey(id, name);
-    CWX.cards.set(card._key, card);
-    CWX.flow.appendChild(card);
-  }
-  card.classList.remove('pending');
-  if (label) card.querySelector('.tool-label').textContent = label;
-  if (name) card.querySelector('.tool-chip').textContent = name;
-  card.querySelector('.tool-state').textContent = 'در حال اجرا…';
-  const inEl = card.querySelector('.tool-in');
-  inEl.classList.remove('hidden');
-  inEl.textContent = fmtInput(input);
-  cxScroll();
-}
-
-function cxToolEnd(id, ok, output) {
-  cxLiveDone();
-  let card = null;
-  for (const [, c] of CWX.cards) if (c._key === 'id:' + id) card = c;
-  if (!card) return;
-  card.classList.remove('pending');
-  card.classList.add(ok ? 'done' : 'failed');
-  card.querySelector('.tool-state').textContent = ok ? '✓ انجام شد' : '✕ خطا';
-  const out = card.querySelector('.tool-out');
-  out.classList.remove('hidden');
-  out.textContent = (output || '').slice(0, 4000);
-  cxScroll();
-}
-
-function cxButtons(sending) {
-  const go = $('#cwSend'), stp = $('#cwStop');
-  if (go) go.classList.toggle('hidden', sending);
-  if (stp) stp.classList.toggle('hidden', !sending);
-}
-
-function cxFinish(payload) {
-  cxLiveDone();
-  CWX.sending = false;
-  cxButtons(false);
-  const text = (payload && payload.final_text && String(payload.final_text).trim())
-    ? String(payload.final_text) : (CWX.runText || '(پاسخ خالی)');
-  CWX.chat.messages.push({ role: 'ai', text: text, plain: text, ts: Date.now() });
-  cxSave();
-  cxRender();
-}
-
-function cxFail(msg) {
-  cxLiveDone();
-  CWX.sending = false;
-  cxButtons(false);
-  const e = document.createElement('div');
-  e.className = 'err-card';
-  e.innerHTML = '<div class="err-text"></div><button class="btn primary retry-btn">🔄 تلاش مجدد</button>';
-  let shown = 'خطا: ' + msg;
-  if (TRANSIENT_RE.test(String(msg))) {
-    shown += '\n\n💡 این خطا معمولاً موقتی است — «تلاش مجدد» بزن.';
-  }
-  e.querySelector('.err-text').textContent = shown;
-  e.querySelector('.retry-btn').onclick = cxRetry;
-  CWX.host.stack.appendChild(e);
-  CWX.failedWrap = e;
-  cxScroll();
-}
-
-function cxRetry() {
-  if (CWX.sending || st.sending) return;
-  if (CWX.failedWrap && CWX.failedWrap.parentNode) CWX.failedWrap.parentNode.removeChild(CWX.failedWrap);
-  CWX.failedWrap = null;
-  if (CWX.host && CWX.host.wrap && CWX.host.wrap.parentNode) CWX.host.wrap.parentNode.removeChild(CWX.host.wrap);
-  CWX.host = null;
-  cxStart();
-}
-
-function cxSend() {
-  const el = $('#cwInput');
-  const text = el.value.trim();
-  if (!text || CWX.sending) return;
-  if (st.sending) return toast('یک پاسخ دیگر در حال تولید است', 'warn');
-  const conn = activeConn();
-  if (!conn) { openConns(null); return toast('ابتدا یک اتصال با کلید بساز', 'warn'); }
-  if (!conn.key) { openConns(conn.id); return toast('کلید اتصال «' + conn.name + '» را وارد کن', 'warn'); }
-  if (conn.kind === 'openai' && !conn.base) { openConns(conn.id); return toast('آدرس پایه اتصال «' + conn.name + '» خالی است', 'warn'); }
-  if (conn.kind !== 'deepseek_web' && !effModel()) { openConns(conn.id); return toast('برای «' + conn.name + '» مدلی تعیین نکرده‌ای', 'warn'); }
-  CWX.chat.messages.push({ role: 'user', text: text, plain: text, ts: Date.now() });
-  cxSave();
-  el.value = '';
-  cxAuto();
-  const box = $('#cwMsgs');
-  box.appendChild(bubbleEl('user', text, null));
-  cxScroll();
-  cxStart();
-}
-
-function cxStart() {
-  CWX.sending = true;
-  CWX.runText = '';
-  cxButtons(true);
-  cxOpenRun();
-  if (!window.__atria || !window.__atria.chat_send) {
-    return cxFail('پل ارتباطی IPC آماده نیست — برنامه را دوباره باز کن');
-  }
-  const conn = activeConn();
-  const { hist } = buildHistory(CWX.chat);
-  window.__atria.chat_send({
-    payload: {
-      api_key: conn ? conn.key : '',
-      base_url: (conn && conn.base) || (conn && conn.kind === 'anthropic' ? 'https://api.anthropic.com' : conn && conn.kind === 'deepseek_web' ? 'https://chat.deepseek.com' : ''),
-      model: effModel() || 'Atria-Dawn-Preview',
-      max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 4096)),
-      temperature: Number(st.settings.temp),
-      system: st.settings.system || '',
-      tools_enabled: true,
-      stream: st.settings.stream !== false,
-      kind: conn ? conn.kind : 'anthropic',
-      file_tools: true,
-      workspace: st.settings.workspace || (diskDirs && diskDirs.workspace) || '',
-      thinking: !!st.settings.thinking,
-      web_search: false,
-      session_id: '',
-      messages: hist,
-    },
-  }).catch((e) => cxFail(e && e.message ? e.message : String(e)));
-}
-
-function cxStop() { window.__atria.chat_stop(); }
-
-function cxAuto() {
-  const el = $('#cwInput');
-  el.style.height = 'auto';
-  el.style.height = Math.min(180, el.scrollHeight) + 'px';
-}
-
-function cxNew() {
-  if (CWX.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
-  if (CWX.chat.messages.length && !confirm('کار جدید — تاریخچهٔ این کار پاک شود؟')) return;
-  CWX.chat.messages = [];
-  cxSave();
-  cxRender();
-  const el = $('#cwInput');
-  if (el) el.focus();
-}
-
-function cxEnter() {
-  if (CWX.sending || st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
-  CWX.active = true;
-  $('#codeWork').classList.remove('hidden');
-  cxRender();
-  cxMeter();
-  cwxSyncModel();
-  const el = $('#cwInput');
-  if (el) el.focus();
-}
-
-function cxExit() {
-  if (CWX.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
-  CWX.active = false;
-  $('#codeWork').classList.add('hidden');
-}
-
-function cwxSyncModel() {
-  const el = $('#cwMpName');
-  if (el) el.textContent = effModel() || '—';
-}
+/* ============ v0.6.1 — مصرف توکن + منوی مدل + نسخهٔ برنامه ============ */
 
 function openModelMenuAt(el) {
   if (!el) return;
@@ -2174,33 +1816,55 @@ function openModelMenuAt(el) {
   }
 }
 
-function cxInit() {
-  cxLoad();
-  const b = $('#btnCodeWork');
-  if (b) b.onclick = cxEnter;
-  const back = $('#cwBack');
-  if (back) back.onclick = cxExit;
-  const go = $('#cwSend');
-  if (go) go.onclick = cxSend;
-  const stp = $('#cwStop');
-  if (stp) stp.onclick = cxStop;
-  const nw = $('#cwNew');
-  if (nw) nw.onclick = cxNew;
-  const rv = $('#cwReveal');
-  if (rv) rv.onclick = () => { if (window.__atria && window.__atria.reveal_dir) window.__atria.reveal_dir().catch(() => {}); };
-  const pick = $('#cwModelPick');
-  if (pick) pick.addEventListener('click', (e) => { e.stopPropagation(); menuShowConns = false; openModelMenuAt(pick); });
-  if (els.modelPick) els.modelPick.addEventListener('click', () => {
-    if (!els.modelMenu.classList.contains('hidden')) openModelMenuAt(els.modelPick);
-  });
-  const el = $('#cwInput');
-  if (el) {
-    el.addEventListener('input', cxAuto);
-    el.addEventListener('keydown', (e) => {
-      if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); cxSend(); }
-    });
+const USAGE_TOT = (() => {
+  try { return JSON.parse(localStorage.getItem('atria.usage.v1')) || { in: 0, out: 0 }; }
+  catch (e) { return { in: 0, out: 0 }; }
+})();
+
+function onUsage(i, o) {
+  i = Number(i) || 0; o = Number(o) || 0;
+  let est = false;
+  if (!i && !o) {
+    i = Math.max(1, Math.ceil((st.runText || '').length * 1.6 / 3));
+    o = Math.max(1, Math.ceil((st.runText || '').length / 3));
+    est = true;
   }
-  cxMeter();
+  USAGE_TOT.in = (USAGE_TOT.in || 0) + i;
+  USAGE_TOT.out = (USAGE_TOT.out || 0) + o;
+  try { localStorage.setItem('atria.usage.v1', JSON.stringify(USAGE_TOT)); } catch (e) {}
+  const chip = $('#tokChip');
+  if (chip && (i || o)) {
+    chip.classList.remove('hidden');
+    chip.textContent = (est ? '~' : '') + '◈' + fmtN(i) + ' ◇' + fmtN(o);
+    chip.title = (est ? 'مصرف تخمینی — ' : 'مصرف توکن — ') + 'ورودی ' + i + ' / خروجی ' + o +
+      ' — مجموع نشست: ' + USAGE_TOT.in + ' ورودی + ' + USAGE_TOT.out + ' خروجی';
+  }
 }
-document.addEventListener('DOMContentLoaded', cxInit);
+
+function vInit() {
+  cx0();
+  if (els.modelPick) els.modelPick.addEventListener('click', () => {
+    if (els.modelMenu && !els.modelMenu.classList.contains('hidden')) openModelMenuAt(els.modelPick);
+  });
+  // نسخهٔ برنامه بالای پنجره
+  try {
+    if (window.__atria && window.__atria.invoke) {
+      window.__atria.invoke('app_meta', {}).then((m) => {
+        const el = $('#appVer');
+        if (el && m && m.version) el.textContent = 'v' + m.version;
+      }).catch(() => {});
+    }
+  } catch (e) {}
+}
+
+function cx0() {
+  try {
+    const chip = $('#tokChip');
+    if (chip && (USAGE_TOT.in || USAGE_TOT.out)) {
+      chip.classList.remove('hidden');
+      chip.textContent = '◈' + fmtN(USAGE_TOT.in) + ' ◇' + fmtN(USAGE_TOT.out);
+      chip.title = 'مجموع مصرف نشست: ' + USAGE_TOT.in + ' ورودی + ' + USAGE_TOT.out + ' خروجی';
+    }
+  } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', vInit);

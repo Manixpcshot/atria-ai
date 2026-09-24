@@ -29,6 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
+        <span class="app-ver" id="appVer">v0.6.1</span>
         <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
@@ -55,7 +56,6 @@
         <div class="side-footer">
           <button class="side-btn" id="btnSettings">⚙︎&nbsp; تنظیمات</button>
           <button class="side-btn" id="btnMemory">🧠&nbsp; حافظهٔ بلندمدت</button>
-          <button class="side-btn" id="btnCodeWork">⌨︎&nbsp; کد ورک</button>
           <div class="engine-note"><span class="dot-live"></span> Rust engine · Tauri v2 · v0.2</div>
         </div>
       </aside>
@@ -380,36 +380,5 @@
 <div class="model-menu hidden" id="modelMenu"></div>
 
   <!-- ============ Code Work — فضای جدا مثل کلاد ============ -->
-  <div id="codeWork" class="cw hidden">
-    <header class="cw-top">
-      <div class="cw-brand">⌨︎ Code Work</div>
-      <div class="cw-meter" id="cwMeter">◈ ۰ · ◇ ۰</div>
-      <button class="cw-back" id="cwBack">بازگشت</button>
-    </header>
-    <main class="cw-msgs" id="cwMsgs"></main>
-    <footer class="cw-foot">
-      <div class="composer-zone">
-        <div class="composer glass">
-          <textarea id="cwInput" rows="1" placeholder="کار رو بنویس… (Enter: ارسال · Shift+Enter: سطر جدید)"></textarea>
-          <button class="send-btn" id="cwSend" title="شروع">
-            <svg viewBox="0 0 24 24"><path d="M22 2 L11 13"/><path d="M22 2 L15 22 L11 13 L2 9 Z"/></svg>
-          </button>
-          <button class="stop-btn hidden" id="cwStop" title="توقف">
-            <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-          </button>
-        </div>
-        <div class="composer-bar">
-          <button class="model-pick" id="cwModelPick" title="انتخاب مدل">
-            <span class="mp-name" id="cwMpName">—</span>
-            <span class="mp-caret">▾</span>
-          </button>
-          <div class="mode-chips">
-            <button class="mode-chip" id="cwNew">＋ کار جدید</button>
-            <button class="mode-chip" id="cwReveal">📂 ورک‌اسپیس</button>
-          </div>
-        </div>
-      </div>
-    </footer>
-  </div>
   </body>
 </html>
