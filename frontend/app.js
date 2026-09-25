@@ -26,6 +26,8 @@ const CONN_TEMPLATES = {
   'nvidia':     { label: 'NVIDIA NIM',                  base: 'https://integrate.api.nvidia.com/v1',                       kind: 'openai' },
   'github':     { label: 'GitHub Models (رایگان)',      base: 'https://models.github.ai/inference',                         kind: 'openai' },
   'perplexity': { label: 'Perplexity (Sonar)',          base: 'https://api.perplexity.ai/chat/completions',                 kind: 'openai' },
+  'apmix':      { label: 'ApMix — Messages API',      base: 'https://api.apmix.ai',                                       kind: 'anthropic' },
+  'apmix-cc':   { label: 'ApMix — Chat Completions',  base: 'https://api.apmix.ai/v1',                                    kind: 'openai' },
   'custom':     { label: 'سفارشی…',                   base: '',                                                        kind: 'openai' },
 };
 
