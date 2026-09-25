@@ -565,8 +565,12 @@ function updateConnTab() {
       d.className = 'conn-card active';
       d.innerHTML = '<div class="cc-name"></div><div class="cc-meta"></div>';
       d.querySelector('.cc-name').textContent = '⭐ ' + c.name;
-      d.querySelector('.cc-meta').textContent =
-        kindLabel(c.kind) + ' · ' + (c.base || 'بدون آدرس') + ' · ' + (Array.isArray(c.models) ? c.models.length : 0) + ' مدل · ' + (c.key ? 'کلید دارد' : 'بدون کلید');
+      const meta = d.querySelector('.cc-meta');
+      meta.innerHTML = '<span class="cc-chip"></span><span class="cc-chip ltr"></span><span class="cc-chip"></span>';
+      const chips = meta.querySelectorAll('.cc-chip');
+      chips[0].textContent = kindLabel(c.kind);
+      chips[1].textContent = c.base || 'بدون آدرس';
+      chips[2].textContent = (Array.isArray(c.models) ? c.models.length : 0) + ' مدل · ' + (c.key ? 'کلید دارد' : 'بدون کلید');
       d.onclick = () => openConns(c.id);
       els.connSummary.appendChild(d);
     }

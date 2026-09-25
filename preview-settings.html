@@ -2,7 +2,7 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8">
-<title>تنظیمات آتریا v0.7.1 — پیش‌نمایش</title>
+<title>تنظیمات آتریا v0.7.2 (مثل ۶٫۷) — پیش‌نمایش</title>
 <style>/* ==========================================================================
    Atria Dawn — styles (RTL, glass, animated dawn theme)
    ========================================================================== */
@@ -1706,7 +1706,7 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   <div class="settings-page" id="settingsModal">
     <div class="sp-wrap">
       <aside class="sp-side">
-        <div class="sp-title">⚙︎&nbsp; تنظیمات <span class="sp-ver">v0.7.1</span></div>
+        <div class="sp-title">⚙︎&nbsp; تنظیمات <span class="sp-ver">v0.7.2</span></div>
         <nav class="sp-nav">
           <button class="stab active" data-tab="conn">🔑&nbsp; کلیدها و API</button>
           <button class="stab" data-tab="behavior">🎛&nbsp; رفتار</button>
@@ -1724,6 +1724,10 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
         </header>
         <div class="sp-body">
         <div class="stab-body active" data-tab="conn">
+          <div class="field">
+            <label class="flabel">اتصال فعال</label>
+            <div class="conn-summary" id="connSummary"></div>
+          </div>
           <div class="conns-body">
             <aside class="conn-list-col">
               <button class="btn primary full" id="connAdd">＋ اتصال جدید</button>
@@ -1783,9 +1787,9 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
           </div>
           </section>
           </div>
+          <span class="fhint">هر سرویس‌دهنده می‌تواند چند اتصال جدا با کلید و مدل‌های خودش داشته باشد. مدل‌های منوی چت دقیقاً همان‌هایی‌اند که برای هر اتصال تعیین کنی — فهرست پیش‌فرضی در کار نیست.</span>
         </div>
         <div class="stab-body" data-tab="behavior">
-          <section class="set-card">
           <div class="set-sec-title">پاسخ‌گویی</div>
           <div class="set-row">
             <div class="set-row-text">
@@ -1815,8 +1819,6 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
             </div>
             <label class="switch-field sm"><input type="checkbox" id="streamVal"><span class="switch"></span></label>
           </div>
-          </section>
-          <section class="set-card">
           <div class="set-row hidden" id="dsSearchRow">
             <div class="set-row-text">
               <div class="set-label">🔎 جست‌وجوی وب دیپ‌سیک</div>
@@ -1824,18 +1826,14 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
             </div>
             <label class="switch-field sm"><input type="checkbox" id="dsSearchVal"><span class="switch"></span></label>
           </div>
-          </section>
         </div>
 
         <div class="stab-body" data-tab="sys">
-          <section class="set-card">
           <div class="set-sec-title">شخصیت و ابزارها</div>
           <div class="field">
             <label class="flabel">دستور سیستمی (System Prompt)</label>
             <textarea id="sysVal" rows="4" dir="auto" spellcheck="false" placeholder="شخصیت و قوانین دلخواه — فارسی یا انگلیسی (خالی = بدون شخصیت اضافه)"></textarea>
           </div>
-          </section>
-          <section class="set-card">
           <div class="set-row">
             <div class="set-row-text">
               <div class="set-label">حالت ایجنت</div>
@@ -1854,22 +1852,17 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
             <label class="flabel">پوشهٔ کاری (Workspace)</label>
             <input type="text" id="wsVal" dir="ltr" spellcheck="false" placeholder="پیش‌فرض: .atria/workspace در پوشهٔ کاربر">
           </div>
-          </section>
-          <section class="set-card">
           <div class="field">
             <label class="flabel">حداکثر طول پاسخ (توکن خروجی)</label>
             <input type="number" id="maxTokVal" min="256" max="65536" step="256" inputmode="numeric" dir="ltr">
             <span class="fhint">سقف سرویس ۶۵۵۳۶ است — سقفِ طول پاسخ است و ربطی به موجودی/اعتبار حساب ندارد.</span>
           </div>
-          </section>
-          <section class="set-card">
           <div class="set-sec-title">ذخیره‌سازی</div>
           <div class="field">
             <div class="storage-box" id="storageBox">در حال آماده‌سازی…</div>
             <button class="btn" id="btnRevealAtria" type="button">📂 باز کردن پوشهٔ .atria</button>
             <span class="fhint">گفتگوها و ورک‌اسپیس مثل اپ‌های رسمی در پوشهٔ کاربر نگهداری می‌شوند — مثلاً <b dir="ltr">C:\Users\man\.atria</b></span>
           </div>
-          </section>
         </div>
         </div>
       </main>
@@ -1885,15 +1878,17 @@ document.querySelectorAll('.stab').forEach((b) => b.addEventListener('click', ()
   const body = document.querySelector('.stab-body[data-tab="' + b.dataset.tab + '"]');
   if (body) body.classList.add('active');
 }));
-document.getElementById('connList').innerHTML =
-  '<button class="conn-card active"><div class="cc-name">open router ⭐</div>' +
+// نمونهٔ پر شده — دقیقاً رندر واقعی برنامه
+document.getElementById('connSummary').innerHTML =
+  '<div class="conn-card active"><div class="cc-name">⭐ open router</div>' +
   '<div class="cc-meta"><span class="cc-chip">Chat Completions</span>' +
   '<span class="cc-chip ltr">https://openrouter.ai/api/v1</span>' +
-  '<span class="cc-chip">5 مدل · کلید دارد</span></div></button>' +
+  '<span class="cc-chip">5 مدل · کلید دارد</span></div></div>';
+document.getElementById('connList').innerHTML =
+  '<button class="conn-card active"><div class="cc-name">open router</div>' +
+  '<div class="cc-meta"><span class="cc-chip">Chat Completions</span></div></button>' +
   '<button class="conn-card"><div class="cc-name">ApMix</div>' +
-  '<div class="cc-meta"><span class="cc-chip">Messages API</span>' +
-  '<span class="cc-chip ltr">https://api.apmix.ai</span>' +
-  '<span class="cc-chip">2 مدل · بدون کلید</span></div></button>';
+  '<div class="cc-meta"><span class="cc-chip">Messages API</span></div></button>';
 const form = document.getElementById('connForm');
 form.classList.remove('hidden');
 document.getElementById('cfName').value = 'open router';
@@ -1901,7 +1896,6 @@ document.getElementById('cfBase').value = 'https://openrouter.ai/api/v1';
 document.getElementById('cfKey').value = 'sk-or-xxxxxxxxxxxx';
 document.getElementById('cfTags').innerHTML =
   '<span class="model-tag"><b>openai/gpt-5.2</b><button class="mt-x">✕</button></span>' +
-  '<span class="model-tag"><b>cohere/north-mini-code:free</b><button class="mt-x">✕</button></span>' +
   '<span class="model-tag"><b>anthropic/claude-sonnet-5</b><button class="mt-x">✕</button></span>';
 </script>
 </body>
