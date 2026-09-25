@@ -718,8 +718,11 @@ function renderConvList() {
     t.className = 'conv-title';
     t.textContent = c.title;
     const d = document.createElement('div');
-    d.className = 'conv-date';
-    d.textContent = new Date(c.createdAt).toLocaleDateString('fa-IR');
+    d.className = 'conv-sub';
+    const lastMsg = c.messages[c.messages.length - 1];
+    const prev = lastMsg ? String(lastMsg.plain || lastMsg.text || '').replace(/\s+/g, ' ').trim().slice(0, 64) : '';
+    const dstr = new Date(c.createdAt).toLocaleDateString('fa-IR');
+    d.textContent = prev ? prev + ' · ' + dstr : dstr;
     const del = document.createElement('button');
     del.className = 'conv-del';
     del.title = 'حذف';
