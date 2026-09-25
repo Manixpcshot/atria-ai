@@ -1,4 +1,4 @@
-//! Built-in agent tools: calculator, time, memory and sandboxed file access.
+//! Built-in agent tools: calculator, time, memory and full file access.
 
 use crate::memory::MemoryStore;
 use serde_json::Value;
@@ -60,7 +60,7 @@ pub fn file_tool_catalog() -> Vec<Value> {
     vec![
         serde_json::json!({
             "name": "list_files",
-            "description": "List files and folders in the user's workspace folder. Path is relative to the workspace root.",
+            "description": "List files and folders. Path can be relative to the workspace folder or an absolute path anywhere on the computer (e.g. 'C:/Users/...' or 'C:\\\\Users\\\\...').",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -70,7 +70,7 @@ pub fn file_tool_catalog() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "read_file",
-            "description": "Read a UTF-8 text file from the user's workspace folder.",
+            "description": "Read a UTF-8 text file. Path can be relative to the workspace folder or an absolute path anywhere on the computer.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -81,7 +81,7 @@ pub fn file_tool_catalog() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "write_file",
-            "description": "Create or overwrite a UTF-8 text file inside the user's workspace folder (parent folders are created).",
+            "description": "Create or overwrite a UTF-8 text file anywhere on the computer (parent folders are created). Path can be relative to the workspace folder or an absolute path.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -172,21 +172,32 @@ pub fn execute(name: &str, input: &Value, mem: &mut MemoryStore, root: &Path) ->
 }
 
 // ---------------------------------------------------------------------------
-// Sandboxed file access — everything resolves under the workspace root.
+// Full file access — absolute paths address the whole computer; relative
+// paths resolve under the workspace folder (which is only the default base).
 // ---------------------------------------------------------------------------
 
 const MAX_READ: usize = 256 * 1024;
 
-/// Resolve `rel` under `root`, rejecting `..` escapes and empty roots.
+/// Resolve a file-tool path. Absolute paths (drive `C:/...`, UNC `//server/...`,
+/// or `/...`) can address any location on the computer; relative paths resolve
+/// under `root` (the workspace folder) as the default base.
 fn sandbox(root: &Path, rel: &str) -> Result<std::path::PathBuf, String> {
+    let raw = rel.trim().replace('\\', "/");
+    let is_abs = raw.starts_with('/')
+        || (raw.len() >= 3
+            && raw.as_bytes()[0].is_ascii_alphabetic()
+            && raw.as_bytes()[1] == b':'
+            && raw.as_bytes()[2] == b'/');
+    if is_abs {
+        return Ok(std::path::PathBuf::from(raw));
+    }
     if root.as_os_str().is_empty() {
         return Err("file tools are disabled (no workspace set)".to_string());
     }
     let mut p = root.to_path_buf();
-    for comp in rel.replace('\\', "/").split('/') {
+    for comp in raw.split('/') {
         match comp {
             "" | "." => continue,
-            ".." => return Err("path escapes the workspace folder".to_string()),
             c => p.push(c),
         }
     }
@@ -450,13 +461,13 @@ mod tests {
     }
 
     #[test]
-    fn file_tools_are_sandboxed() {
-        let dir = std::env::temp_dir().join(format!("atria-sandbox-{}", std::process::id()));
+    fn file_tools_full_access() {
+        let dir = std::env::temp_dir().join(format!("atria-fa-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut mem = MemoryStore::in_memory();
 
-        // write + read roundtrip
+        // relative paths still resolve under the root
         let out = execute(
             "write_file",
             &serde_json::json!({"path": "notes/a.txt", "content": "salam"}),
@@ -466,18 +477,36 @@ mod tests {
         assert!(!out.is_error, "{}", out.output);
         let out = execute("read_file", &serde_json::json!({"path": "notes/a.txt"}), &mut mem, &dir);
         assert_eq!(out.output, "salam");
-
-        // listing sees it
         let out = execute("list_files", &serde_json::json!({"path": "notes"}), &mut mem, &dir);
         assert!(out.output.contains("a.txt"), "{}", out.output);
 
-        // escaping the sandbox is rejected
-        let out = execute("read_file", &serde_json::json!({"path": "../../etc/passwd"}), &mut mem, &dir);
-        assert!(out.is_error);
-        let out = execute("write_file", &serde_json::json!({"path": "../evil.txt", "content": "x"}), &mut mem, &dir);
-        assert!(out.is_error);
+        // absolute paths can address the whole computer (even with empty root)
+        let abs = dir.join("abs.txt");
+        let abs_s = abs.to_string_lossy().replace('\\', "/");
+        let out = execute(
+            "write_file",
+            &serde_json::json!({"path": abs_s, "content": "full"}),
+            &mut mem,
+            Path::new(""),
+        );
+        assert!(!out.is_error, "{}", out.output);
+        let out = execute("read_file", &serde_json::json!({"path": abs_s}), &mut mem, Path::new(""));
+        assert!(!out.is_error, "{}", out.output);
+        assert_eq!(out.output, "full");
 
-        // empty root -> disabled
+        // ".." is allowed now (full access)
+        let out = execute(
+            "write_file",
+            &serde_json::json!({"path": "../atria-fa-sibling.txt", "content": "x"}),
+            &mut mem,
+            &dir,
+        );
+        assert!(!out.is_error, "{}", out.output);
+        let sib = dir.parent().unwrap().join("atria-fa-sibling.txt");
+        assert!(sib.exists());
+        let _ = std::fs::remove_file(&sib);
+
+        // empty root still disables *relative* access
         let out = execute("list_files", &serde_json::json!({}), &mut mem, Path::new(""));
         assert!(out.is_error);
 

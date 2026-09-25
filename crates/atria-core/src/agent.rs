@@ -167,7 +167,7 @@ pub async fn run_agent(
         out.input_tokens += turn.usage.input_tokens;
         out.output_tokens += turn.usage.output_tokens;
 
-        // Execute every requested tool locally (sandboxed to the workspace).
+        // Execute every requested tool locally (file tools: full computer access).
         let root = Path::new(&cfg.workspace);
         let mut results = Vec::new();
         if turn.stop_reason == "tool_use" {

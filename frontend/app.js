@@ -28,6 +28,13 @@ const CONN_TEMPLATES = {
   'perplexity': { label: 'Perplexity (Sonar)',          base: 'https://api.perplexity.ai/chat/completions',                 kind: 'openai' },
   'apmix':      { label: 'ApMix — Messages API',      base: 'https://api.apmix.ai',                                       kind: 'anthropic' },
   'apmix-cc':   { label: 'ApMix — Chat Completions',  base: 'https://api.apmix.ai/v1',                                    kind: 'openai' },
+  'opencode':   { label: 'OpenCode Zen — مدل‌های کدنویسی', base: 'https://opencode.ai/zen/v1',                      kind: 'openai' },
+  'opencode-cc':{ label: 'OpenCode Zen — Claude',          base: 'https://opencode.ai/zen',                         kind: 'anthropic' },
+  'kimi':       { label: 'Kimi (Moonshot)',                base: 'https://api.moonshot.ai/v1',                      kind: 'openai' },
+  'zai':        { label: 'Z.AI (GLM)',                     base: 'https://api.z.ai/api/paas/v4',                    kind: 'openai' },
+  'siliconflow':{ label: 'SiliconFlow — متن‌باز',          base: 'https://api.siliconflow.com/v1',                  kind: 'openai' },
+  'ollama':     { label: 'Ollama (محلی)',                  base: 'http://localhost:11434/v1',                       kind: 'openai' },
+  'lmstudio':   { label: 'LM Studio (محلی)',               base: 'http://localhost:1234/v1',                        kind: 'openai' },
   'custom':     { label: 'سفارشی…',                   base: '',                                                        kind: 'openai' },
 };
 
@@ -743,7 +750,6 @@ function renderConvList() {
 }
 
 function newChat(silent) {
-  if (st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
   const chat = { id: 'c' + Date.now() + Math.random().toString(36).slice(2, 6), title: 'گفتگوی جدید', createdAt: Date.now(), messages: [] };
   st.chats.unshift(chat);
   st.currentId = chat.id;
@@ -756,7 +762,6 @@ function newChat(silent) {
 }
 
 function switchChat(id) {
-  if (st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
   st.currentId = id;
   localStorage.setItem(LS_CURRENT, id);
   renderConvList();
@@ -766,7 +771,6 @@ function switchChat(id) {
 }
 
 function deleteChat(id) {
-  if (st.sending) return toast('ابتدا تولید را متوقف کن', 'warn');
   const c = st.chats.find((x) => x.id === id);
   if (!confirm('گفتگوی «' + (c ? c.title : 'این گفتگو') + '» حذف شود؟')) return;
   st.chats = st.chats.filter((x) => x.id !== id);
@@ -993,7 +997,8 @@ const TRANSIENT_RE = /(maxwaitms|rate.?limit|ratelimit|queue|expiration|timeout|
 
 function send() {
   const text = els.input.value.trim();
-  if ((!text && !st.pendingImgs.length) || st.sending) return;
+  if (!text && !st.pendingImgs.length) return;
+  if (st.sending) return toast('تولید فعلی هنوز تمام نشده — ⏹ بزن یا صبر کن', 'warn');
   const chat = currentChat();
   if (!chat) { newChat(true); return send(); }
 
@@ -1035,6 +1040,7 @@ function send() {
 
 function startTurn() {
   st.sending = true;
+  st.runChatId = st.currentId; // چتِ همین تولید — حتی اگر کاربر وسط کار چت را عوض کند
   st.runText = '';
   st.streamEl = null;
   st.stackEl = null;
@@ -1418,8 +1424,9 @@ function finishRun(newMessages, finalText) {
   els.btnSend.classList.remove('hidden');
   els.btnStop.classList.add('hidden');
   if (st.streamEl) st.streamEl.classList.remove('streaming');
-  const chat = currentChat();
+  const chat = st.chats.find((x) => x.id === st.runChatId) || null;
   const plain = finalText && finalText.trim() ? finalText : st.runText || '(پاسخ خالی)';
+  if (!chat) { toast('گفتگوی این تولید حذف شده بود؛ پاسخ ذخیره نشد', 'warn'); return; }
   const flow = (st.run && st.run.log.length) ? st.run.log : null;
   const pushed = [];
   if (newMessages && newMessages.length) {
@@ -1442,8 +1449,12 @@ function finishRun(newMessages, finalText) {
   }
   if (lastSession) chat.dsSession = lastSession;
   saveChats(chat.id);
-  renderHistory(); // نمایش نهایی = متن کامل ذخیره‌شده (نه متن ناقص استریم زنده)
-  scrollBottom();
+  if (st.currentId === chat.id) {
+    renderHistory(); // نمایش نهایی = متن کامل ذخیره‌شده (نه متن ناقص استریم زنده)
+    scrollBottom();
+  } else {
+    toast('پاسخ در گفتگوی «' + chat.title + '» ذخیره شد', 'ok');
+  }
 }
 
 /* ---------------- events from Rust ---------------- */
@@ -1586,15 +1597,19 @@ function renderModelMenu() {
     };
     els.modelMenu.appendChild(head);
     let any = false;
-    for (const cc of st.conns) {
-      if (cc.enabled === false) continue;
+    const grouped = st.conns.filter((cc) => cc.enabled !== false && cc.models && cc.models.length);
+    grouped.sort((a, b) => (c && a.id === c.id ? -1 : c && b.id === c.id ? 1 : 0));
+    for (const cc of grouped) {
+      const g = document.createElement('div');
+      g.className = 'mm-group';
+      g.textContent = cc.name;
+      els.modelMenu.appendChild(g);
       for (const m of cc.models) {
         const it = document.createElement('button');
-        const isAct = (st.settings.model === m && ((c && cc.id === c.id) || (!st.settings.conn && true)));
         it.className = 'mm-item' + (c && cc.id === c.id && st.settings.model === m ? ' active' : '');
         it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
         it.querySelector('.mm-model').textContent = m;
-        it.querySelector('.mm-src').textContent = cc.name;
+        it.querySelector('.mm-src').textContent = kindLabel(cc.kind);
         it.onclick = () => chooseModelFor(cc.id, m);
         els.modelMenu.appendChild(it);
         any = true;
@@ -1623,6 +1638,11 @@ function renderModelMenu() {
     els.modelMenu.querySelectorAll('.mm-item').forEach((it) => {
       const hit = !q || it.textContent.toLowerCase().includes(q);
       it.classList.toggle('hidden', !hit);
+    });
+    els.modelMenu.querySelectorAll('.mm-group').forEach((g) => {
+      let n = g.nextElementSibling, vis = false;
+      while (n && n.classList.contains('mm-item')) { if (!n.classList.contains('hidden')) vis = true; n = n.nextElementSibling; }
+      g.classList.toggle('hidden', !vis);
     });
   };
   tools.querySelector('#mmManage').onclick = (e) => {
@@ -1669,7 +1689,7 @@ function boot() {
   renderConvList();
   renderHistory();
 
-  els.btnNew.onclick = () => { if (!st.sending) newChat(); };
+  els.btnNew.onclick = () => newChat();
   els.btnSettings.onclick = () => openModal(els.settingsModal);
   els.btnMemory.onclick = openMemory;
   els.btnSide.onclick = () => els.frame.classList.toggle('side-hidden');

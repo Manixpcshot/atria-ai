@@ -1337,3 +1337,7 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   flex: 1 1 auto; min-width: 0; overflow-y: auto;
   padding-inline: 6px 2px; display: flex; flex-direction: column; gap: 12px;
 }
+
+/* v0.6.7: گروه‌بندی منوی مدل */
+.mm-group{padding:9px 12px 3px;font-size:10px;font-weight:700;letter-spacing:.3px;color:var(--text-dim);position:sticky;top:0;background:var(--panel);z-index:1}
+.mm-group.hidden{display:none}
