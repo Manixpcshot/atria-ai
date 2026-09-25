@@ -1177,3 +1177,70 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
+
+
+/* ================= v0.6.3 — منوی مدل جمع‌وجور + صفحهٔ کامل تنظیمات ================= */
+#modelMenu {
+  width: 300px; max-width: 300px;
+  max-height: 320px;
+  overflow-y: auto; overflow-x: hidden;
+  border-radius: 16px; padding: 4px 0 6px;
+}
+#modelMenu .mm-item { margin: 1px 8px; padding: 7px 10px; font-size: 12px; border-radius: 10px; }
+#modelMenu .mm-model {
+  min-width: 0; flex: 1 1 auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px;
+}
+#modelMenu .mm-src {
+  flex: 0 1 auto; max-width: 42%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px;
+}
+#modelMenu .mm-head { padding: 6px 12px 2px; }
+#modelMenu .mm-tools { padding: 6px 8px; }
+#modelMenu .mm-search { font-size: 11.5px; padding: 6px 10px; }
+#modelMenu .mm-custom { font-size: 11px; }
+
+.settings-page {
+  position: fixed; top: 44px; left: 0; right: 0; bottom: 0; z-index: 55;
+  padding: 18px clamp(14px, 3vw, 36px);
+  background: rgba(8, 10, 18, 0.55);
+  backdrop-filter: blur(10px);
+  animation: spIn 0.28s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+@keyframes spIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.sp-wrap {
+  height: 100%; display: flex; overflow: hidden; border-radius: 22px;
+  background: rgba(13, 15, 27, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.55);
+}
+.sp-side {
+  width: 232px; flex: 0 0 232px; display: flex; flex-direction: column; gap: 10px;
+  padding: 22px 16px; border-inline-end: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+.sp-title { font-size: 16px; font-weight: 800; color: #e6efff; margin-bottom: 8px; }
+.sp-nav { display: flex; flex-direction: column; gap: 6px; }
+.sp-nav .stab {
+  text-align: start; padding: 11px 14px; border-radius: 12px;
+  font-size: 13px; font-weight: 700; cursor: pointer;
+  border: 1px solid transparent; background: rgba(255, 255, 255, 0.04); color: #b9c9e4;
+}
+.sp-nav .stab:hover { background: rgba(255, 255, 255, 0.08); color: #eaf2ff; }
+.sp-nav .stab.active {
+  background: linear-gradient(180deg, rgba(56, 130, 246, 0.28), rgba(56, 130, 246, 0.14));
+  border-color: rgba(56, 130, 246, 0.45); color: #ffffff;
+}
+.sp-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+.sp-main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+.sp-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 28px 4px;
+}
+.sp-head h2 { margin: 0; font-size: 18px; font-weight: 800; color: #eaf2ff; }
+.sp-body {
+  flex: 1 1 auto; overflow-y: auto;
+  padding: 14px 28px 28px;
+}
+.sp-body .stab-body { display: none; }
+.sp-body .stab-body.active { display: flex; flex-direction: column; gap: 12px; }

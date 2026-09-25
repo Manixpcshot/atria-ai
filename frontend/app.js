@@ -1688,7 +1688,7 @@ function boot() {
     openMemory();
     toast('حافظه پاک شد', 'ok');
   };
-  els.settingsModal.onclick = (e) => { if (e.target === els.settingsModal) closeModal(els.settingsModal); };
+  // صفحهٔ کامل تنظیمات — کلیک پس‌زمینه نمی‌بندد (فقط ✕ / بستن / Esc)
   els.memoryModal.onclick = (e) => { if (e.target === els.memoryModal) closeModal(els.memoryModal); };
   els.cmdk.onclick = (e) => { if (e.target === els.cmdk) closeModal(els.cmdk); };
   els.cmdkInput.oninput = () => renderCmdkList(els.cmdkInput.value.trim());
