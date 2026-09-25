@@ -1569,3 +1569,117 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   background: #1c1b19 !important; border: 1px solid rgba(245, 240, 230, 0.12) !important;
   border-radius: 10px !important; color: #efe9dd !important; min-height: 34px !important;
 }
+
+/* ================= v0.7.0 — چت و پنل مدل مثل کلاد + تعمیر باگ‌های عکس‌ها ================= */
+
+/* چت: ستون محتوای مرکزی (دیگر چسبیده به لبهٔ پنجره نیست) */
+.messages .msg {
+  max-width: 920px; width: 100%;
+  margin-inline: auto; box-sizing: border-box;
+}
+.stack { max-width: min(760px, 84%) !important; }
+.composer-zone {
+  width: calc(100% - 24px); max-width: 920px;
+  margin: 0 auto 18px !important;
+}
+.think-now {
+  max-width: 46%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 11px; opacity: 0.85; flex: none;
+}
+
+/* منوی مدل — دقیقاً سبک کلاد: نام + توضیح + تیک فعال */
+#modelMenu {
+  width: 344px !important; max-width: min(344px, calc(100vw - 24px)) !important;
+  border-radius: 16px !important; padding: 8px !important;
+  background: rgba(38, 36, 34, 0.98) !important;
+}
+#modelMenu .mm-item {
+  display: flex !important; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 10px 12px !important;
+  border-radius: 12px !important; margin: 1px 2px !important;
+}
+#modelMenu .mm-item:hover { background: rgba(245, 240, 230, 0.07) !important; border-color: transparent !important; }
+#modelMenu .mm-item.active { background: rgba(245, 240, 230, 0.08) !important; border-color: transparent !important; }
+#modelMenu .mm-main {
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0; flex: 1; text-align: start;
+}
+#modelMenu .mm-name {
+  font-family: var(--font); font-size: 13px; font-weight: 700; color: #efe9dd;
+  direction: ltr; text-align: start;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#modelMenu .mm-sub {
+  font-family: var(--font); font-size: 11px; color: #a49d90;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#modelMenu .mm-tick {
+  flex: none; width: 20px; text-align: center;
+  color: #e0a17c; font-size: 15px; font-weight: 800; line-height: 1;
+}
+#modelMenu .mm-group {
+  position: static !important;
+  padding: 10px 14px 4px !important;
+  font-size: 10px; color: #8f887c !important; letter-spacing: 0.4px;
+}
+#modelMenu .mm-model, #modelMenu .mm-src { display: none; }
+#modelMenu .mm-search, input.mm-search {
+  background: #1c1b19 !important;
+  border: 1px solid rgba(245, 240, 230, 0.12) !important;
+  border-radius: 10px !important; color: #efe9dd !important;
+  min-height: 34px !important; padding: 7px 11px !important;
+  width: 100%; box-sizing: border-box; outline: none;
+}
+#modelMenu .mm-search:focus, input.mm-search:focus {
+  border-color: rgba(217, 119, 87, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.15) !important;
+}
+
+/* باگ باکس سفید: هر ورودیِ بدونِ type هم استایل بگیرد */
+.sp-body input:not([type="checkbox"]):not([type="range"]) {
+  width: 100%; box-sizing: border-box;
+  min-height: 38px !important; padding: 8px 12px !important;
+  background: #1c1b19 !important;
+  border: 1px solid rgba(245, 240, 230, 0.12) !important;
+  border-radius: 10px !important;
+  color: #efe9dd !important; font-size: 12.5px !important;
+  outline: none; transition: 0.15s;
+}
+.sp-body input:not([type="checkbox"]):not([type="range"]):focus {
+  border-color: rgba(217, 119, 87, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.15) !important;
+}
+
+/* فهرست مدل‌های سرور — LTR و تمیز (باگ قاطی/آینه‌ای) */
+.srv-list { display: flex; flex-direction: column; gap: 2px; }
+.srv-item {
+  direction: ltr !important; text-align: left !important;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 7px 10px !important; border-radius: 8px !important;
+}
+
+/* چیپ‌های متای اتصال (تعمیر BIDI «5 مدل» و آدرس‌ها) */
+.cc-meta { display: flex !important; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.cc-chip {
+  font-size: 10px; color: #a49d90;
+  background: rgba(245, 240, 230, 0.06);
+  border: 1px solid rgba(245, 240, 230, 0.08);
+  border-radius: 999px; padding: 2px 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.cc-chip.ltr { direction: ltr; font-family: var(--mono); max-width: 190px; }
+
+/* کارت اتصال‌ها: بدون فرم → تک‌ستونه و جمع (نه چالهٔ خالی) */
+.conns-body { min-height: 300px; }
+.conns-body:has(.conn-form-col.hidden) {
+  grid-template-columns: minmax(0, 400px);
+  min-height: 200px;
+}
+
+/* تگ‌های مدل: مرتب با لبهٔ برش */
+.model-tag { max-width: 100%; box-sizing: border-box; }
+.model-tag b {
+  font-family: var(--mono); font-size: 11px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

@@ -223,7 +223,7 @@ let chatsLoadPayload = [];
 let chatsLoadCalled = 0;
 function router(cmd) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.6.8' });
+    case 'app_meta': return Promise.resolve({ version: '0.7.0' });
     case 'chats_load': chatsLoadCalled++; return Promise.resolve(chatsLoadPayload);
     case 'dirs_info': return Promise.resolve({ chats: 'C:/u/.atria/chats', workspace: 'C:/u/.atria/workspace', memory: 'C:/u/.atria/memory.json' });
     case 'memory_list': return Promise.resolve([{ title: 'نکته', content: 'متن', ts: 'امروز' }]);
@@ -303,7 +303,7 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.6.8');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.7.0');
 
 console.log('\n=== 2) منوی انتخاب مدل ===');
 byId.modelPick.click();
@@ -315,6 +315,8 @@ eq('۳ آیتم مدل + ۲ دکمهٔ پایینی', byId.modelMenu.querySelect
 const items = byId.modelMenu.querySelectorAll('.mm-item');
 const itemA = items.find((i) => i.textContent.includes('model-a'));
 ok('آیتم model-a هست', !!itemA);
+ok('سبک کلاد: نام + توضیح + تیک', !!(itemA.querySelector('.mm-name') && itemA.querySelector('.mm-sub') && itemA.querySelector('.mm-tick')));
+ok('تیک فعال روی مدل انتخابی', itemA.classList.contains('active') === (T.effModel() === 'model-a'));
 const search = byId.modelMenu.querySelector('#mmSearch');
 ok('باکس جستجو هست', !!search);
 search.value = 'claude';
@@ -409,6 +411,22 @@ T.deleteChat(runChat3);
 ok('حذف چتِ در حال تولید — بدون کرش', T.st.sending === true && !T.st.chats.some((c) => c.id === runChat3));
 emit('atria:done', { new_messages: null, final_text: 'پاسخ گم‌شده', session_id: '', input_tokens: 0, output_tokens: 0 });
 ok('پاسخ چت حذف‌شده بی‌صدا کنار رفت', T.st.sending === false && !T.st.chats.some((c) => (c.messages || []).some((m) => m.plain === 'پاسخ گم‌شده')));
+// v0.7.0: بازگشت به چتِ در حال تولید — حباب زنده باید دوباره سوار شود (باگ «پیام‌ها پاک می‌شود»)
+{
+  byId.input.value = 'تولید زنده';
+  byId.btnSend.click();
+  const liveChat = T.st.runChatId;
+  T.newChat();
+  emit('atria:text', { delta: 'در حال نوشتن…' });
+  ok('حین دوری، حباب زنده به صفحه چسبیده نیست', T.st.liveMsg && !T.st.liveMsg.isConnected);
+  T.switchChat(liveChat);
+  ok('بازگشت به چتِ در حال تولید — حباب زنده دوباره سوار شد', T.st.liveMsg && T.st.liveMsg.isConnected);
+  emit('atria:text', { delta: ' ادامه' });
+  ok('نوشتن ادامه دارد بعد از بازگشت', T.st.runText.includes('ادامه'));
+  emit('atria:done', { new_messages: null, final_text: 'پاسخ زنده', session_id: '', input_tokens: 1, output_tokens: 1 });
+  const liveChatObj = T.st.chats.find((c) => c.id === liveChat);
+  eq('پاسخ نهایی در همان چت نشست', liveChatObj.messages[liveChatObj.messages.length - 1].plain, 'پاسخ زنده');
+}
 
 console.log('\n=== 7) خطا و تلاش مجدد ===');
 byId.input.value = 'پیام چهارم';

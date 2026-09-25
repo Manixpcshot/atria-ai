@@ -321,19 +321,27 @@ function renderConnsModal() {
 
 function renderConnList() {
   els.connList.innerHTML = '';
-  if (!st.conns.length) {
-    els.connList.innerHTML = '<div class="mem-empty">هنوز اتصالی نیست — «اتصال جدید» بزن</div>';
+  const list = Array.isArray(st.conns) ? st.conns : [];
+  if (!list.length) {
+    els.connList.innerHTML = '<div class="mem-empty">هنوز اتصالی نیست — «＋ اتصال جدید» بزن</div>';
     return;
   }
-  for (const c of st.conns) {
-    const it = document.createElement('button');
-    it.className = 'conn-card' + (c.id === connEditId ? ' active' : '');
-    it.innerHTML = '<div class="cc-name"></div><div class="cc-meta"></div>';
-    it.querySelector('.cc-name').textContent = c.name + (c.id === st.activeConnId ? ' ⭐' : '');
-    it.querySelector('.cc-meta').textContent =
-      kindLabel(c.kind) + ' · ' + c.models.length + ' مدل' + (c.key ? '' : ' · بدون کلید');
-    it.onclick = () => { connEditId = c.id; connSrv = []; renderConnsModal(); };
-    els.connList.appendChild(it);
+  for (const c of list) {
+    try {
+      const it = document.createElement('button');
+      it.className = 'conn-card' + (c.id === connEditId ? ' active' : '');
+      it.innerHTML = '<div class="cc-name"></div><div class="cc-meta"></div>';
+      it.querySelector('.cc-name').textContent = c.name + (c.id === st.activeConnId ? ' ⭐' : '');
+      const meta = it.querySelector('.cc-meta');
+      meta.innerHTML = '<span class="cc-chip"></span><span class="cc-chip ltr"></span><span class="cc-chip"></span>';
+      const chips = meta.querySelectorAll('.cc-chip');
+      const mods = Array.isArray(c.models) ? c.models.length : 0;
+      chips[0].textContent = kindLabel(c.kind);
+      chips[1].textContent = c.base || 'بدون آدرس';
+      chips[2].textContent = mods + ' مدل · ' + (c.key ? 'کلید دارد' : 'بدون کلید');
+      it.onclick = () => { connEditId = c.id; connSrv = []; renderConnsModal(); };
+      els.connList.appendChild(it);
+    } catch (e) { console.error('renderConnList item:', e); }
   }
 }
 
@@ -558,7 +566,7 @@ function updateConnTab() {
       d.innerHTML = '<div class="cc-name"></div><div class="cc-meta"></div>';
       d.querySelector('.cc-name').textContent = '⭐ ' + c.name;
       d.querySelector('.cc-meta').textContent =
-        kindLabel(c.kind) + ' · ' + (c.base || 'بدون آدرس') + ' · ' + c.models.length + ' مدل · ' + (c.key ? 'کلید دارد' : 'بدون کلید');
+        kindLabel(c.kind) + ' · ' + (c.base || 'بدون آدرس') + ' · ' + (Array.isArray(c.models) ? c.models.length : 0) + ' مدل · ' + (c.key ? 'کلید دارد' : 'بدون کلید');
       d.onclick = () => openConns(c.id);
       els.connSummary.appendChild(d);
     }
@@ -884,6 +892,7 @@ function renderHistory() {
       bubbleEl(m.role === 'user' ? 'user' : 'ai', m.plain || m.text || '…', m.flow, m.images));
   }
   scrollBottom(true);
+  ensureLiveVisible(); // v0.7.0: اگر تولید در همین چت در جریان است، حباب زنده برگردد
 }
 
 /* ---------------- wire helpers ---------------- */
@@ -1042,6 +1051,7 @@ function startTurn() {
   st.runText = '';
   st.streamEl = null;
   st.stackEl = null;
+  st.liveMsg = null;
   st.run = newRun();
   st.live = null;
   liveMdEl(); // create the live ai message shell
@@ -1135,7 +1145,7 @@ function newRun() {
 function ensurePanel() {
   if (!st.run) st.run = newRun();
   const run = st.run;
-  if (run.panel && run.panel.isConnected) return run.panel;
+  if (run.panel && (run.panel.isConnected || (st.liveMsg && st.liveMsg.contains(run.panel)))) return run.panel;
   if (!st.stackEl) liveMdEl(); // v0.6.8: اگر هنوز حباب ساخته نشده، اول بساز
   const box = document.createElement('div');
   box.className = 'think-box run-panel has open';
@@ -1201,6 +1211,7 @@ function addThinkStep() {
 }
 
 function onThinking(delta) {
+  ensureLiveVisible();
   if (!st.settings.thinking) return;
   closeLive();
   const run = st.run || (st.run = newRun());
@@ -1226,6 +1237,7 @@ function onThinking(delta) {
 }
 
 function onText(delta) {
+  ensureLiveVisible();
   st.runText += delta;
   if (st.cursorHolder) stopBlink();
   if (st.run) { st.run.thinkStep = null; st.run.thinkKind = 'text'; }
@@ -1373,6 +1385,7 @@ function liveMdEl() {
     st.streamEl = bub;
     st.stackEl = stack;
     st.mdEl = md;
+    st.liveMsg = wrap; // برای سوار دوباره بعد از جابه‌جایی چت
     scrollBottom();
   }
   return st.mdEl;
@@ -1380,7 +1393,19 @@ function liveMdEl() {
 
 st.liveEl = function () { return liveMdEl(); };
 
+// اگر وسط تولید به چت دیگری رفتیم و برگشتیم، حباب زنده را دوباره سوار صفحه کن
+function ensureLiveVisible() {
+  if (!st.sending || !st.liveMsg) return;
+  const chat = currentChat();
+  if (!chat || chat.id !== st.runChatId) return;
+  if (!st.liveMsg.isConnected) {
+    els.messages.appendChild(st.liveMsg);
+    scrollBottom(true);
+  }
+}
+
 function ensureLive() {
+  ensureLiveVisible();
   if (!st.live) {
     stopBlink();
     const sec = document.createElement('div');
@@ -1579,11 +1604,13 @@ function renderModelMenu() {
     }
     for (const cc of st.conns) {
       const it = document.createElement('button');
-      it.className = 'mm-item' + (c && cc.id === c.id ? ' active' : '');
-      it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
-      it.querySelector('.mm-model').textContent = cc.name;
-      it.querySelector('.mm-src').textContent =
-        kindLabel(cc.kind) + ' · ' + cc.models.length + ' مدل' + (cc.key ? '' : ' · بدون کلید');
+      const isCur = c && cc.id === c.id;
+      it.className = 'mm-item' + (isCur ? ' active' : '');
+      it.innerHTML = '<span class="mm-main"><span class="mm-name"></span><span class="mm-sub"></span></span><span class="mm-tick"></span>';
+      it.querySelector('.mm-name').textContent = cc.name;
+      it.querySelector('.mm-sub').textContent =
+        kindLabel(cc.kind) + ' · ' + (Array.isArray(cc.models) ? cc.models.length : 0) + ' مدل' + (cc.key ? '' : ' · بدون کلید');
+      it.querySelector('.mm-tick').textContent = isCur ? '✓' : '';
       it.onclick = () => {
         setActiveConn(cc.id);
         menuShowConns = false;
@@ -1609,12 +1636,14 @@ function renderModelMenu() {
       g.className = 'mm-group';
       g.textContent = cc.name;
       els.modelMenu.appendChild(g);
-      for (const m of cc.models) {
+      for (const m of (Array.isArray(cc.models) ? cc.models : [])) {
         const it = document.createElement('button');
-        it.className = 'mm-item' + (c && cc.id === c.id && st.settings.model === m ? ' active' : '');
-        it.innerHTML = '<span class="mm-model"></span><span class="mm-src"></span>';
-        it.querySelector('.mm-model').textContent = m;
-        it.querySelector('.mm-src').textContent = kindLabel(cc.kind);
+        const isAct = c && cc.id === c.id && m === effModel();
+        it.className = 'mm-item' + (isAct ? ' active' : '');
+        it.innerHTML = '<span class="mm-main"><span class="mm-name"></span><span class="mm-sub"></span></span><span class="mm-tick"></span>';
+        it.querySelector('.mm-name').textContent = m;
+        it.querySelector('.mm-sub').textContent = cc.name + ' · ' + kindLabel(cc.kind);
+        it.querySelector('.mm-tick').textContent = isAct ? '✓' : '';
         it.onclick = () => chooseModelFor(cc.id, m);
         els.modelMenu.appendChild(it);
         any = true;
