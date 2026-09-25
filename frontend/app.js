@@ -292,12 +292,18 @@ let menuShowConns = false;
 
 function editConn() { return st.conns.find((c) => c.id === connEditId) || null; }
 
+function stabGo(tab) {
+  document.querySelectorAll('.stab').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
+  document.querySelectorAll('.stab-body').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
+}
+
 function openConns(id) {
   connEditId = id || (activeConn() ? activeConn().id : null);
   if (!connEditId && st.conns.length) connEditId = st.conns[0].id;
   connSrv = [];
   renderConnsModal();
-  openModal(els.connsModal);
+  openModal(els.settingsModal);
+  stabGo('conn');
 }
 
 function renderConnsModal() {
@@ -529,9 +535,9 @@ function bindConns() {
     updateConnTab();
     updateModelPick();
   };
-  els.connsX.onclick = () => closeModal(els.connsModal);
-  els.connsClose.onclick = () => closeModal(els.connsModal);
-  els.connsModal.onclick = (e) => { if (e.target === els.connsModal) closeModal(els.connsModal); };
+  /* v0.6.6: مودال جدا حذف شد — API داخل تنظیمات */
+  /* v0.6.6: مودال جدا حذف شد */
+  /* v0.6.6: مودال جدا حذف شد */
   els.btnManageConns.onclick = () => openConns(null);
 }
 

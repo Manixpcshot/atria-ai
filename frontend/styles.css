@@ -1322,3 +1322,18 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
 .tok-chip, .app-ver {
   color: #e0c2ae; background: rgba(217, 119, 87, 0.12); border-color: rgba(217, 119, 87, 0.3);
 }
+
+
+/* ================= v0.6.6 — API داخل صفحهٔ تنظیمات (بدون مودال دوم) ================= */
+.sp-body .stab-body[data-tab="conn"] { min-height: 0; }
+.sp-body .conns-body {
+  display: flex; gap: 14px; flex: 1 1 auto; min-height: 340px; margin-top: 4px;
+}
+.conn-list-col {
+  width: 236px; flex: 0 0 236px; display: flex; flex-direction: column; gap: 8px;
+}
+.conn-list { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.conn-form-col {
+  flex: 1 1 auto; min-width: 0; overflow-y: auto;
+  padding-inline: 6px 2px; display: flex; flex-direction: column; gap: 12px;
+}

@@ -112,7 +112,7 @@
       <aside class="sp-side">
         <div class="sp-title">⚙︎&nbsp; تنظیمات</div>
         <nav class="sp-nav">
-          <button class="stab active" data-tab="conn">🔗&nbsp; اتصال</button>
+          <button class="stab active" data-tab="conn">🔑&nbsp; کلیدها و API</button>
           <button class="stab" data-tab="behavior">🎛&nbsp; رفتار</button>
           <button class="stab" data-tab="sys">🖥&nbsp; سیستم</button>
         </nav>
@@ -132,10 +132,67 @@
             <label class="flabel">اتصال فعال</label>
             <div class="conn-summary" id="connSummary"></div>
           </div>
-          <button class="btn primary full" id="btnManageConns">⚙︎ مدیریت کلیدها و اتصال‌ها</button>
+          <div class="conns-body">
+            <aside class="conn-list-col">
+              <button class="btn primary full" id="connAdd">＋ اتصال جدید</button>
+              <div class="conn-list" id="connList"></div>
+            </aside>
+          <section class="conn-form-col hidden" id="connForm">
+          <div class="field">
+            <label class="flabel">نام اتصال</label>
+            <input id="cfName" dir="auto" spellcheck="false" placeholder="مثلاً OmniRoute محلی یا کلید کاری">
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="flabel">گویش API</label>
+              <select id="cfKind">
+                <option value="anthropic">Messages API (Anthropic-compatible)</option>
+                <option value="openai">Chat Completions (OpenAI-compatible)</option>
+                <option value="deepseek_web">DeepSeek وب (userToken + PoW — بدون کلید API)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="flabel">قالب آماده (سریع‌تر پر شود)</label>
+              <select id="cfTemplate"></select>
+            </div>
+          </div>
+          <div class="field">
+            <label class="flabel">آدرس پایه (Base URL)</label>
+            <input id="cfBase" dir="ltr" spellcheck="false">
+          </div>
+          <div class="field">
+            <label class="flabel" id="cfKeyLabel">کلید API</label>
+            <div class="key-row">
+              <input type="password" id="cfKey" dir="ltr" spellcheck="false" placeholder="کلید همین اتصال">
+              <button class="eye" id="cfKeyEye" title="نمایش">👁</button>
+              <button class="btn tiny hidden" id="cfTokenGuide" type="button">از کجا بیاورم؟</button>
+            </div>
+            <span class="fhint">کلید هر اتصال جداگانه نگه داشته می‌شود و فقط روی همین سیستم می‌ماند.</span>
+            <span class="fhint prov-help hidden" id="cfHint"></span>
+          </div>
+          <div class="field">
+            <label class="flabel">مدل‌های این اتصال</label>
+            <div class="model-tags" id="cfTags"></div>
+            <div class="key-row">
+              <input id="cfModelInput" dir="ltr" spellcheck="false" placeholder="نام مدل — Enter بزن">
+              <button class="btn tiny" id="cfModelAdd">افزودن</button>
+              <button class="btn tiny" id="cfFetchModels">🔎 دریافت از سرور</button>
+            </div>
+            <div class="srv-models hidden" id="cfSrvWrap">
+              <input class="mm-search" id="cfSrvSearch" placeholder="جست‌وجو در مدل‌های سرور…" spellcheck="false">
+              <div class="srv-list" id="cfSrvList"></div>
+            </div>
+            <span class="fhint">فقط مدل‌هایی که همین‌جا اضافه کنی در منوی چت نمایش داده می‌شوند. با «دریافت از سرور» فهرست مدل‌های واقعی سرور می‌آید؛ روی هرکدام کلیک کن تا اضافه یا برداشته شود.</span>
+          </div>
+          <div class="conn-form-foot">
+            <button class="btn danger" id="cfDelete">حذف اتصال</button>
+            <div class="spacer"></div>
+            <button class="btn" id="cfSetActive">⭐ اتصال فعال</button>
+          </div>
+          </section>
+          </div>
           <span class="fhint">هر سرویس‌دهنده می‌تواند چند اتصال جدا با کلید و مدل‌های خودش داشته باشد. مدل‌های منوی چت دقیقاً همان‌هایی‌اند که برای هر اتصال تعیین کنی — فهرست پیش‌فرضی در کار نیست.</span>
         </div>
-
         <div class="stab-body" data-tab="behavior">
           <div class="set-sec-title">پاسخ‌گویی</div>
           <div class="set-row">
@@ -246,79 +303,6 @@
           <input type="text" id="cmdkInput" placeholder="جست‌وجوی گفتگو…" spellcheck="false">
         </div>
         <div class="cmdk-list" id="cmdkList"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- connections / API keys manager -->
-  <div class="modal-backdrop hidden" id="connsModal">
-    <div class="modal glass wide">
-      <div class="modal-head">
-        <h2>کلیدها و اتصال‌ها</h2>
-        <button class="x" id="connsX">✕</button>
-      </div>
-      <div class="modal-body conns-body">
-        <aside class="conn-list-col">
-          <button class="btn primary full" id="connAdd">＋ اتصال جدید</button>
-          <div class="conn-list" id="connList"></div>
-        </aside>
-        <section class="conn-form-col hidden" id="connForm">
-          <div class="field">
-            <label class="flabel">نام اتصال</label>
-            <input id="cfName" dir="auto" spellcheck="false" placeholder="مثلاً OmniRoute محلی یا کلید کاری">
-          </div>
-          <div class="row2">
-            <div class="field">
-              <label class="flabel">گویش API</label>
-              <select id="cfKind">
-                <option value="anthropic">Messages API (Anthropic-compatible)</option>
-                <option value="openai">Chat Completions (OpenAI-compatible)</option>
-                <option value="deepseek_web">DeepSeek وب (userToken + PoW — بدون کلید API)</option>
-              </select>
-            </div>
-            <div class="field">
-              <label class="flabel">قالب آماده (سریع‌تر پر شود)</label>
-              <select id="cfTemplate"></select>
-            </div>
-          </div>
-          <div class="field">
-            <label class="flabel">آدرس پایه (Base URL)</label>
-            <input id="cfBase" dir="ltr" spellcheck="false">
-          </div>
-          <div class="field">
-            <label class="flabel" id="cfKeyLabel">کلید API</label>
-            <div class="key-row">
-              <input type="password" id="cfKey" dir="ltr" spellcheck="false" placeholder="کلید همین اتصال">
-              <button class="eye" id="cfKeyEye" title="نمایش">👁</button>
-              <button class="btn tiny hidden" id="cfTokenGuide" type="button">از کجا بیاورم؟</button>
-            </div>
-            <span class="fhint">کلید هر اتصال جداگانه نگه داشته می‌شود و فقط روی همین سیستم می‌ماند.</span>
-            <span class="fhint prov-help hidden" id="cfHint"></span>
-          </div>
-          <div class="field">
-            <label class="flabel">مدل‌های این اتصال</label>
-            <div class="model-tags" id="cfTags"></div>
-            <div class="key-row">
-              <input id="cfModelInput" dir="ltr" spellcheck="false" placeholder="نام مدل — Enter بزن">
-              <button class="btn tiny" id="cfModelAdd">افزودن</button>
-              <button class="btn tiny" id="cfFetchModels">🔎 دریافت از سرور</button>
-            </div>
-            <div class="srv-models hidden" id="cfSrvWrap">
-              <input class="mm-search" id="cfSrvSearch" placeholder="جست‌وجو در مدل‌های سرور…" spellcheck="false">
-              <div class="srv-list" id="cfSrvList"></div>
-            </div>
-            <span class="fhint">فقط مدل‌هایی که همین‌جا اضافه کنی در منوی چت نمایش داده می‌شوند. با «دریافت از سرور» فهرست مدل‌های واقعی سرور می‌آید؛ روی هرکدام کلیک کن تا اضافه یا برداشته شود.</span>
-          </div>
-          <div class="conn-form-foot">
-            <button class="btn danger" id="cfDelete">حذف اتصال</button>
-            <div class="spacer"></div>
-            <button class="btn" id="cfSetActive">⭐ اتصال فعال</button>
-          </div>
-        </section>
-      </div>
-      <div class="modal-foot">
-        <div class="spacer"></div>
-        <button class="btn primary" id="connsClose">بستن</button>
       </div>
     </div>
   </div>
