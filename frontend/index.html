@@ -29,7 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
-        <span class="app-ver" id="appVer">v0.6.1</span>
+        <span class="app-ver" id="appVer">v0.6.8</span>
         <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
@@ -56,7 +56,7 @@
         <div class="side-footer">
           <button class="side-btn" id="btnSettings">⚙︎&nbsp; تنظیمات</button>
           <button class="side-btn" id="btnMemory">🧠&nbsp; حافظهٔ بلندمدت</button>
-          <div class="engine-note"><span class="dot-live"></span> Rust engine · Tauri v2 · v0.2</div>
+          <div class="engine-note"><span class="dot-live"></span> Rust engine · Tauri v2</div>
         </div>
       </aside>
 
@@ -356,6 +356,10 @@
       memory_clear: function () { return invoke('memory_clear'); },
       app_meta: function () { return invoke('app_meta'); },
       list_models: function (a) { return invoke('list_models', a); },
+      chats_load: function () { return invoke('chats_load'); },
+      chats_sync: function (a) { return invoke('chats_sync', a); },
+      dirs_info: function () { return invoke('dirs_info'); },
+      reveal_dir: function () { return invoke('reveal_dir'); },
       minimize_win: function () { return invoke('minimize_win'); },
       maximize_win: function () { return invoke('maximize_win'); },
       close_win: function () { return invoke('close_win'); }

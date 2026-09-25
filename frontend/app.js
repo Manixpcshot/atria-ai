@@ -103,8 +103,9 @@ function loadSettings() {
 }
 function saveSettings() {
   localStorage.setItem(LS_SETTINGS, JSON.stringify(st.settings));
-  els.modelChip.textContent = effModel() || '—';
-  if (els.mpName) els.mpName.textContent = effModel() || '—';
+  const label = effModel() || '—';
+  if (els.modelChip) els.modelChip.textContent = label;
+  if (els.mpName) els.mpName.textContent = label;
 }
 function loadChats() {
   try { return JSON.parse(localStorage.getItem(LS_CHATS) || '[]'); } catch { return []; }
@@ -542,10 +543,7 @@ function bindConns() {
     updateConnTab();
     updateModelPick();
   };
-  /* v0.6.6: مودال جدا حذف شد — API داخل تنظیمات */
-  /* v0.6.6: مودال جدا حذف شد */
-  /* v0.6.6: مودال جدا حذف شد */
-  els.btnManageConns.onclick = () => openConns(null);
+  // v0.6.8: دکمهٔ مدیریت قدیمی حذف شده بود ولی سیم‌کشی‌اش جامانده بود (شیء نال = قاتل boot)
 }
 
 function updateConnTab() {
@@ -598,8 +596,7 @@ function cacheEls() {
     toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'),
     dsSearchRow: $('#dsSearchRow'), dsSearchVal: $('#dsSearchVal'),
     tokenGuide: $('#tokenGuide'), tokenGuideX: $('#tokenGuideX'), tokenGuideClose: $('#tokenGuideClose'),
-    connSummary: $('#connSummary'), btnManageConns: $('#btnManageConns'),
-    connsModal: $('#connsModal'), connsX: $('#connsX'), connsClose: $('#connsClose'),
+    connSummary: $('#connSummary'),
     connList: $('#connList'), connAdd: $('#connAdd'), connForm: $('#connForm'),
     cfName: $('#cfName'), cfKind: $('#cfKind'), cfTemplate: $('#cfTemplate'),
     cfBase: $('#cfBase'), cfKey: $('#cfKey'), cfKeyEye: $('#cfKeyEye'),
@@ -625,6 +622,7 @@ function invokeCmd(name, args) {
 }
 
 function toast(msg, kind) {
+  if (!els.toasts) return;
   const t = document.createElement('div');
   t.className = 'toast' + (kind ? ' ' + kind : '');
   t.textContent = msg;
@@ -1083,6 +1081,9 @@ function startTurn() {
 
 function retryLast() {
   if (st.sending) return;
+  if (st.runChatId && st.currentId !== st.runChatId && st.chats.some((x) => x.id === st.runChatId)) {
+    switchChat(st.runChatId); // تلاش مجدد در همان چت
+  }
   if (st.failedWrap && st.failedWrap.parentNode) st.failedWrap.parentNode.removeChild(st.failedWrap);
   st.failedWrap = null;
   if (st.streamEl) {
@@ -1135,6 +1136,7 @@ function ensurePanel() {
   if (!st.run) st.run = newRun();
   const run = st.run;
   if (run.panel && run.panel.isConnected) return run.panel;
+  if (!st.stackEl) liveMdEl(); // v0.6.8: اگر هنوز حباب ساخته نشده، اول بساز
   const box = document.createElement('div');
   box.className = 'think-box run-panel has open';
   box.innerHTML =
@@ -1146,6 +1148,7 @@ function ensurePanel() {
     '<div class="think-body"><div class="flow"></div></div>';
   box.querySelector('.think-head').onclick = () => box.classList.toggle('open');
   const stack = st.stackEl;
+  if (!stack) { run.panel = box; run.flow = box.querySelector('.flow'); return box; }
   const bub = stack.querySelector('.bubble');
   if (bub) stack.insertBefore(box, bub); else stack.appendChild(box);
   run.panel = box;
@@ -1546,7 +1549,9 @@ function renderCmdkList(q) {
 /* ---------------- model picker + mode chips (Claude-like bar) ---------------- */
 
 function updateModelPick() {
-  els.mpName.textContent = effModel() || '—';
+  const label = effModel() || '—';
+  if (els.mpName) els.mpName.textContent = label;
+  if (els.modelChip) els.modelChip.textContent = label;
 }
 
 function closeModelMenu() { els.modelMenu.classList.add('hidden'); }
@@ -1746,11 +1751,11 @@ function boot() {
   }
   els.btnStop.onclick = stop;
 
-  // نوار مدل/حالت (مثل کلاد)
-  bindConns();
-  updateModelPick();
-  syncChips();
-  updateConnTab();
+  // نوار مدل/حالت (مثل کلاد) — v0.6.8: هیچ خطایی نباید بقیهٔ سیم‌کشی را بکُشد
+  try { bindConns(); } catch (e) { console.error('bindConns:', e); }
+  try { updateModelPick(); } catch (e) { console.error('updateModelPick:', e); }
+  try { syncChips(); } catch (e) { console.error('syncChips:', e); }
+  try { updateConnTab(); } catch (e) { console.error('updateConnTab:', e); }
   restoreFromDisk();
   window.addEventListener('beforeunload', () => {
     try { saveConns(); saveSettings(); } catch {}
