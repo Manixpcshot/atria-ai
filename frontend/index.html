@@ -29,7 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
-        <span class="app-ver" id="appVer">v0.6.8</span>
+        <span class="app-ver" id="appVer">v0.6.9</span>
         <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
@@ -128,10 +128,12 @@
         </header>
         <div class="sp-body">
         <div class="stab-body active" data-tab="conn">
+          <section class="set-card">
           <div class="field">
             <label class="flabel">اتصال فعال</label>
             <div class="conn-summary" id="connSummary"></div>
           </div>
+          </section>
           <div class="conns-body">
             <aside class="conn-list-col">
               <button class="btn primary full" id="connAdd">＋ اتصال جدید</button>
@@ -194,6 +196,7 @@
           <span class="fhint">هر سرویس‌دهنده می‌تواند چند اتصال جدا با کلید و مدل‌های خودش داشته باشد. مدل‌های منوی چت دقیقاً همان‌هایی‌اند که برای هر اتصال تعیین کنی — فهرست پیش‌فرضی در کار نیست.</span>
         </div>
         <div class="stab-body" data-tab="behavior">
+          <section class="set-card">
           <div class="set-sec-title">پاسخ‌گویی</div>
           <div class="set-row">
             <div class="set-row-text">
@@ -223,6 +226,8 @@
             </div>
             <label class="switch-field sm"><input type="checkbox" id="streamVal"><span class="switch"></span></label>
           </div>
+          </section>
+          <section class="set-card">
           <div class="set-row hidden" id="dsSearchRow">
             <div class="set-row-text">
               <div class="set-label">🔎 جست‌وجوی وب دیپ‌سیک</div>
@@ -230,14 +235,18 @@
             </div>
             <label class="switch-field sm"><input type="checkbox" id="dsSearchVal"><span class="switch"></span></label>
           </div>
+          </section>
         </div>
 
         <div class="stab-body" data-tab="sys">
+          <section class="set-card">
           <div class="set-sec-title">شخصیت و ابزارها</div>
           <div class="field">
             <label class="flabel">دستور سیستمی (System Prompt)</label>
             <textarea id="sysVal" rows="4" dir="auto" spellcheck="false" placeholder="شخصیت و قوانین دلخواه — فارسی یا انگلیسی (خالی = بدون شخصیت اضافه)"></textarea>
           </div>
+          </section>
+          <section class="set-card">
           <div class="set-row">
             <div class="set-row-text">
               <div class="set-label">حالت ایجنت</div>
@@ -248,7 +257,7 @@
           <div class="set-row">
             <div class="set-row-text">
               <div class="set-label">دسترسی به فایل‌ها</div>
-              <div class="set-desc">فقط داخل پوشهٔ کاری (Workspace)</div>
+              <div class="set-desc">دسترسی کامل به فایل‌های کل کامپیوتر (مسیرهای مطلق مثل C:/…) — محدود به پوشهٔ کاری نیست</div>
             </div>
             <label class="switch-field sm"><input type="checkbox" id="fileToolsVal"><span class="switch"></span></label>
           </div>
@@ -256,17 +265,22 @@
             <label class="flabel">پوشهٔ کاری (Workspace)</label>
             <input type="text" id="wsVal" dir="ltr" spellcheck="false" placeholder="پیش‌فرض: .atria/workspace در پوشهٔ کاربر">
           </div>
+          </section>
+          <section class="set-card">
           <div class="field">
             <label class="flabel">حداکثر طول پاسخ (توکن خروجی)</label>
             <input type="number" id="maxTokVal" min="256" max="65536" step="256" inputmode="numeric" dir="ltr">
             <span class="fhint">سقف سرویس ۶۵۵۳۶ است — سقفِ طول پاسخ است و ربطی به موجودی/اعتبار حساب ندارد.</span>
           </div>
+          </section>
+          <section class="set-card">
           <div class="set-sec-title">ذخیره‌سازی</div>
           <div class="field">
             <div class="storage-box" id="storageBox">در حال آماده‌سازی…</div>
             <button class="btn" id="btnRevealAtria" type="button">📂 باز کردن پوشهٔ .atria</button>
             <span class="fhint">گفتگوها و ورک‌اسپیس مثل اپ‌های رسمی در پوشهٔ کاربر نگهداری می‌شوند — مثلاً <b dir="ltr">C:\Users\man\.atria</b></span>
           </div>
+          </section>
         </div>
         </div>
       </main>
