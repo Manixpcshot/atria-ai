@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -42,8 +44,11 @@ jobs:
         id: taginfo
         shell: pwsh
         run: |
-          $tag = (git describe --tags --exact-match 2>$null)
+          $tag = ""
+          try { $tag = (git describe --tags --exact-match 2>$null) } catch { $tag = "" }
+          if (-not $tag) { $tag = "" }
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          exit 0
 
       - name: Upload assets to the GitHub release
         if: github.event_name == 'release' || steps.taginfo.outputs.tag != ''
