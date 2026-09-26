@@ -404,6 +404,7 @@ function renderModelTags() {
   for (const m of c.models) {
     const t = document.createElement('span');
     t.className = 'model-tag';
+    t.dir = 'ltr';
     t.innerHTML = '<b></b><button class="mt-x" title="حذف">✕</button>';
     t.querySelector('b').textContent = m;
     t.querySelector('.mt-x').onclick = () => {
@@ -462,7 +463,16 @@ function renderSrvList() {
     const it = document.createElement('button');
     const picked = c && c.models.includes(id);
     it.className = 'srv-item' + (picked ? ' picked' : '');
-    it.textContent = (picked ? '✓ ' : '＋ ') + id;
+    it.dir = 'ltr';
+    it.title = id;
+    const tick = document.createElement('span');
+    tick.className = 'srv-tick';
+    tick.textContent = picked ? '✓' : '+';
+    const nm = document.createElement('bdi');
+    nm.className = 'srv-name';
+    nm.textContent = id;
+    it.appendChild(tick);
+    it.appendChild(nm);
     it.onclick = () => {
       if (!c) return;
       if (c.models.includes(id)) c.models = c.models.filter((x) => x !== id);
