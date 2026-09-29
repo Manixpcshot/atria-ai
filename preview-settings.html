@@ -2,7 +2,8 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8">
-<title>تنظیمات آتریا v0.7.3 — پیش‌نمایش</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>تنظیمات آتریا v0.7.4 — پیش‌نمایش</title>
 <style>/* ==========================================================================
    Atria Dawn — styles (RTL, glass, animated dawn theme)
    ========================================================================== */
@@ -1717,15 +1718,417 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .model-tag b, .mm-name, .mp-name, .cc-name { unicode-bidi: isolate; }
+
+/* ================= v0.7.4 — تنظیمات یکپارچه: بازگشت کامل به چیدمان v0.6.7 ================= */
+/* This is intentionally the final settings-only skin: one source of truth after the
+   v0.6.9 overrides, while preserving the v0.7.1 version badge and v0.7.3 LTR model rows. */
+#settingsModal:not(.hidden) {
+  display: block !important;
+  position: fixed !important; top: 44px !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+  z-index: 55 !important; box-sizing: border-box !important;
+  padding: 18px clamp(14px, 3vw, 36px) !important;
+  background: rgba(12, 11, 10, 0.62) !important;
+  backdrop-filter: blur(10px) !important;
+  animation: spIn 0.28s cubic-bezier(0.2, 0.9, 0.25, 1) !important;
+}
+#settingsModal.hidden { display: none !important; }
+#settingsModal .sp-wrap {
+  width: 100% !important; height: 100% !important; min-height: 0 !important;
+  display: flex !important; overflow: hidden !important; border-radius: 22px !important;
+  background: rgba(33, 31, 29, 0.98) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.55) !important;
+}
+#settingsModal .sp-side {
+  width: 232px !important; flex: 0 0 232px !important;
+  display: flex !important; flex-direction: column !important; gap: 10px !important;
+  padding: 22px 16px !important; border-inline-end: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+#settingsModal .sp-title {
+  display: flex !important; align-items: center !important; gap: 8px !important;
+  font-size: 16px !important; font-weight: 800 !important; color: #efe9dd !important;
+  margin: 0 0 8px !important; letter-spacing: 0 !important;
+}
+#settingsModal .sp-ver {
+  flex: none !important; font-family: var(--mono) !important; font-size: 10px !important;
+  letter-spacing: 0.3px !important; color: #cfc8ba !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 999px !important; padding: 2px 8px !important;
+}
+#settingsModal .sp-nav { display: flex !important; flex-direction: column !important; gap: 6px !important; }
+#settingsModal .sp-nav .stab {
+  display: block !important; width: 100% !important; flex: none !important;
+  text-align: start !important; padding: 11px 14px !important; border-radius: 12px !important;
+  font-size: 13px !important; font-weight: 700 !important; cursor: pointer !important;
+  border: 1px solid transparent !important; background: rgba(255, 255, 255, 0.04) !important;
+  color: #cfc8ba !important; box-shadow: none !important; transition: 0.15s !important;
+}
+#settingsModal .sp-nav .stab:hover {
+  background: rgba(255, 255, 255, 0.08) !important; color: #efe9dd !important;
+}
+#settingsModal .sp-nav .stab.active {
+  background: linear-gradient(180deg, rgba(217, 119, 87, 0.22), rgba(224, 161, 124, 0.14)) !important;
+  border-color: rgba(217, 119, 87, 0.45) !important; color: #fff !important;
+}
+#settingsModal .sp-foot {
+  margin-top: auto !important; display: flex !important; flex-direction: column !important;
+  gap: 8px !important; padding: 0 !important; border: 0 !important;
+}
+#settingsModal .sp-main { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; min-width: 0 !important; }
+#settingsModal .sp-head {
+  display: flex !important; align-items: center !important; justify-content: space-between !important;
+  padding: 18px 28px 4px !important; border: 0 !important;
+}
+#settingsModal .sp-head h2 { margin: 0 !important; font-size: 18px !important; font-weight: 800 !important; color: #efe9dd !important; }
+#settingsModal .sp-head .x {
+  width: 30px !important; height: 30px !important; border-radius: 9px !important;
+  border: 0 !important; cursor: pointer !important; background: transparent !important;
+  color: var(--muted) !important; font-size: 13px !important; box-shadow: none !important;
+}
+#settingsModal .sp-head .x:hover { background: rgba(248, 113, 113, 0.18) !important; color: var(--bad) !important; }
+#settingsModal .sp-body {
+  flex: 1 1 auto !important; min-height: 0 !important; overflow-y: auto !important;
+  padding: 14px 28px 28px !important;
+}
+#settingsModal .sp-body .stab-body { display: none !important; }
+#settingsModal .sp-body .stab-body.active {
+  display: flex !important; flex-direction: column !important; gap: 12px !important;
+}
+#settingsModal .sp-body .stab-body[data-tab="conn"] { min-height: 0 !important; }
+
+/* Settings fields and buttons — the original v0.6.7 compact controls, consistently scoped. */
+#settingsModal .sp-body .field { display: flex !important; flex: 1 1 auto !important; flex-direction: column !important; gap: 7px !important; min-width: 0 !important; }
+#settingsModal .sp-body .flabel { font-size: 12.5px !important; color: var(--muted) !important; font-weight: 500 !important; }
+#settingsModal .sp-body .fhint { display: block; font-size: 11px !important; color: var(--faint) !important; line-height: 1.7 !important; }
+#settingsModal .sp-body .fhint.warn { color: #ffb4a8 !important; margin-top: 10px !important; }
+#settingsModal input:not([type="checkbox"]):not([type="range"]),
+#settingsModal textarea,
+#settingsModal select {
+  width: 100% !important; min-width: 0 !important; min-height: 40px !important;
+  padding: 10px 13px !important; border-radius: 11px !important; outline: none !important;
+  border: 1px solid var(--brd) !important; background: rgba(0, 0, 0, 0.25) !important;
+  color: var(--ink) !important; font-size: 13px !important; font-family: var(--font) !important;
+  box-shadow: none !important; transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+#settingsModal input:focus, #settingsModal textarea:focus, #settingsModal select:focus {
+  border-color: rgba(217, 119, 87, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.15) !important;
+}
+#settingsModal select option { background: var(--bg1) !important; color: var(--ink) !important; }
+#settingsModal textarea { min-height: 88px !important; resize: vertical !important; line-height: 1.9 !important; }
+#settingsModal input[type="range"] { width: 170px !important; height: 26px !important; accent-color: var(--violet) !important; flex: none !important; }
+#settingsModal .row2 { display: flex !important; gap: 14px !important; }
+#settingsModal .key-row { display: flex !important; flex-wrap: nowrap !important; gap: 8px !important; min-width: 0 !important; }
+#settingsModal .sp-body .key-row input:not([type="checkbox"]):not([type="range"]) { width: auto !important; flex: 1 1 auto !important; min-width: 0 !important; font-family: var(--mono) !important; }
+#settingsModal .key-row .btn.tiny { margin-inline-start: 4px !important; }
+#settingsModal .eye {
+  flex: none !important; border: 1px solid var(--brd) !important; background: var(--glass) !important;
+  border-radius: 11px !important; cursor: pointer !important; padding: 0 13px !important;
+  color: var(--muted) !important;
+}
+#settingsModal .eye:hover { color: var(--ink) !important; }
+#settingsModal .btn {
+  min-height: 0 !important; padding: 9px 18px !important; border-radius: 11px !important;
+  cursor: pointer !important; font-family: var(--font) !important; font-size: 12.5px !important;
+  font-weight: 600 !important; border: 1px solid var(--brd) !important; transition: 0.2s !important;
+  background: var(--glass) !important; color: var(--ink) !important; box-shadow: none !important;
+}
+#settingsModal .btn:hover { border-color: var(--brd-strong) !important; transform: translateY(-1px) !important; }
+#settingsModal .btn.primary {
+  background: var(--grad) !important; border: 0 !important; color: #211f1d !important;
+  box-shadow: 0 6px 20px rgba(217, 119, 87, 0.3) !important;
+}
+#settingsModal .btn.danger {
+  background: rgba(248, 113, 113, 0.12) !important; border-color: rgba(248, 113, 113, 0.3) !important;
+  color: var(--bad) !important;
+}
+#settingsModal .btn.danger:hover { background: rgba(248, 113, 113, 0.2) !important; }
+#settingsModal .btn.tiny { min-height: 30px !important; padding: 5px 10px !important; font-size: 11px !important; white-space: nowrap !important; }
+#settingsModal .btn.full { width: 100% !important; }
+#settingsModal .switch-field.sm { margin: 0 !important; flex: none !important; }
+#settingsModal .switch-field .switch { background: rgba(255, 255, 255, 0.1) !important; border: 1px solid var(--brd) !important; }
+#settingsModal .switch-field input:checked + .switch { background: var(--grad) !important; border-color: transparent !important; }
+
+/* Connections: one v0.6.7 two-column layout; no extra card/popup layered over the page. */
+#settingsModal .conns-body {
+  display: flex !important; flex: 1 1 auto !important; align-items: flex-start !important;
+  gap: 14px !important; min-height: 340px !important; margin-top: 4px !important;
+  padding: 0 !important; border: 0 !important; border-radius: 0 !important;
+  background: transparent !important;
+}
+#settingsModal .conn-list-col {
+  width: 236px !important; flex: 0 0 236px !important;
+  display: flex !important; flex-direction: column !important; gap: 8px !important;
+  min-width: 0 !important; padding: 0 !important; background: transparent !important; border: 0 !important;
+}
+#settingsModal .conn-list {
+  display: flex !important; flex-direction: column !important; gap: 7px !important;
+  max-height: 420px !important; overflow-y: auto !important; padding: 0 !important;
+}
+#settingsModal .conn-card {
+  text-align: start !important; cursor: pointer !important; padding: 9px 12px !important;
+  border-radius: 11px !important; background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid var(--brd) !important; color: var(--ink) !important;
+  box-shadow: none !important; transition: 0.15s !important; animation: fadeSlide 0.25s ease both;
+}
+#settingsModal .conn-card:hover { background: rgba(217, 119, 87, 0.08) !important; border-color: var(--brd-strong) !important; }
+#settingsModal .conn-card.active {
+  border-color: rgba(217, 119, 87, 0.5) !important; background: rgba(217, 119, 87, 0.12) !important;
+  box-shadow: 0 0 0 1px rgba(217, 119, 87, 0.2) !important;
+}
+#settingsModal .cc-name { font-size: 13px !important; font-weight: 700 !important; color: var(--ink) !important; margin-bottom: 3px !important; }
+#settingsModal .cc-meta {
+  display: flex !important; flex-wrap: wrap !important; align-items: center !important;
+  gap: 4px 6px !important; font-size: 10.5px !important; color: var(--muted) !important;
+  direction: rtl !important; text-align: start !important;
+}
+#settingsModal .cc-chip {
+  display: inline-flex !important; align-items: center !important; max-width: 100% !important;
+  padding: 2px 8px !important; border-radius: 999px !important;
+  color: var(--muted) !important; background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important; font-size: 10px !important;
+  line-height: 1.5 !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
+}
+#settingsModal .cc-chip.ltr { direction: ltr !important; unicode-bidi: isolate !important; font-family: var(--mono) !important; max-width: 190px !important; }
+#settingsModal .conn-summary { display: flex !important; flex-direction: column !important; gap: 8px !important; }
+#settingsModal .conn-summary .conn-card { pointer-events: auto !important; }
+#settingsModal .conn-form-col {
+  display: flex !important; flex: 1 1 auto !important; flex-direction: column !important; gap: 10px !important;
+  min-width: 0 !important; max-height: none !important; overflow-y: auto !important;
+  padding: 0 6px 0 2px !important; border: 0 !important; border-radius: 0 !important;
+  background: transparent !important; box-shadow: none !important;
+}
+#settingsModal .conn-form-col.hidden { display: none !important; }
+#settingsModal .conn-form-foot { display: flex !important; align-items: center !important; gap: 10px !important; margin-top: 4px !important; padding: 0 !important; border: 0 !important; }
+#settingsModal .conns-body:has(.conn-form-col.hidden) { flex-direction: column !important; min-height: 0 !important; }
+#settingsModal .conns-body:has(.conn-form-col.hidden) .conn-list-col { width: 100% !important; flex: 1 1 auto !important; }
+#settingsModal .conns-body:has(.conn-form-col.hidden) .conn-list { max-height: 420px !important; }
+
+/* Model chips and fetched server list keep their structured, isolated LTR rendering. */
+#settingsModal .model-tags {
+  display: flex !important; flex-wrap: wrap !important; gap: 6px !important; padding: 7px !important;
+  min-height: 42px !important; border: 1px dashed rgba(255, 255, 255, 0.12) !important;
+  border-radius: 10px !important; background: rgba(0, 0, 0, 0.15) !important;
+}
+#settingsModal .model-tag {
+  display: inline-flex !important; align-items: center !important; gap: 5px !important;
+  max-width: 100% !important; box-sizing: border-box !important; direction: ltr !important;
+  font-family: var(--mono) !important; font-size: 11px !important;
+  background: rgba(217, 119, 87, 0.14) !important; border: 1px solid rgba(217, 119, 87, 0.3) !important;
+  border-radius: 20px !important; padding: 3px 5px 3px 10px !important; color: var(--ink) !important;
+}
+#settingsModal .model-tag b { direction: ltr !important; unicode-bidi: isolate !important; font-family: var(--mono) !important; font-size: 11px !important; }
+#settingsModal .model-tag .mt-x {
+  flex: none !important; border: 0 !important; background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--muted) !important; border-radius: 50% !important; width: 16px !important; height: 16px !important;
+  font-size: 9px !important; cursor: pointer !important; line-height: 1 !important;
+}
+#settingsModal .model-tag .mt-x:hover { background: rgba(255, 107, 125, 0.3) !important; color: #fff !important; }
+#settingsModal .srv-models { display: flex !important; flex-direction: column !important; gap: 6px !important; margin-top: 7px !important; min-width: 0 !important; }
+#settingsModal .srv-models.hidden { display: none !important; }
+#settingsModal .srv-list {
+  display: flex !important; flex-direction: column !important; gap: 3px !important;
+  max-height: 190px !important; overflow-y: auto !important; padding: 5px !important;
+  border: 1px solid var(--brd) !important; border-radius: 10px !important;
+  background: rgba(0, 0, 0, 0.2) !important; direction: ltr !important; unicode-bidi: isolate !important;
+}
+#settingsModal .srv-item {
+  display: flex !important; align-items: center !important; gap: 8px !important; width: 100% !important;
+  direction: ltr !important; unicode-bidi: isolate !important; text-align: left !important;
+  padding: 6px 10px !important; border-radius: 8px !important; border: 1px solid transparent !important;
+  background: transparent !important; color: var(--ink) !important; cursor: pointer !important;
+  font-family: var(--mono) !important; font-size: 11.5px !important; line-height: 1.5 !important;
+  white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+}
+#settingsModal .srv-item:hover { background: rgba(217, 119, 87, 0.1) !important; }
+#settingsModal .srv-item.picked {
+  border-color: rgba(52, 211, 153, 0.35) !important; background: rgba(52, 211, 153, 0.1) !important; color: #a8e6c9 !important;
+}
+#settingsModal .srv-tick { flex: none !important; width: 15px !important; text-align: center !important; font-family: 'Segoe UI Symbol', 'Segoe UI', sans-serif !important; }
+#settingsModal .srv-name {
+  flex: 1 1 auto !important; min-width: 0 !important; direction: ltr !important; unicode-bidi: isolate !important;
+  font-family: var(--mono) !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
+}
+#settingsModal .srv-empty { padding: 12px 4px !important; font-size: 12px !important; }
+#settingsModal .mm-search {
+  background: rgba(255, 255, 255, 0.05) !important; border: 1px solid var(--brd) !important;
+  border-radius: 9px !important; color: var(--ink) !important; min-height: 34px !important;
+  padding: 6px 10px !important; font-size: 12px !important;
+}
+#settingsModal .mm-search:focus { border-color: rgba(217, 119, 87, 0.5) !important; box-shadow: none !important; }
+
+/* The original simple behavior/system rows and local storage block. */
+#settingsModal .set-sec-title {
+  font-size: 11px !important; font-weight: 800 !important; letter-spacing: 0.4px !important;
+  color: var(--muted) !important; margin: 16px 2px 6px !important;
+}
+#settingsModal .set-sec-title:first-child { margin-top: 2px !important; }
+#settingsModal .set-row {
+  display: flex !important; align-items: center !important; justify-content: space-between !important;
+  gap: 18px !important; padding: 12px 4px !important; border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+#settingsModal .set-row:last-of-type { border-bottom: 0 !important; }
+#settingsModal .set-row-text { display: flex !important; flex-direction: column !important; gap: 3px !important; min-width: 0 !important; }
+#settingsModal .set-label { font-size: 13.5px !important; font-weight: 650 !important; color: var(--ink) !important; }
+#settingsModal .set-desc { font-size: 11.5px !important; color: var(--muted) !important; line-height: 1.75 !important; }
+#settingsModal .storage-box {
+  display: flex !important; flex-direction: column !important; gap: 2px !important;
+  padding: 8px 12px !important; border: 1px solid var(--brd) !important; border-radius: 12px !important;
+  background: rgba(0, 0, 0, 0.18) !important; margin-bottom: 8px !important;
+}
+#settingsModal .st-row {
+  display: flex !important; gap: 12px !important; align-items: baseline !important;
+  padding: 7px 0 !important; border-bottom: 1px dashed rgba(255, 255, 255, 0.06) !important;
+}
+#settingsModal .st-row:last-child { border-bottom: 0 !important; }
+#settingsModal .st-row b { min-width: 62px !important; flex: none !important; color: var(--muted) !important; font-size: 11px !important; font-weight: 700 !important; }
+#settingsModal .st-row span {
+  direction: ltr !important; unicode-bidi: isolate !important; text-align: left !important; font-family: var(--mono) !important;
+  font-size: 10.5px !important; color: var(--ink) !important; user-select: all !important;
+  word-break: break-all !important; line-height: 1.7 !important;
+}
+
+/* Real filtering must beat #modelMenu .mm-item { display:flex !important; }. */
+#modelMenu .mm-item.hidden { display: none !important; }
+#modelMenu .mm-group.hidden { display: none !important; }
+#modelMenu .mm-search-empty { padding: 16px 10px !important; color: var(--muted) !important; text-align: center !important; }
+#modelMenu .mm-action.hidden, #modelMenu .mm-empty-state.hidden { display: none !important; }
+
+@media (max-width: 900px) {
+  #settingsModal:not(.hidden) { padding: 10px !important; }
+  #settingsModal .sp-side { width: 190px !important; flex-basis: 190px !important; padding: 16px 12px !important; }
+  #settingsModal .sp-head { padding-inline: 16px !important; }
+  #settingsModal .sp-body { padding: 12px 16px 18px !important; }
+  #settingsModal .conns-body { flex-direction: column !important; }
+  #settingsModal .conn-list-col { width: 100% !important; flex: 0 0 auto !important; max-height: 190px !important; }
+  #settingsModal .conn-form-col { max-height: none !important; }
+  #settingsModal .row2 { flex-wrap: wrap !important; }
+}
+@media (max-width: 600px) {
+  #settingsModal:not(.hidden) { padding: 6px !important; }
+  #settingsModal .sp-wrap { flex-direction: column !important; }
+  #settingsModal .sp-side {
+    width: auto !important; flex: 0 0 auto !important; gap: 8px !important; padding: 9px 12px !important;
+    border-inline-end: 0 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  }
+  #settingsModal .sp-title { margin: 0 !important; font-size: 14px !important; }
+  #settingsModal .sp-nav { flex-direction: row !important; overflow-x: auto !important; }
+  #settingsModal .sp-nav .stab { width: auto !important; white-space: nowrap !important; padding: 7px 10px !important; }
+  #settingsModal .sp-foot { flex-direction: row !important; margin-top: 0 !important; }
+  #settingsModal .sp-foot .btn { flex: 1 1 0 !important; padding: 7px 9px !important; }
+  #settingsModal .sp-head { padding: 10px 12px 4px !important; }
+  #settingsModal .sp-body { padding: 9px 12px 14px !important; }
+}
+
 </style>
 </head>
 <body>
-<div class="frame"><div class="layout"><section class="chat"></section></div></div>
-<!-- settings page (full page — not a popup) -->
+  <div class="frame" id="frame">
+
+    <!-- animated dawn background -->
+    <div class="bg">
+      <div class="blob b1"></div>
+      <div class="blob b2"></div>
+      <div class="blob b3"></div>
+      <div class="blob b4"></div>
+      <div id="stars"></div>
+      <div class="grid-overlay"></div>
+      <div class="vignette"></div>
+    </div>
+
+    <!-- titlebar -->
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="brand">
+        <div class="logo"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImxnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzdjOGNmZiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjAuNTUiIHN0b3AtY29sb3I9IiNiMDcwZmYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZmZjMDc4Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI4IiBmaWxsPSIjMGEwYzE4Ii8+CiAgPHBhdGggZD0iTTE2IDQgTDI2LjUgMjQuNSBIMjEuMiBMMTYgMTMuMiBMMTAuOCAyNC41IEg1LjUgWiIgZmlsbD0idXJsKCNsZykiLz4KICA8Y2lyY2xlIGN4PSIxNiIgY3k9IjIxLjgiIHI9IjIuMSIgZmlsbD0iIzBhMGMxOCIvPgo8L3N2Zz4K" alt="Atria"></div>
+        <div class="brand-text">
+          <span class="brand-name">Atria</span>
+          <span class="brand-sub">DAWN</span>
+        </div>
+        <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
+        <span class="app-ver" id="appVer">v0.7.4</span>
+        <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
+      </div>
+      <div class="titlebar-actions">
+        <button class="tb-btn" id="btnSide" title="نمایش/پنهان‌سازی نوار کناری">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>
+        </button>
+      </div>
+      <div class="win-controls">
+        <button class="wc wc-min" id="btnMin" title="کوچک‌کردن"><svg viewBox="0 0 12 12"><line x1="1" y1="6" x2="11" y2="6"/></svg></button>
+        <button class="wc wc-max" id="btnMax" title="بزرگ‌کردن"><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" rx="1"/></svg></button>
+        <button class="wc wc-close" id="btnClose" title="بستن"><svg viewBox="0 0 12 12"><line x1="1.5" y1="1.5" x2="10.5" y2="10.5"/><line x1="10.5" y1="1.5" x2="1.5" y2="10.5"/></svg></button>
+      </div>
+    </header>
+
+    <!-- layout -->
+    <div class="layout">
+      <aside class="sidebar">
+        <button class="new-chat-btn" id="btnNew">
+          <span class="nc-glow"></span>
+          <span class="nc-plus">＋</span>
+          گفتگوی جدید
+        </button>
+        <nav class="conv-list" id="convList"></nav>
+        <div class="side-footer">
+          <button class="side-btn" id="btnSettings">⚙︎&nbsp; تنظیمات</button>
+          <button class="side-btn" id="btnMemory">🧠&nbsp; حافظهٔ بلندمدت</button>
+          <div class="engine-note"><span class="dot-live"></span> Rust engine · Tauri v2</div>
+        </div>
+      </aside>
+
+      <section class="chat">
+        <div class="messages" id="messages"></div>
+
+        <div class="empty" id="empty">
+          <div class="orb"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImxnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzdjOGNmZiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjAuNTUiIHN0b3AtY29sb3I9IiNiMDcwZmYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZmZjMDc4Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI4IiBmaWxsPSIjMGEwYzE4Ii8+CiAgPHBhdGggZD0iTTE2IDQgTDI2LjUgMjQuNSBIMjEuMiBMMTYgMTMuMiBMMTAuOCAyNC41IEg1LjUgWiIgZmlsbD0idXJsKCNsZykiLz4KICA8Y2lyY2xlIGN4PSIxNiIgY3k9IjIxLjgiIHI9IjIuMSIgZmlsbD0iIzBhMGMxOCIvPgo8L3N2Zz4K" alt=""></div>
+          <h1>سلام! من <span class="grad-text">Atria</span> هستم</h1>
+          <p class="empty-sub">دستیار هوشمند آتریا — می‌تونم فکر کنم، ابزار استفاده کنم و با انیمیشن خط‌به‌خط بنویسم.</p>
+          <div class="suggestions">
+            <button class="chip" data-q="۱۷×۲۴+۳ چنده؟">«۱۷×۲۴+۳ چنده؟»</button>
+            <button class="chip" data-q="امروز چنده؟">«امروز چنده؟»</button>
+            <button class="chip" data-q="یادداشت کن: پروژه آتریا مهم است">«یادداشت کن: …»</button>
+          </div>
+        </div>
+
+        <div class="composer-zone">
+          <div class="composer glass">
+            <div class="img-tray hidden" id="imgTray"></div>
+            <textarea id="input" rows="1" placeholder="هرچی می‌خوای بپرس…  (Enter: ارسال · Shift+Enter: سطر جدید)"></textarea>
+            <button class="send-btn" id="btnSend" title="ارسال">
+              <svg viewBox="0 0 24 24"><path d="M22 2 L11 13"/><path d="M22 2 L15 22 L11 13 L2 9 Z"/></svg>
+            </button>
+            <button class="stop-btn hidden" id="btnStop" title="توقف">
+              <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            </button>
+          </div>
+          <div class="composer-bar">
+            <button class="model-pick" id="modelPick" title="انتخاب مدل">
+              <span class="mp-name" id="mpName">Atria-Dawn-Preview</span>
+              <span class="mp-caret">▾</span>
+            </button>
+
+            <div class="mode-chips">
+              <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+              <button class="mode-chip" id="btnAttach" title="پیوست تصویر (برای مدل‌های ویژن‌دار)">📎 تصویر</button>
+              <button class="mode-chip" id="chipAgent">⚡ ایجنت</button>
+              <button class="mode-chip" id="chipThink">🧠 تفکر</button>
+              <button class="mode-chip" id="chipFiles">📂 فایل‌ها</button>
+            </div>
+          </div>
+        </div>
+
+        <button class="scroll-btn hidden" id="btnScroll" title="پایین">↓</button>
+      </section>
+    </div>
+  </div>
+
+  <!-- settings page (full page — not a popup) -->
   <div class="settings-page" id="settingsModal">
     <div class="sp-wrap">
       <aside class="sp-side">
-        <div class="sp-title">⚙︎&nbsp; تنظیمات <span class="sp-ver">v0.7.3</span></div>
+        <div class="sp-title">⚙︎&nbsp; تنظیمات <span class="sp-ver">v0.7.4</span></div>
         <nav class="sp-nav">
           <button class="stab active" data-tab="conn">🔑&nbsp; کلیدها و API</button>
           <button class="stab" data-tab="behavior">🎛&nbsp; رفتار</button>
@@ -1888,8 +2291,116 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
     </div>
   </div>
 
-  
 <script>
+// Interactive, local-only UI preview. No real credential is present.
+const templates = {
+  openrouter: { name: 'OpenRouter', base: 'https://openrouter.ai/api/v1', kind: 'openai' },
+  ollama: { name: 'Ollama (محلی)', base: 'http://localhost:11434/v1', kind: 'openai' },
+  openai: { name: 'OpenAI', base: 'https://api.openai.com/v1', kind: 'openai' }
+};
+const connections = [
+  { name: 'OpenRouter اصلی', kind: 'openai', base: 'https://openrouter.ai/api/v1', key: 'sk-or-••••••••••••', models: ['openai/gpt-4.1', 'anthropic/claude-sonnet-4'], active: true },
+  { name: 'Ollama محلی', kind: 'openai', base: 'http://localhost:11434/v1', key: '', models: ['qwen2.5-coder:7b'], active: false }
+];
+let editing = 0;
+const $ = (id) => document.getElementById(id);
+function paintList() {
+  $('connList').innerHTML = connections.map((c, i) =>
+    '<button class="conn-card' + (i === editing ? ' active' : '') + '" data-index="' + i + '">' +
+    '<div class="cc-name"></div><div class="cc-meta"><span class="cc-chip"></span><span class="cc-chip ltr"></span><span class="cc-chip"></span></div></button>'
+  ).join('');
+  [...$('connList').querySelectorAll('.conn-card')].forEach((card, i) => {
+    const c = connections[i];
+    card.querySelector('.cc-name').textContent = c.name + (c.active ? ' ⭐' : '');
+    const chips = card.querySelectorAll('.cc-chip');
+    chips[0].textContent = c.kind === 'anthropic' ? 'Messages API' : 'Chat Completions';
+    chips[1].textContent = c.base || 'بدون آدرس';
+    chips[2].textContent = c.models.length + ' مدل · ' + (c.key ? 'کلید دارد' : 'بدون کلید');
+    card.onclick = () => { editing = i; paintForm(); paintList(); };
+  });
+}
+function paintForm() {
+  const c = connections[editing];
+  $('cfName').value = c.name;
+  $('cfKind').value = c.kind;
+  $('cfBase').value = c.base;
+  $('cfKey').value = c.key;
+  $('cfTemplate').value = Object.keys(templates).find((id) => templates[id].base === c.base) || '';
+  $('cfSetActive').textContent = c.active ? '⭐ اتصال فعال ✓' : '⭐ اتصال فعال';
+  $('cfTags').innerHTML = c.models.map((m) => '<span class="model-tag" dir="ltr"><b></b><button class="mt-x" type="button">✕</button></span>').join('');
+  [...$('cfTags').querySelectorAll('.model-tag')].forEach((tag, i) => {
+    tag.querySelector('b').textContent = c.models[i];
+    tag.querySelector('button').onclick = () => { c.models.splice(i, 1); paintForm(); paintList(); };
+  });
+  $('connSummary').innerHTML = '';
+  const active = connections.find((x) => x.active);
+  if (active) {
+    const summary = document.createElement('div'); summary.className = 'conn-card active';
+    summary.innerHTML = '<div class="cc-name"></div><div class="cc-meta"><span class="cc-chip"></span><span class="cc-chip ltr"></span><span class="cc-chip"></span></div>';
+    summary.querySelector('.cc-name').textContent = '⭐ ' + active.name;
+    const chips = summary.querySelectorAll('.cc-chip');
+    chips[0].textContent = active.kind === 'anthropic' ? 'Messages API' : 'Chat Completions';
+    chips[1].textContent = active.base || 'بدون آدرس';
+    chips[2].textContent = active.models.length + ' مدل · ' + (active.key ? 'کلید دارد' : 'بدون کلید');
+    $('connSummary').appendChild(summary);
+  }
+}
+const serverModels = [
+  'openai/gpt-4.1', 'openai/gpt-4.1-mini', 'openai/o4-mini',
+  'anthropic/claude-sonnet-4', 'anthropic/claude-haiku-4.5',
+  'google/gemini-2.5-pro', 'deepseek/deepseek-v3.2', 'qwen/qwen3-coder'
+];
+function paintServerModels() {
+  const q = $('cfSrvSearch').value.trim().toLocaleLowerCase();
+  const items = serverModels.filter((m) => !q || m.toLocaleLowerCase().includes(q));
+  $('cfSrvList').innerHTML = items.length ? items.map((m) => {
+    const picked = connections[editing].models.includes(m);
+    return '<button class="srv-item' + (picked ? ' picked' : '') + '" dir="ltr" title="' + m + '"><span class="srv-tick">' + (picked ? '✓' : '+') + '</span><bdi class="srv-name"></bdi></button>';
+  }).join('') : '<div class="mem-empty srv-empty">مدلی با این عبارت پیدا نشد</div>';
+  [...$('cfSrvList').querySelectorAll('.srv-item')].forEach((row, i) => {
+    const model = items[i]; row.querySelector('.srv-name').textContent = model;
+    row.onclick = () => {
+      const list = connections[editing].models;
+      const at = list.indexOf(model); at < 0 ? list.push(model) : list.splice(at, 1);
+      paintServerModels(); paintForm(); paintList();
+    };
+  });
+}
+Object.keys(templates).forEach((id) => {
+  const opt = document.createElement('option'); opt.value = id; opt.textContent = templates[id].name; $('cfTemplate').appendChild(opt);
+});
+$('connForm').classList.remove('hidden');
+paintList(); paintForm();
+$('cfSrvWrap').classList.remove('hidden'); paintServerModels();
+$('cfSrvSearch').addEventListener('input', paintServerModels);
+$('cfName').addEventListener('input', () => { connections[editing].name = $('cfName').value; paintList(); });
+$('cfBase').addEventListener('input', () => { connections[editing].base = $('cfBase').value; $('cfTemplate').value = ''; paintList(); });
+$('cfKey').addEventListener('input', () => { connections[editing].key = $('cfKey').value; paintList(); });
+$('cfKind').addEventListener('change', () => { connections[editing].kind = $('cfKind').value; paintList(); });
+$('cfTemplate').addEventListener('change', () => {
+  const t = templates[$('cfTemplate').value]; if (!t) return;
+  const c = connections[editing]; c.kind = t.kind; c.base = t.base;
+  if (!c.name || c.name === 'اتصال جدید') c.name = t.name;
+  paintForm(); paintList();
+});
+$('cfModelAdd').addEventListener('click', () => {
+  const m = $('cfModelInput').value.trim(); if (!m) return;
+  if (!connections[editing].models.includes(m)) connections[editing].models.push(m);
+  $('cfModelInput').value = ''; paintForm(); paintList(); paintServerModels();
+});
+$('cfModelInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('cfModelAdd').click(); } });
+$('cfFetchModels').addEventListener('click', () => { $('cfSrvWrap').classList.remove('hidden'); paintServerModels(); });
+$('cfSetActive').addEventListener('click', () => {
+  connections.forEach((c, i) => c.active = i === editing); paintForm(); paintList();
+});
+$('connAdd').addEventListener('click', () => {
+  const draft = connections.findIndex((c) => c.name.startsWith('اتصال جدید') && !c.base && !c.key && !c.models.length);
+  if (draft >= 0) { editing = draft; }
+  else { connections.unshift({ name: 'اتصال جدید', kind: 'openai', base: '', key: '', models: [], active: false }); editing = 0; }
+  $('connForm').classList.remove('hidden'); paintForm(); paintList(); $('cfName').focus();
+});
+$('settingsX').addEventListener('click', () => $('settingsModal').classList.add('hidden'));
+$('settingsClose').addEventListener('click', () => $('settingsModal').classList.add('hidden'));
 document.querySelectorAll('.stab').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('.stab').forEach((x) => x.classList.remove('active'));
   document.querySelectorAll('.stab-body').forEach((x) => x.classList.remove('active'));
@@ -1897,35 +2408,6 @@ document.querySelectorAll('.stab').forEach((b) => b.addEventListener('click', ()
   const body = document.querySelector('.stab-body[data-tab="' + b.dataset.tab + '"]');
   if (body) body.classList.add('active');
 }));
-document.getElementById('connSummary').innerHTML =
-  '<div class="conn-card active"><div class="cc-name">⭐ open router</div>' +
-  '<div class="cc-meta"><span class="cc-chip">Chat Completions</span>' +
-  '<span class="cc-chip ltr">https://openrouter.ai/api/v1</span>' +
-  '<span class="cc-chip">5 مدل · کلید دارد</span></div></div>';
-document.getElementById('connList').innerHTML =
-  '<button class="conn-card active"><div class="cc-name">open router</div>' +
-  '<div class="cc-meta"><span class="cc-chip">Chat Completions</span></div></button>';
-const form = document.getElementById('connForm');
-form.classList.remove('hidden');
-document.getElementById('cfName').value = 'open router';
-document.getElementById('cfBase').value = 'https://openrouter.ai/api/v1';
-document.getElementById('cfKey').value = 'sk-or-xxxxxxxxxxxx';
-document.getElementById('cfTags').innerHTML =
-  '<span class="model-tag" dir="ltr"><b>openai/gpt-5.2</b><button class="mt-x">✕</button></span>' +
-  '<span class="model-tag" dir="ltr"><b>anthropic/claude-sonnet-5</b><button class="mt-x">✕</button></span>';
-// نمونهٔ لیست سرور — دقیقاً رندر واقعی v0.7.3
-const models = [
-  ['openai/gpt-5.2', true], ['openai/gpt-5.1', false],
-  ['anthropic/claude-sonnet-5', true], ['anthropic/claude-haiku-4.5', false],
-  ['deepseek/deepseek-v3.2', false], ['qwen/qwen3-coder-4.5', true],
-  ['cohere/north-mini-coder:free', false], ['google/gemini-2.5-pro', false]
-];
-const wrap = document.getElementById('cfSrvWrap');
-wrap.classList.remove('hidden');
-document.getElementById('cfSrvList').innerHTML = models.map(([id, picked]) =>
-  '<button class="srv-item' + (picked ? ' picked' : '') + '" dir="ltr" title="' + id + '">' +
-  '<span class="srv-tick">' + (picked ? '✓' : '+') + '</span>' +
-  '<bdi class="srv-name">' + id + '</bdi></button>').join('');
 </script>
 </body>
 </html>

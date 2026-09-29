@@ -148,20 +148,6 @@ function saveSettingsSoon() {
   if (saveSetTimer) clearTimeout(saveSetTimer);
   saveSetTimer = setTimeout(() => { saveSetTimer = 0; saveSettings(); }, 250);
 }
-let connListTimer = 0, connTabTimer = 0, saveConnsTimer = 0;
-function saveConnsSoon() {
-  if (saveConnsTimer) clearTimeout(saveConnsTimer);
-  saveConnsTimer = setTimeout(() => { saveConnsTimer = 0; saveConns(); }, 250);
-}
-function updateConnListSoon() {
-  if (connListTimer) clearTimeout(connListTimer);
-  connListTimer = setTimeout(() => { connListTimer = 0; renderConnList(); }, 200);
-}
-function updateConnTabSoon() {
-  if (connTabTimer) clearTimeout(connTabTimer);
-  connTabTimer = setTimeout(() => { connTabTimer = 0; updateConnTab(); }, 200);
-}
-
 // restore conversations from ~/.atria/chats (disk is the source of truth)
 async function restoreFromDisk() {
   if (!window.__atria || !window.__atria.chats_load) return;
@@ -242,18 +228,66 @@ function loadConns() {
 }
 function saveConns() { localStorage.setItem(LS_CONNS, JSON.stringify(st.conns)); }
 
-// one-time migration: old single API settings become the first connection
+function normEndpoint(value) {
+  return String(value || '').trim().replace(/\/+$/, '').toLowerCase();
+}
+
+function isPhantomDefaultConn(c) {
+  const lastModel = String(c && c.lastModel || '').trim();
+  return !!c && c.name === 'اتصال من' && !String(c.key || '').trim() &&
+    normEndpoint(c.base) === normEndpoint(DEFAULTS.base_url) &&
+    (!lastModel || lastModel === DEFAULTS.model) && Array.isArray(c.models) &&
+    c.models.length === 1 && c.models[0] === DEFAULTS.model;
+}
+
+function isGeneratedConnName(name) {
+  const value = String(name || '').trim();
+  return !value || value === 'اتصال' || /^اتصال(?: \d+| جدید(?: \d+)?)?$/.test(value);
+}
+
+function isEmptyAutoConn(c) {
+  return !!c && isGeneratedConnName(c.name) && !String(c.base || '').trim() &&
+    !String(c.key || '').trim() && !String(c.lastModel || '').trim() &&
+    Array.isArray(c.models) && c.models.length === 0;
+}
+
+// Migrate only data explicitly configured by the user. DEFAULTS always contains a
+// base URL and model, so treating either as proof of setup used to invent a fake connection.
 function migrateConns() {
-  if (localStorage.getItem(LS_CONNS)) return;
-  const s = st.settings;
+  const saved = localStorage.getItem(LS_CONNS);
+  let hasSavedList = false;
+  if (saved !== null) {
+    try { hasSavedList = Array.isArray(JSON.parse(saved)); } catch {}
+  }
+  if (hasSavedList) {
+    const clean = st.conns.filter((c) => !isPhantomDefaultConn(c) && !isEmptyAutoConn(c));
+    if (clean.length !== st.conns.length) {
+      st.conns = clean;
+      saveConns();
+    }
+    return;
+  }
+
+  let legacy = {};
+  try {
+    const value = JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}');
+    if (value && typeof value === 'object' && !Array.isArray(value)) legacy = value;
+  } catch {}
+  const legacyKey = String(legacy.api_key ?? st.settings.api_key ?? '').trim();
+  const legacyBase = String(legacy.base_url ?? st.settings.base_url ?? '').trim();
+  const legacyModel = String(legacy.model ?? st.settings.model ?? '').trim();
+  const changedBase = !!legacyBase && normEndpoint(legacyBase) !== normEndpoint(DEFAULTS.base_url);
+  const changedModel = !!legacyModel && legacyModel !== DEFAULTS.model;
+  const explicitlyConfigured = !!legacyKey || changedBase || changedModel;
+
   const list = [];
-  if (s.api_key || s.base_url || s.model) {
+  if (explicitlyConfigured) {
     const c = normConn({
       name: 'اتصال من',
-      kind: s.api_kind,
-      base: s.base_url,
-      key: s.api_key,
-      models: s.model ? [s.model] : [],
+      kind: legacy.api_kind || st.settings.api_kind,
+      base: legacyBase,
+      key: legacyKey,
+      models: legacyModel && (changedModel || legacyKey) ? [legacyModel] : [],
     });
     if (c) list.push(c);
   }
@@ -275,15 +309,15 @@ function activeConn() {
   return st.conns.find((c) => c.id === st.activeConnId) || st.conns[0] || null;
 }
 function setActiveConn(id) {
-  st.activeConnId = id || '';
+  const c = st.conns.find((x) => x.id === id) || st.conns[0] || null;
+  st.activeConnId = c ? c.id : '';
   localStorage.setItem(LS_ACTIVE_CONN, st.activeConnId);
-  const c = activeConn();
-  if (c) {
-    const m = (c.lastModel && c.models.includes(c.lastModel)) ? c.lastModel : (c.models[0] || '');
-    if (m !== st.settings.model) {
-      st.settings.model = m;
-      saveSettings();
-    }
+  const model = c
+    ? ((c.lastModel && c.models.includes(c.lastModel)) ? c.lastModel : (c.models[0] || ''))
+    : '';
+  if (model !== st.settings.model) {
+    st.settings.model = model;
+    saveSettings();
   }
   updateModelPick();
   updateConnTab();
@@ -296,6 +330,7 @@ function kindLabel(kind) {
 
 let connEditId = null;
 let connSrv = [];
+let connSrvRequest = 0;
 let menuShowConns = false;
 
 function editConn() { return st.conns.find((c) => c.id === connEditId) || null; }
@@ -306,9 +341,16 @@ function stabGo(tab) {
 }
 
 function openConns(id) {
-  connEditId = id || (activeConn() ? activeConn().id : null);
-  if (!connEditId && st.conns.length) connEditId = st.conns[0].id;
+  const requested = id ? st.conns.find((c) => c.id === id) : null;
+  const current = requested || activeConn();
+  connEditId = current ? current.id : null;
+  connSrvRequest++;
   connSrv = [];
+  if (els.cfSrvSearch) els.cfSrvSearch.value = '';
+  if (els.cfFetchModels) {
+    els.cfFetchModels.disabled = false;
+    els.cfFetchModels.textContent = '🔎 دریافت از سرور';
+  }
   renderConnsModal();
   openModal(els.settingsModal);
   stabGo('conn');
@@ -331,7 +373,7 @@ function renderConnList() {
       const it = document.createElement('button');
       it.className = 'conn-card' + (c.id === connEditId ? ' active' : '');
       it.innerHTML = '<div class="cc-name"></div><div class="cc-meta"></div>';
-      it.querySelector('.cc-name').textContent = c.name + (c.id === st.activeConnId ? ' ⭐' : '');
+      it.querySelector('.cc-name').textContent = (c.name || 'اتصال بی‌نام') + (c.id === st.activeConnId ? ' ⭐' : '');
       const meta = it.querySelector('.cc-meta');
       meta.innerHTML = '<span class="cc-chip"></span><span class="cc-chip ltr"></span><span class="cc-chip"></span>';
       const chips = meta.querySelectorAll('.cc-chip');
@@ -339,37 +381,71 @@ function renderConnList() {
       chips[0].textContent = kindLabel(c.kind);
       chips[1].textContent = c.base || 'بدون آدرس';
       chips[2].textContent = mods + ' مدل · ' + (c.key ? 'کلید دارد' : 'بدون کلید');
-      it.onclick = () => { connEditId = c.id; connSrv = []; renderConnsModal(); };
+      it.onclick = () => { connEditId = c.id; connSrvRequest++; connSrv = []; if (els.cfSrvSearch) els.cfSrvSearch.value = ''; renderConnsModal(); };
       els.connList.appendChild(it);
     } catch (e) { console.error('renderConnList item:', e); }
   }
 }
 
+function matchingTemplate(conn) {
+  if (!conn) return '';
+  const base = normEndpoint(conn.base);
+  const entry = Object.entries(CONN_TEMPLATES).find(([, t]) =>
+    t.kind === conn.kind && base && normEndpoint(t.base) === base);
+  return entry ? entry[0] : '';
+}
+
 function loadConnForm() {
   const c = editConn();
-  const has = !!c;
-  els.connForm.classList.toggle('hidden', !has);
-  if (!c) return;
+  els.connForm.classList.toggle('hidden', !c);
+  els.cfKey.type = 'password';
+  els.cfKeyEye.textContent = '👁';
+  els.cfModelInput.value = '';
+  els.cfSrvSearch.value = '';
+  connSrv = [];
+  els.cfSrvList.innerHTML = '';
+  els.cfSrvWrap.classList.add('hidden');
+  els.cfFetchModels.disabled = false;
+  els.cfFetchModels.textContent = '🔎 دریافت از سرور';
+  els.cfTemplate.value = '';
+  els.cfTags.innerHTML = '';
+
+  if (!c) {
+    els.cfName.value = '';
+    els.cfKind.value = 'openai';
+    els.cfBase.value = '';
+    els.cfKey.value = '';
+    els.cfSetActive.textContent = '⭐ اتصال فعال';
+    els.cfKeyLabel.textContent = 'کلید API';
+    els.cfKey.placeholder = 'کلید همین اتصال';
+    els.cfTokenGuide.classList.add('hidden');
+    els.cfHint.classList.add('hidden');
+    return;
+  }
+
   els.cfName.value = c.name;
   els.cfKind.value = c.kind;
   els.cfBase.value = c.base;
   els.cfKey.value = c.key;
+  els.cfTemplate.value = matchingTemplate(c);
   els.cfSetActive.textContent = c.id === st.activeConnId ? '⭐ اتصال فعال ✓' : '⭐ اتصال فعال';
   renderModelTags();
   renderSrvList();
   updateConnFormHints();
 }
 
-function commitConnForm() {
+function commitConnForm(finalize = false) {
   const c = editConn();
   if (!c) return;
-  c.name = els.cfName.value.trim() || 'اتصال';
+  c.name = els.cfName.value.trim() || (finalize ? 'اتصال جدید' : '');
+  if (finalize && !els.cfName.value.trim()) els.cfName.value = c.name;
   c.kind = els.cfKind.value;
   c.base = els.cfBase.value.trim();
   c.key = els.cfKey.value.trim();
-  saveConnsSoon();
-  updateConnListSoon();
-  updateConnTabSoon();
+  if (els.cfTemplate.value && els.cfTemplate.value !== matchingTemplate(c)) els.cfTemplate.value = '';
+  saveConns();
+  renderConnList();
+  updateConnTab();
   updateModelPick();
 }
 
@@ -434,30 +510,49 @@ function addConnModel(name) {
 
 async function fetchConnModels() {
   const c = editConn();
-  if (!c) return;
-  els.cfFetchModels.textContent = '…';
+  if (!c || els.cfFetchModels.disabled) return;
+  const requestId = ++connSrvRequest;
+  const connId = c.id;
+  const base = els.cfBase.value.trim();
+  const key = els.cfKey.value.trim();
+  els.cfFetchModels.disabled = true;
+  els.cfFetchModels.textContent = 'در حال دریافت…';
+  connSrv = [];
+  renderSrvList();
   try {
-    connSrv = await window.__atria.list_models({
-      base: els.cfBase.value.trim(),
-      key: els.cfKey.value.trim(),
-    });
+    const result = await window.__atria.list_models({ base, key });
+    if (requestId !== connSrvRequest || connEditId !== connId) return;
+    connSrv = Array.isArray(result)
+      ? [...new Set(result.map((x) => String(x || '').trim()).filter(Boolean))]
+      : [];
     renderSrvList();
     toast(connSrv.length + ' مدل از سرور آمد — روی هرکدام کلیک کن تا اضافه شود', 'ok');
   } catch (e) {
-    toast('دریافت فهرست مدل‌ها: ' + e, 'err');
+    if (requestId === connSrvRequest && connEditId === connId) toast('دریافت فهرست مدل‌ها: ' + e, 'err');
   } finally {
-    els.cfFetchModels.textContent = '🔎 دریافت از سرور';
+    if (requestId === connSrvRequest && connEditId === connId) {
+      els.cfFetchModels.disabled = false;
+      els.cfFetchModels.textContent = '🔎 دریافت از سرور';
+    }
   }
 }
 
+function resetConnServerModels() {
+  connSrvRequest++;
+  connSrv = [];
+  renderSrvList();
+  els.cfFetchModels.disabled = false;
+  els.cfFetchModels.textContent = '🔎 دریافت از سرور';
+}
+
 function renderSrvList() {
-  const q = (els.cfSrvSearch.value || '').trim().toLowerCase();
+  const q = (els.cfSrvSearch.value || '').trim().toLocaleLowerCase();
   els.cfSrvWrap.classList.toggle('hidden', !connSrv.length);
   els.cfSrvList.innerHTML = '';
   const c = editConn();
   let shown = 0;
   for (const id of connSrv) {
-    if (q && !id.toLowerCase().includes(q)) continue;
+    if (q && !id.toLocaleLowerCase().includes(q)) continue;
     shown++;
     if (shown > 400) break;
     const it = document.createElement('button');
@@ -485,6 +580,12 @@ function renderSrvList() {
     };
     els.cfSrvList.appendChild(it);
   }
+  if (connSrv.length && q && shown === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'mem-empty srv-empty';
+    empty.textContent = 'مدلی با این عبارت پیدا نشد';
+    els.cfSrvList.appendChild(empty);
+  }
 }
 
 function bindConns() {
@@ -493,19 +594,32 @@ function bindConns() {
     Object.entries(CONN_TEMPLATES)
       .map(([id, t]) => `<option value="${id}">${t.label}</option>`).join('');
   els.connAdd.onclick = () => {
-    const c = normConn({ name: 'اتصال ' + (st.conns.length + 1), kind: 'openai', base: '', key: '', models: [] });
-    st.conns.push(c);
+    const unfinished = st.conns.find((c) =>
+      isGeneratedConnName(c.name) && !c.base.trim() && !c.key.trim() && !c.models.length);
+    if (unfinished) {
+      connEditId = unfinished.id;
+      renderConnsModal();
+      els.cfName.focus();
+      return;
+    }
+    let suffix = 1;
+    let name = 'اتصال جدید';
+    while (st.conns.some((c) => c.name === name)) name = 'اتصال جدید ' + (++suffix);
+    const c = normConn({ name, kind: 'openai', base: '', key: '', models: [] });
+    st.conns.unshift(c);
     saveConns();
+    setActiveConn(c.id);
     connEditId = c.id;
+    connSrvRequest++;
     connSrv = [];
     renderConnsModal();
-    updateConnTab();
+    els.cfName.focus();
   };
-  els.cfName.oninput = commitConnForm;
+  els.cfName.oninput = () => commitConnForm();
   els.cfName.onkeydown = (e) => { if (!(e.isComposing || e.keyCode === 229) && e.key === 'Enter') { e.preventDefault(); els.cfBase.focus(); } };
   els.cfBase.onkeydown = (e) => { if (!(e.isComposing || e.keyCode === 229) && e.key === 'Enter') { e.preventDefault(); els.cfKey.focus(); } };
   els.cfKey.onkeydown = (e) => { if (!(e.isComposing || e.keyCode === 229) && e.key === 'Enter') { e.preventDefault(); els.cfKey.blur(); } };
-  els.cfName.onblur = els.cfBase.onblur = els.cfKey.onblur = () => { commitConnForm(); saveConns(); };
+  els.cfName.onblur = els.cfBase.onblur = els.cfKey.onblur = () => commitConnForm(true);
   els.cfKind.onchange = () => { commitConnForm(); updateConnFormHints(); };
   els.cfTemplate.onchange = () => {
     const t = CONN_TEMPLATES[els.cfTemplate.value];
@@ -513,14 +627,15 @@ function bindConns() {
     if (!c || !t) return;
     c.kind = t.kind;
     c.base = t.base;
-    if (/^اتصال/.test(c.name)) c.name = t.label;
+    if (isGeneratedConnName(c.name)) c.name = t.label;
+    connSrvRequest++;
     saveConns();
     loadConnForm();
     renderConnList();
     updateConnTab();
   };
-  els.cfBase.oninput = commitConnForm;
-  els.cfKey.oninput = commitConnForm;
+  els.cfBase.oninput = () => { resetConnServerModels(); commitConnForm(); };
+  els.cfKey.oninput = () => { resetConnServerModels(); commitConnForm(); };
   els.cfKeyEye.onclick = () => {
     const show = els.cfKey.type === 'password';
     els.cfKey.type = show ? 'text' : 'password';
@@ -549,13 +664,12 @@ function bindConns() {
     const c = editConn();
     if (!c) return;
     if (!confirm('اتصال «' + c.name + '» حذف شود؟')) return;
+    const wasActive = st.activeConnId === c.id;
     st.conns = st.conns.filter((x) => x.id !== c.id);
     saveConns();
-    if (st.activeConnId === c.id) {
-      st.activeConnId = st.conns[0] ? st.conns[0].id : '';
-      localStorage.setItem(LS_ACTIVE_CONN, st.activeConnId);
-    }
+    if (wasActive) setActiveConn(st.conns[0] ? st.conns[0].id : '');
     connEditId = st.conns[0] ? st.conns[0].id : null;
+    connSrvRequest++;
     connSrv = [];
     renderConnsModal();
     updateConnTab();
@@ -569,12 +683,12 @@ function updateConnTab() {
   if (els.connSummary) {
     els.connSummary.innerHTML = '';
     if (!c) {
-      els.connSummary.innerHTML = '<div class="mem-empty">اتصالی نیست — از «مدیریت کلیدها و اتصال‌ها» بساز</div>';
+      els.connSummary.innerHTML = '<div class="mem-empty">اتصالی نیست — برای شروع «اتصال جدید» را بزن</div>';
     } else {
       const d = document.createElement('div');
       d.className = 'conn-card active';
       d.innerHTML = '<div class="cc-name"></div><div class="cc-meta"></div>';
-      d.querySelector('.cc-name').textContent = '⭐ ' + c.name;
+      d.querySelector('.cc-name').textContent = '⭐ ' + (c.name || 'اتصال بی‌نام');
       const meta = d.querySelector('.cc-meta');
       meta.innerHTML = '<span class="cc-chip"></span><span class="cc-chip ltr"></span><span class="cc-chip"></span>';
       const chips = meta.querySelectorAll('.cc-chip');
@@ -981,7 +1095,7 @@ function clearImgs() {
 // مدل مؤثرِ اتصال فعال: انتخاب فعلی اگر مجاز باشد، وگرنه آخرین مدل همین اتصال، وگرنه اولی
 function effModel() {
   const conn = activeConn();
-  if (!conn) return st.settings.model || '';
+  if (!conn) return '';
   if (st.settings.model && conn.models.includes(st.settings.model)) return st.settings.model;
   if (conn.lastModel && conn.models.includes(conn.lastModel)) return conn.lastModel;
   return conn.models[0] || '';
@@ -1600,7 +1714,7 @@ function renderModelMenu() {
   const tools = document.createElement('div');
   tools.className = 'mm-tools';
   tools.innerHTML =
-    '<input class="mm-search" id="mmSearch" placeholder="جست‌وجوی مدل…" spellcheck="false">' +
+    '<input class="mm-search" id="mmSearch" dir="auto" placeholder="جست‌وجوی مدل…" spellcheck="false">' +
     '<button class="mm-fetch" id="mmManage" title="مدیریت اتصال‌ها و مدل‌ها">⚙︎</button>';
   els.modelMenu.appendChild(tools);
 
@@ -1612,16 +1726,16 @@ function renderModelMenu() {
     els.modelMenu.appendChild(head);
     if (!st.conns.length) {
       const e2 = document.createElement('div');
-      e2.className = 'mem-empty';
+      e2.className = 'mem-empty mm-empty-state';
       e2.textContent = 'اتصالی نیست';
       els.modelMenu.appendChild(e2);
     }
     for (const cc of st.conns) {
       const it = document.createElement('button');
       const isCur = c && cc.id === c.id;
-      it.className = 'mm-item' + (isCur ? ' active' : '');
+      it.className = 'mm-item mm-option' + (isCur ? ' active' : '');
       it.innerHTML = '<span class="mm-main"><span class="mm-name"></span><span class="mm-sub"></span></span><span class="mm-tick"></span>';
-      it.querySelector('.mm-name').textContent = cc.name;
+      it.querySelector('.mm-name').textContent = cc.name || 'اتصال بی‌نام';
       it.querySelector('.mm-sub').textContent =
         kindLabel(cc.kind) + ' · ' + (Array.isArray(cc.models) ? cc.models.length : 0) + ' مدل' + (cc.key ? '' : ' · بدون کلید');
       it.querySelector('.mm-tick').textContent = isCur ? '✓' : '';
@@ -1653,7 +1767,7 @@ function renderModelMenu() {
       for (const m of (Array.isArray(cc.models) ? cc.models : [])) {
         const it = document.createElement('button');
         const isAct = c && cc.id === c.id && m === effModel();
-        it.className = 'mm-item' + (isAct ? ' active' : '');
+        it.className = 'mm-item mm-option' + (isAct ? ' active' : '');
         it.innerHTML = '<span class="mm-main"><span class="mm-name"></span><span class="mm-sub"></span></span><span class="mm-tick"></span>';
         it.querySelector('.mm-name').textContent = m;
         it.querySelector('.mm-sub').textContent = cc.name + ' · ' + kindLabel(cc.kind);
@@ -1665,33 +1779,47 @@ function renderModelMenu() {
     }
     if (!any) {
       const e2 = document.createElement('div');
-      e2.className = 'mem-empty';
+      e2.className = 'mem-empty mm-empty-state';
       e2.textContent = 'مدلی تعیین نکرده‌ای — «↻ تعویض اتصال» یا ⚙︎';
       els.modelMenu.appendChild(e2);
     }
     const addBtn = document.createElement('button');
-    addBtn.className = 'mm-item mm-custom';
+    addBtn.className = 'mm-item mm-custom mm-action';
     addBtn.textContent = '＋ افزودن/حذف مدل‌های اتصال‌ها…';
     addBtn.onclick = () => { closeModelMenu(); openConns(null); };
     els.modelMenu.appendChild(addBtn);
   }
   const manage = document.createElement('button');
-  manage.className = 'mm-item mm-custom';
+  manage.className = 'mm-item mm-custom mm-action';
   manage.textContent = '⚙︎ مدیریت اتصال‌ها و مدل‌ها…';
   manage.onclick = () => { closeModelMenu(); openConns(null); };
   els.modelMenu.appendChild(manage);
 
-  tools.querySelector('#mmSearch').oninput = (e) => {
-    const q = e.target.value.trim().toLowerCase();
-    els.modelMenu.querySelectorAll('.mm-item').forEach((it) => {
-      const hit = !q || it.textContent.toLowerCase().includes(q);
+  const searchInput = tools.querySelector('#mmSearch');
+  const searchEmpty = document.createElement('div');
+  searchEmpty.className = 'mem-empty mm-search-empty hidden';
+  searchEmpty.textContent = 'نتیجه‌ای با این عبارت پیدا نشد';
+  els.modelMenu.appendChild(searchEmpty);
+  searchInput.oninput = (e) => {
+    const q = String(e.target.value || '').trim().toLocaleLowerCase();
+    let visible = 0;
+    els.modelMenu.querySelectorAll('.mm-option').forEach((it) => {
+      const haystack = it.textContent.toLocaleLowerCase();
+      const hit = !q || haystack.includes(q);
       it.classList.toggle('hidden', !hit);
+      if (hit) visible++;
     });
+    els.modelMenu.querySelectorAll('.mm-action, .mm-empty-state').forEach((it) =>
+      it.classList.toggle('hidden', !!q));
     els.modelMenu.querySelectorAll('.mm-group').forEach((g) => {
-      let n = g.nextElementSibling, vis = false;
-      while (n && n.classList.contains('mm-item')) { if (!n.classList.contains('hidden')) vis = true; n = n.nextElementSibling; }
-      g.classList.toggle('hidden', !vis);
+      let n = g.nextElementSibling, hasVisibleOption = false;
+      while (n && !n.classList.contains('mm-group')) {
+        if (n.classList.contains('mm-option') && !n.classList.contains('hidden')) hasVisibleOption = true;
+        n = n.nextElementSibling;
+      }
+      g.classList.toggle('hidden', !hasVisibleOption);
     });
+    searchEmpty.classList.toggle('hidden', !q || visible > 0);
   };
   tools.querySelector('#mmManage').onclick = (e) => {
     e.stopPropagation();
@@ -1730,7 +1858,11 @@ function boot() {
   st.conns = loadConns();
   migrateConns();
   migratePersona();
-  st.activeConnId = localStorage.getItem(LS_ACTIVE_CONN) || (st.conns[0] ? st.conns[0].id : '');
+  const savedActiveId = localStorage.getItem(LS_ACTIVE_CONN) || '';
+  st.activeConnId = st.conns.some((c) => c.id === savedActiveId)
+    ? savedActiveId
+    : (st.conns[0] ? st.conns[0].id : '');
+  localStorage.setItem(LS_ACTIVE_CONN, st.activeConnId);
   stars();
   bindSettings();
   saveSettings();
@@ -1738,7 +1870,7 @@ function boot() {
   renderHistory();
 
   els.btnNew.onclick = () => newChat();
-  els.btnSettings.onclick = () => openModal(els.settingsModal);
+  els.btnSettings.onclick = () => openConns(null);
   els.btnMemory.onclick = openMemory;
   els.btnSide.onclick = () => els.frame.classList.toggle('side-hidden');
   els.btnMin.onclick = () => invokeCmd('minimize_win');
@@ -1854,10 +1986,13 @@ function boot() {
     }
   });
 
-  // اولین اجرا: کلیدی تعبیه نشده — تنظیمات را باز کن
-  if (!st.settings.api_key) {
-    openModal(els.settingsModal);
-    setTimeout(() => toast('برای شروع، کلید API خودت را وارد کن', 'warn'), 400);
+  // Connection credentials are stored in atria.conns.v1, not in the legacy settings object.
+  const startupConn = activeConn();
+  if (!startupConn || !String(startupConn.key || '').trim()) {
+    openConns(startupConn ? startupConn.id : null);
+    setTimeout(() => toast(
+      startupConn ? 'کلید/توکن اتصال فعال را وارد کن' : 'برای شروع، یک اتصال جدید بساز و کلید/API را وارد کن',
+      'warn'), 400);
   }
 }
 
