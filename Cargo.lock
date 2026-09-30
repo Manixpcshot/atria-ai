@@ -2010,7 +2010,7 @@ dependencies = [
 
 [[package]]
 name = "num_enum"
-version = "0.8.0"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26"
 dependencies = [
@@ -2020,7 +2020,7 @@ dependencies = [
 
 [[package]]
 name = "num_enum_derive"
-version = "0.8.0"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
