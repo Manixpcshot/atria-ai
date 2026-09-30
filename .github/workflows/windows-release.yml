@@ -49,21 +49,42 @@ jobs:
           Compress-Archive -Path dist-stage/* -DestinationPath Atria-Dawn-win64.zip
 
       - name: Sign update manifest and create SHA-256 sums
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
         shell: pwsh
         env:
           ATRIA_UPDATE_PRIVATE_KEY: ${{ secrets.ATRIA_UPDATE_PRIVATE_KEY }}
-          ATRIA_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          ATRIA_RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
         run: node scripts/sign-release.mjs
+
+      - name: Stage signed release assets
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          Copy-Item target/release/atria.exe release-assets/atria.exe
+          Copy-Item Atria-Dawn-win64.zip release-assets/
+          Copy-Item SHA256SUMS.txt release-assets/
+          Copy-Item update-manifest.json release-assets/
+          Copy-Item update-manifest.sig release-assets/
+
+      - name: Upload pre-release verification assets
+        if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.ref_name }}-windows-preflight
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload signed assets to the GitHub release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            target/release/atria.exe
-            Atria-Dawn-win64.zip
-            SHA256SUMS.txt
-            update-manifest.json
-            update-manifest.sig
+            release-assets/atria.exe
+            release-assets/Atria-Dawn-win64.zip
+            release-assets/SHA256SUMS.txt
+            release-assets/update-manifest.json
+            release-assets/update-manifest.sig
           tag_name: ${{ github.event.release.tag_name }}
+          overwrite_files: true
