@@ -3,6 +3,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod secrets;
+mod updates;
 
 use commands::AppState;
 use std::sync::atomic::AtomicBool;
@@ -66,6 +68,15 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_models,
+            commands::test_connection,
+            commands::secret_set,
+            commands::secret_get,
+            commands::secret_delete,
+            commands::update_check,
+            commands::update_install,
+            commands::file_apply_edit,
+            commands::file_reject_edit,
+            commands::file_restore_backup,
             commands::dirs_info,
             commands::chats_load,
             commands::chats_sync,

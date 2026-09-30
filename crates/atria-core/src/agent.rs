@@ -2,7 +2,7 @@
 
 use crate::client::{send, strip_thinking, is_output_limit_stop_reason, ClientConfig, CoreError, StreamEvent};
 use crate::memory::MemoryStore;
-use crate::tools::{execute, file_tool_catalog, tool_catalog, tool_label};
+use crate::tools::{execute_with_data_root, file_tool_catalog, tool_catalog, tool_label};
 use crate::types::{Block, Message, Role};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -202,8 +202,9 @@ pub async fn run_agent(
             }
         }
 
-        // Execute every requested tool locally (file tools: full computer access).
+        // Execute tools locally; file writes remain staged until explicit user approval.
         let root = Path::new(&cfg.workspace);
+        let data_root = Path::new(&cfg.app_data);
         let mut results = Vec::new();
         if turn.stop_reason == "tool_use" {
             for block in &turn.message.content {
@@ -214,7 +215,7 @@ pub async fn run_agent(
                         label: tool_label(name).to_string(),
                         input: input.clone(),
                     });
-                    let res = execute(name, input, mem, root);
+                    let res = execute_with_data_root(name, input, mem, root, data_root);
                     emit(AgentEvent::ToolEnd {
                         id: id.clone(),
                         name: name.clone(),

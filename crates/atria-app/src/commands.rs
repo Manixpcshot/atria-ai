@@ -32,7 +32,7 @@ pub struct ChatPayload {
     /// "anthropic" (Messages API) or "openai" (Chat Completions).
     #[serde(default)]
     pub kind: String,
-    /// Enable local file tools inside the workspace folder.
+    /// Enable local file tools; each write is staged for user review and approval.
     #[serde(default)]
     pub file_tools: bool,
     /// Workspace root for the file tools.
@@ -71,10 +71,104 @@ pub async fn list_models(base: String, key: String) -> Result<Vec<String>, Strin
     atria_core::client::list_models(&base, &key).await.map_err(|e| e.to_string())
 }
 
+/// Probe a provider/model with a tiny, non-streaming request.
+#[tauri::command]
+pub async fn test_connection(base: String, key: String, model: String, kind: String) -> Result<serde_json::Value, String> {
+    if model.trim().is_empty() && kind != "deepseek_web" {
+        return Err("ابتدا یک مدل تعیین کن".into());
+    }
+    let started = std::time::Instant::now();
+    let cfg = ClientConfig {
+        api_key: key,
+        base_url: base,
+        model: if model.trim().is_empty() { "deepseek-chat".into() } else { model.clone() },
+        max_tokens: 64,
+        temperature: 0.0,
+        system: "Reply with a short connection-test acknowledgement only.".into(),
+        stream: false,
+        tools: false,
+        kind: ApiKind::parse(&kind),
+        file_tools: false,
+        workspace: String::new(),
+        app_data: String::new(),
+        web_thinking: false,
+        web_search: false,
+        web_session: String::new(),
+        web_session_out: None,
+    };
+    let messages = [Message::user_text("Reply with OK.")];
+    let stop = Arc::new(AtomicBool::new(false));
+    let turn = atria_core::send(&cfg, &messages, &[], |_| {}, stop).await.map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "model": model,
+        "latency_ms": started.elapsed().as_millis(),
+        "reply": turn.message.plain_text().chars().take(160).collect::<String>(),
+        "input_tokens": turn.usage.input_tokens,
+        "output_tokens": turn.usage.output_tokens,
+        "stop_reason": turn.stop_reason,
+    }))
+}
+
+/// Apply/reject a staged file edit, or restore a backup, under ~/.atria.
+#[tauri::command]
+pub fn file_apply_edit(id: String, state: State<'_, AppState>) -> Result<String, String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    atria_core::tools::apply_pending_edit(&id, root)
+}
+
+#[tauri::command]
+pub fn file_reject_edit(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    atria_core::tools::reject_pending_edit(&id, root)
+}
+
+#[tauri::command]
+pub fn file_restore_backup(id: String, state: State<'_, AppState>) -> Result<String, String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    atria_core::tools::restore_file_backup(&id, root)
+}
+
+/// Store provider credentials in the current Windows user’s Credential Manager.
+#[tauri::command]
+pub fn secret_set(id: String, value: String, state: State<'_, AppState>) -> Result<(), String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    crate::secrets::set(root, &id, &value)
+}
+
+#[tauri::command]
+pub fn secret_get(id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    crate::secrets::get(root, &id)
+}
+
+#[tauri::command]
+pub fn secret_delete(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    crate::secrets::delete(root, &id)
+}
+
 /// Abort the in-flight generation.
 #[tauri::command]
 pub fn chat_stop(state: State<'_, AppState>) {
     state.stop.store(true, Ordering::Relaxed);
+}
+
+/// Check the latest public release after verifying its Ed25519 signature.
+#[tauri::command]
+pub async fn update_check() -> Result<crate::updates::UpdateStatus, String> {
+    crate::updates::check().await
+}
+
+/// Download a release only after signature and SHA-256 verification, then
+/// replace the running executable after the current process exits.
+#[tauri::command]
+pub async fn update_install(app: AppHandle) -> Result<(), String> {
+    let (_version, staged) = crate::updates::download_verified_executable().await?;
+    let target = std::env::current_exe().map_err(|e| format!("cannot locate Atria executable: {e}"))?;
+    crate::updates::launch_replacement(&staged, &target, std::process::id())?;
+    app.exit(0);
+    Ok(())
 }
 
 /// Static app info for the UI (about panel, badges).
@@ -210,7 +304,12 @@ pub async fn chat_send(
     let stop = state.stop.clone();
     let running = state.running.clone();
     let mem_path = state.mem_path.clone();
-        let sess_out = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let workspace = if payload.workspace.trim().is_empty() {
+        atria_root().join("workspace").to_string_lossy().to_string()
+    } else {
+        payload.workspace.clone()
+    };
+    let sess_out = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
 
     tauri::async_runtime::spawn(async move {
         let cfg = ClientConfig {
@@ -224,7 +323,8 @@ pub async fn chat_send(
             tools: payload.tools_enabled,
             kind: ApiKind::parse(&payload.kind),
             file_tools: payload.file_tools,
-            workspace: payload.workspace,
+            workspace,
+            app_data: mem_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_string_lossy().to_string(),
             web_thinking: payload.thinking,
             web_search: payload.web_search,
             web_session: payload.session_id,

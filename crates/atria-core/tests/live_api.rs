@@ -9,7 +9,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 fn key() -> String {
-    std::env::var("ATRIA_API_KEY").unwrap_or_else(|_| "".into())
+    std::env::var("ATRIA_API_KEY").expect("set ATRIA_API_KEY to run ignored live_api tests; no key is embedded")
 }
 
 #[tokio::test]

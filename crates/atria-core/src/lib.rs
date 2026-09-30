@@ -8,7 +8,7 @@
 //!   providers (Gemini compat layer, Groq, DeepSeek, OpenRouter, ...)
 //! * **SSE streaming** decoder (`thinking_delta`, `text_delta`,
 //!   `reasoning_content`, `input_json_delta`, ...)
-//! * **Agent loop** with tools: calculator, time, memory, sandboxed file access
+//! * **Agent loop** with calculator/time/memory tools and diff-reviewed file edits
 //! * Persistent **memory** store for `remember` / `recall`
 
 pub mod agent;

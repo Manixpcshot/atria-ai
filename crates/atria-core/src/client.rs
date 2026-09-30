@@ -47,10 +47,12 @@ pub struct ClientConfig {
     pub tools: bool,
     /// Which API dialect to use.
     pub kind: ApiKind,
-    /// Local file-access tools (`list_files` / `read_file` / `write_file`).
+    /// Local file-access tools (`list_files` / `read_file` / staged `write_file`).
     pub file_tools: bool,
-    /// Sandbox root for the file tools (empty = disabled).
+    /// Default workspace for relative file-tool paths.
     pub workspace: String,
+    /// Private app data directory for staged edits/backups.
+    pub app_data: String,
     /// DeepSeek-web: the site's DeepThink toggle.
     pub web_thinking: bool,
     /// DeepSeek-web: the site's web-search toggle.
@@ -75,6 +77,7 @@ impl Default for ClientConfig {
             kind: ApiKind::Anthropic,
             file_tools: false,
             workspace: String::new(),
+            app_data: String::new(),
             web_thinking: true,
             web_search: false,
             web_session: String::new(),

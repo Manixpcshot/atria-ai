@@ -29,7 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
-        <span class="app-ver" id="appVer">v0.7.6</span>
+        <span class="app-ver" id="appVer">v0.8.0</span>
         <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
@@ -54,6 +54,7 @@
         </button>
         <nav class="conv-list" id="convList"></nav>
         <div class="side-footer">
+          <button class="side-btn" id="btnProjects">📁&nbsp; پروژه‌ها و ادامهٔ کار</button>
           <button class="side-btn" id="btnSettings">⚙︎&nbsp; تنظیمات</button>
           <button class="side-btn" id="btnMemory">🧠&nbsp; حافظهٔ بلندمدت</button>
           <div class="engine-note"><span class="dot-live"></span> Rust engine · Tauri v2</div>
@@ -93,6 +94,10 @@
               <span class="mp-caret" aria-hidden="true">⌄</span>
             </button>
             
+            <div class="composer-status">
+              <button class="project-chip hidden" id="projectChip" type="button" title="پروژهٔ فعال"></button>
+              <span class="ctx-meter" id="ctxMeter" title="برآورد تقریبی مصرف پنجرهٔ متن">متن: —</span>
+            </div>
             <div class="mode-chips">
               <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
               <button class="mode-chip" id="btnAttach" title="پیوست تصویر (برای مدل‌های ویژن‌دار)">📎 تصویر</button>
@@ -175,12 +180,17 @@
               <button class="eye" id="cfKeyEye" title="نمایش">👁</button>
               <button class="btn tiny hidden" id="cfTokenGuide" type="button">از کجا بیاورم؟</button>
             </div>
-            <span class="fhint">کلید هر اتصال جداگانه نگه داشته می‌شود و فقط روی همین سیستم می‌ماند.</span>
+            <span class="fhint">کلیدها در Windows Credential Manager و برای حساب فعلی ذخیره می‌شوند؛ در localStorage فقط مشخصات اتصال می‌ماند.</span>
             <span class="fhint prov-help hidden" id="cfHint"></span>
+            <div class="conn-test-row">
+              <button class="btn tiny" id="cfTestConn" type="button" title="یک درخواست کوتاه واقعی می‌فرستد و ممکن است هزینهٔ ناچیزی داشته باشد">🩺 آزمون اتصال و مدل</button>
+              <span class="conn-test-status" id="cfTestStatus" aria-live="polite"></span>
+            </div>
           </div>
           <div class="field">
             <label class="flabel">مدل‌های این اتصال</label>
             <div class="model-tags" id="cfTags"></div>
+            <span class="fhint">برچسب‌های تصویر/ابزار/استدلال را روی هر مدل روشن یا خاموش کن؛ مقدار اولیه از نام مدل حدس زده می‌شود.</span>
             <div class="key-row">
               <input type="text" id="cfModelInput" dir="ltr" spellcheck="false" placeholder="نام مدل — Enter بزن">
               <button class="btn tiny" id="cfModelAdd">افزودن</button>
@@ -238,6 +248,11 @@
             </div>
             <label class="switch-field sm"><input type="checkbox" id="dsSearchVal"><span class="switch"></span></label>
           </div>
+          <div class="field context-budget-field">
+            <label class="flabel" for="ctxLimitVal">بودجهٔ پنجرهٔ گفتگو (توکن تقریبی)</label>
+            <input type="number" id="ctxLimitVal" min="4096" max="200000" step="1024" inputmode="numeric" dir="ltr">
+            <span class="fhint">آتریا تاریخچهٔ قدیمی را خلاصه می‌کند، پیام‌های تازه را نگه می‌دارد و پیش از پرشدن پنجره هشدار می‌دهد. برای هر مدل سقف مناسب خودش را تنظیم کن.</span>
+          </div>
         </div>
 
         <div class="stab-body" data-tab="sys">
@@ -256,7 +271,7 @@
           <div class="set-row">
             <div class="set-row-text">
               <div class="set-label">دسترسی به فایل‌ها</div>
-              <div class="set-desc">دسترسی کامل به فایل‌های کل کامپیوتر (مسیرهای مطلق مثل C:/…) — محدود به پوشهٔ کاری نیست</div>
+              <div class="set-desc">خواندن/فهرست‌کردن فایل‌ها؛ هر نوشتن ابتدا diff می‌سازد و فقط با تأیید تو اعمال می‌شود، با backup و بازگردانی.</div>
             </div>
             <label class="switch-field sm"><input type="checkbox" id="fileToolsVal"><span class="switch"></span></label>
           </div>
@@ -275,10 +290,49 @@
             <button class="btn" id="btnRevealAtria" type="button">📂 باز کردن پوشهٔ .atria</button>
             <span class="fhint">گفتگوها و ورک‌اسپیس مثل اپ‌های رسمی در پوشهٔ کاربر نگهداری می‌شوند — مثلاً <b dir="ltr">C:\Users\man\.atria</b></span>
           </div>
+          <div class="set-sec-title">به‌روزرسانی امن</div>
+          <div class="field update-box">
+            <p class="fhint">نسخهٔ جدید از مخزن رسمی بررسی می‌شود؛ فایل اجرایی پیش از نصب با امضای Ed25519 و SHA-256 اعتبارسنجی خواهد شد.</p>
+            <div class="update-actions">
+              <button class="btn" id="btnCheckUpdate" type="button">↻ بررسی نسخه</button>
+              <button class="btn primary hidden" id="btnInstallUpdate" type="button">⬇ دریافت و نصب امن</button>
+            </div>
+            <div class="update-status" id="updateStatus" aria-live="polite">بررسی خودکار هنگام اجرای برنامه انجام می‌شود.</div>
+          </div>
         </div>
         </div>
       </main>
     </div>
+  </div>
+
+  <!-- project workspace: persistent notes, tasks, checkpoints and resume -->
+  <div class="modal-backdrop hidden" id="projectsModal">
+    <section class="project-modal glass" role="dialog" aria-modal="true" aria-labelledby="projectsTitle">
+      <header class="modal-head">
+        <div><h2 id="projectsTitle">📁 پروژه‌ها و ادامهٔ کار</h2><p class="project-intro">یادداشت، کارهای باز و نقطهٔ ذخیره را نگه دار؛ گفتگوی تازهٔ همین پروژه آن‌ها را به‌عنوان زمینه می‌گیرد.</p></div>
+        <button class="x" id="projectsX" type="button" aria-label="بستن پروژه‌ها">✕</button>
+      </header>
+      <div class="project-grid">
+        <aside class="project-list-col">
+          <button class="btn primary full" id="projectCreate" type="button">＋ پروژهٔ جدید</button>
+          <div class="project-list" id="projectList"></div>
+        </aside>
+        <section class="project-detail" id="projectDetail">
+          <div class="field"><label class="flabel" for="projectName">نام پروژه</label><input id="projectName" type="text" dir="auto" maxlength="100"></div>
+          <div class="field"><label class="flabel" for="projectNotes">یادداشت و زمینهٔ ماندگار</label><textarea id="projectNotes" rows="4" dir="auto" placeholder="هدف، تصمیم‌ها، محدودیت‌ها…"></textarea></div>
+          <div class="project-checkpoint" id="projectCheckpoint">هنوز نقطهٔ ذخیره‌ای ثبت نشده است.</div>
+          <div class="project-task-head"><strong>کارهای پروژه</strong><span id="projectTaskCount">۰ کار</span></div>
+          <div class="project-tasks" id="projectTasks"></div>
+          <div class="project-add-task"><input id="projectTaskInput" type="text" dir="auto" placeholder="کار بعدی…"><button class="btn tiny" id="projectTaskAdd" type="button">افزودن</button></div>
+          <div class="project-actions">
+            <button class="btn" id="projectAttach" type="button">پیوست گفتگو به پروژه</button>
+            <button class="btn" id="projectCheckpointSave" type="button">⏺ ذخیرهٔ نقطه</button>
+            <button class="btn primary" id="projectResume" type="button">ادامه در گفتگوی تازه</button>
+            <button class="btn danger" id="projectDelete" type="button">حذف پروژه</button>
+          </div>
+        </section>
+      </div>
+    </section>
   </div>
 
   <!-- memory modal -->
@@ -364,6 +418,15 @@
       memory_clear: function () { return invoke('memory_clear'); },
       app_meta: function () { return invoke('app_meta'); },
       list_models: function (a) { return invoke('list_models', a); },
+      test_connection: function (a) { return invoke('test_connection', a); },
+      secret_set: function (a) { return invoke('secret_set', a); },
+      secret_get: function (a) { return invoke('secret_get', a); },
+      secret_delete: function (a) { return invoke('secret_delete', a); },
+      file_apply_edit: function (a) { return invoke('file_apply_edit', a); },
+      file_reject_edit: function (a) { return invoke('file_reject_edit', a); },
+      file_restore_backup: function (a) { return invoke('file_restore_backup', a); },
+      update_check: function () { return invoke('update_check'); },
+      update_install: function () { return invoke('update_install'); },
       chats_load: function () { return invoke('chats_load'); },
       chats_sync: function (a) { return invoke('chats_sync', a); },
       dirs_info: function () { return invoke('dirs_info'); },

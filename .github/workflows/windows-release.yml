@@ -25,11 +25,19 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      - name: Build Atria (release)
-        run: cargo build --release -p atria-app
+      - name: Validate frontend integration
+        run: |
+          node --check frontend/app.js
+          node --check tests/ui_harness.mjs
+          node tests/ui_harness.mjs
 
-      - name: Run engine tests
-        run: cargo test -p atria-core --release
+      - name: Build Atria (release)
+        run: cargo build --release --locked -p atria-app
+
+      - name: Run engine and app tests
+        run: |
+          cargo test --release --locked -p atria-core
+          cargo test --release --locked -p atria-app
 
       - name: Package artifacts
         shell: pwsh
@@ -40,21 +48,22 @@ jobs:
           Copy-Item LICENSE dist-stage/
           Compress-Archive -Path dist-stage/* -DestinationPath Atria-Dawn-win64.zip
 
-      - name: Detect release tag
-        id: taginfo
+      - name: Sign update manifest and create SHA-256 sums
+        if: github.event_name == 'release'
         shell: pwsh
-        run: |
-          $tag = ""
-          try { $tag = (git describe --tags --exact-match 2>$null) } catch { $tag = "" }
-          if (-not $tag) { $tag = "" }
-          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          exit 0
+        env:
+          ATRIA_UPDATE_PRIVATE_KEY: ${{ secrets.ATRIA_UPDATE_PRIVATE_KEY }}
+          ATRIA_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/sign-release.mjs
 
-      - name: Upload assets to the GitHub release
-        if: github.event_name == 'release' || steps.taginfo.outputs.tag != ''
+      - name: Upload signed assets to the GitHub release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: |
             target/release/atria.exe
             Atria-Dawn-win64.zip
-          tag_name: ${{ github.event.release.tag_name || steps.taginfo.outputs.tag }}
+            SHA256SUMS.txt
+            update-manifest.json
+            update-manifest.sig
+          tag_name: ${{ github.event.release.tag_name }}

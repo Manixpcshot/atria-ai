@@ -78,9 +78,11 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "atria-app"
-version = "0.7.6"
+version = "0.8.0"
 dependencies = [
  "atria-core",
+ "reqwest 0.12.28",
+ "ring",
  "serde",
  "serde_json",
  "tauri",
@@ -89,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "atria-core"
-version = "0.7.6"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "futures",
@@ -2008,7 +2010,7 @@ dependencies = [
 
 [[package]]
 name = "num_enum"
-version = "0.7.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26"
 dependencies = [
@@ -2018,7 +2020,7 @@ dependencies = [
 
 [[package]]
 name = "num_enum_derive"
-version = "0.7.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [

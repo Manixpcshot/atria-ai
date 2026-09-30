@@ -1,8 +1,10 @@
-//! Built-in agent tools: calculator, time, memory and full file access.
+//! Built-in agent tools: calculator, time, memory, file reading, and user-approved staged file writes.
 
 use crate::memory::MemoryStore;
 use serde_json::Value;
-use std::path::Path;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Result of executing a tool locally.
 #[derive(Debug, Clone)]
@@ -81,7 +83,7 @@ pub fn file_tool_catalog() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "write_file",
-            "description": "Create or overwrite a UTF-8 text file anywhere on the computer (parent folders are created). Path can be relative to the workspace folder or an absolute path.",
+            "description": "Prepare a proposed UTF-8 text file change and show a diff. Do NOT claim it has been applied: the user must review and approve it in Atria. Path can be relative to the workspace folder or an absolute path.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -108,10 +110,25 @@ pub fn tool_label(name: &str) -> &'static str {
     }
 }
 
-/// Execute one tool call locally.
-///
-/// `root` sandboxes the file tools; an empty path disables file access.
+/// Execute one tool call locally. The compatibility wrapper stores review data
+/// beneath a private state folder next to the supplied workspace.
 pub fn execute(name: &str, input: &Value, mem: &mut MemoryStore, root: &Path) -> ToolOutcome {
+    let data_root = if root.as_os_str().is_empty() {
+        user_data_root()
+    } else {
+        root.join(".atria-state")
+    };
+    execute_with_data_root(name, input, mem, root, &data_root)
+}
+
+/// Execute one tool with an explicit private app-data root (used by the Tauri shell).
+pub fn execute_with_data_root(
+    name: &str,
+    input: &Value,
+    mem: &mut MemoryStore,
+    root: &Path,
+    data_root: &Path,
+) -> ToolOutcome {
     match name {
         "calculator" => {
             let expr = input["expression"].as_str().unwrap_or("").trim();
@@ -166,9 +183,17 @@ pub fn execute(name: &str, input: &Value, mem: &mut MemoryStore, root: &Path) ->
         }
         "list_files" => file_list(input, root),
         "read_file" => file_read(input, root),
-        "write_file" => file_write(input, root),
+        "write_file" => file_write(input, root, data_root),
         other => ToolOutcome { output: format!("unknown tool \"{other}\""), is_error: true },
     }
+}
+
+fn user_data_root() -> PathBuf {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    home.join(".atria")
 }
 
 // ---------------------------------------------------------------------------
@@ -259,24 +284,165 @@ fn file_read(input: &Value, root: &Path) -> ToolOutcome {
     }
 }
 
-fn file_write(input: &Value, root: &Path) -> ToolOutcome {
+const MAX_WRITE: usize = 2 * 1024 * 1024;
+static NEXT_EDIT_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingEdit {
+    path: PathBuf,
+    expected_old: Option<String>,
+    content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FileBackup {
+    path: PathBuf,
+    backup_path: Option<PathBuf>,
+    existed: bool,
+    applied_content: String,
+}
+
+fn new_id(prefix: &str) -> String {
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis()).unwrap_or(0);
+    format!("{prefix}-{n}-{}", NEXT_EDIT_ID.fetch_add(1, Ordering::Relaxed))
+}
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 96 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+fn diff_preview(old: &str, new: &str) -> String {
+    let a: Vec<&str> = old.lines().collect();
+    let b: Vec<&str> = new.lines().collect();
+    let mut prefix = 0;
+    while prefix < a.len().min(b.len()) && a[prefix] == b[prefix] { prefix += 1; }
+    let mut suffix = 0;
+    while suffix < a.len().saturating_sub(prefix).min(b.len().saturating_sub(prefix))
+        && a[a.len() - 1 - suffix] == b[b.len() - 1 - suffix] { suffix += 1; }
+    let mut out = String::from("--- current\n+++ proposed\n");
+    for line in a.iter().take(prefix).rev().take(3).rev() { out.push_str(&format!(" {line}\n")); }
+    for line in &a[prefix..a.len() - suffix] { out.push_str(&format!("-{line}\n")); }
+    for line in &b[prefix..b.len() - suffix] { out.push_str(&format!("+{line}\n")); }
+    if suffix > 0 {
+        for line in a.iter().rev().take(suffix.min(3)).collect::<Vec<_>>().into_iter().rev() {
+            out.push_str(&format!(" {line}\n"));
+        }
+    }
+    if out.len() > 12_000 { out.truncate(12_000); out.push_str("\n… diff truncated"); }
+    out
+}
+
+fn file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutcome {
     let rel = input["path"].as_str().unwrap_or("").trim();
     let content = input["content"].as_str().unwrap_or("");
+    if content.len() > MAX_WRITE {
+        return ToolOutcome { output: format!("proposed file is larger than {} bytes", MAX_WRITE), is_error: true };
+    }
     let path = match sandbox(root, rel) {
         Ok(p) => p,
         Err(e) => return ToolOutcome { output: e, is_error: true },
     };
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            return ToolOutcome { output: format!("cannot create folder: {e}"), is_error: true };
-        }
-    }
-    match std::fs::write(&path, content) {
-        Ok(()) => ToolOutcome {
-            output: format!("wrote {} bytes to {}", content.len(), rel),
-            is_error: false,
+    let (old, expected_old) = match std::fs::read(&path) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(text) => (text.clone(), Some(text)),
+            Err(_) => return ToolOutcome { output: "refusing to replace a non-UTF-8/binary file with a text edit".into(), is_error: true },
         },
-        Err(e) => ToolOutcome { output: format!("cannot write file: {e}"), is_error: true },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
+        Err(e) => return ToolOutcome { output: format!("cannot inspect file: {e}"), is_error: true },
+    };
+    if old == content {
+        return ToolOutcome { output: "proposed content is identical; no change needed".into(), is_error: false };
+    }
+    let id = new_id("edit");
+    let dir = data_root.join("pending-edits");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return ToolOutcome { output: format!("cannot stage edit: {e}"), is_error: true };
+    }
+    let pending = PendingEdit { path: path.clone(), expected_old, content: content.to_string() };
+    let file = dir.join(format!("{id}.json"));
+    let serialized = match serde_json::to_vec(&pending) {
+        Ok(v) => v,
+        Err(e) => return ToolOutcome { output: format!("cannot stage edit: {e}"), is_error: true },
+    };
+    if let Err(e) = std::fs::write(file, serialized) {
+        return ToolOutcome { output: format!("cannot stage edit: {e}"), is_error: true };
+    }
+    ToolOutcome {
+        output: format!(
+            "This edit is staged only and has NOT been applied. Review the diff in Atria and wait for the user to approve or reject it.\n[ATRIA_PENDING_EDIT:{id}]\n{}",
+            diff_preview(&old, content)
+        ),
+        is_error: false,
+    }
+}
+
+/// Apply a previously staged text edit, creating a restorable backup first.
+pub fn apply_pending_edit(id: &str, data_root: &Path) -> Result<String, String> {
+    if !valid_id(id) { return Err("invalid edit id".into()); }
+    let pending_path = data_root.join("pending-edits").join(format!("{id}.json"));
+    let pending: PendingEdit = serde_json::from_slice(&std::fs::read(&pending_path).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let current = match std::fs::read(&pending.path) {
+        Ok(bytes) => Some(String::from_utf8(bytes).map_err(|_| "file is no longer UTF-8 text".to_string())?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("cannot re-check target before applying: {e}")),
+    };
+    if current != pending.expected_old {
+        return Err("file changed after the preview was created; refresh the diff before applying".into());
+    }
+    if let Some(parent) = pending.path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let backup_id = new_id("backup");
+    let backup_dir = data_root.join("backups");
+    std::fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
+    let existed = pending.path.exists();
+    let backup_path = if existed {
+        let p = backup_dir.join(format!("{backup_id}.bak"));
+        std::fs::copy(&pending.path, &p).map_err(|e| format!("cannot back up current file: {e}"))?;
+        Some(p)
+    } else { None };
+    let backup = FileBackup { path: pending.path.clone(), backup_path, existed, applied_content: pending.content.clone() };
+    std::fs::write(backup_dir.join(format!("{backup_id}.json")), serde_json::to_vec(&backup).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::write(&pending.path, pending.content.as_bytes()) {
+        return Err(format!("cannot apply edit (backup is preserved): {e}"));
+    }
+    let _ = std::fs::remove_file(pending_path);
+    Ok(format!("Edit applied to {}. Undo is available in Atria.\n[ATRIA_BACKUP:{backup_id}]", pending.path.display()))
+}
+
+pub fn reject_pending_edit(id: &str, data_root: &Path) -> Result<(), String> {
+    if !valid_id(id) { return Err("invalid edit id".into()); }
+    let path = data_root.join("pending-edits").join(format!("{id}.json"));
+    std::fs::remove_file(path).map_err(|e| e.to_string())
+}
+
+pub fn restore_file_backup(id: &str, data_root: &Path) -> Result<String, String> {
+    if !valid_id(id) { return Err("invalid backup id".into()); }
+    let dir = data_root.join("backups");
+    let file = dir.join(format!("{id}.json"));
+    let meta: FileBackup = serde_json::from_slice(&std::fs::read(file).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let current = match std::fs::read_to_string(&meta.path) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("cannot verify file before undo: {e}")),
+    };
+    if current.as_deref() != Some(meta.applied_content.as_str()) {
+        return Err("file has changed since this edit was applied; refusing to overwrite newer changes".into());
+    }
+    if meta.existed {
+        let backup = meta.backup_path.ok_or_else(|| "backup data missing".to_string())?;
+        let bytes = std::fs::read(backup).map_err(|e| e.to_string())?;
+        if let Some(parent) = meta.path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        std::fs::write(&meta.path, bytes).map_err(|e| e.to_string())?;
+        Ok(format!("Restored previous contents of {}.", meta.path.display()))
+    } else {
+        match std::fs::remove_file(&meta.path) {
+            Ok(()) => Ok(format!("Removed newly-created file {}.", meta.path.display())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("File was already absent.".into()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 
@@ -461,55 +627,92 @@ mod tests {
     }
 
     #[test]
-    fn file_tools_full_access() {
+    fn staged_file_edits_require_approval_and_are_reversible() {
         let dir = std::env::temp_dir().join(format!("atria-fa-{}", std::process::id()));
+        let data = dir.join("app-data");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut mem = MemoryStore::in_memory();
 
-        // relative paths still resolve under the root
-        let out = execute(
+        let target = dir.join("notes/a.txt");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "old line\nkeep").unwrap();
+        let stale = execute_with_data_root(
             "write_file",
-            &serde_json::json!({"path": "notes/a.txt", "content": "salam"}),
+            &serde_json::json!({"path": "notes/a.txt", "content": "staged but now stale"}),
             &mut mem,
             &dir,
+            &data,
+        );
+        let stale_id = stale.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
+        std::fs::write(&target, "user edited after preview").unwrap();
+        assert!(apply_pending_edit(stale_id, &data).unwrap_err().contains("changed after the preview"));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "user edited after preview");
+        reject_pending_edit(stale_id, &data).unwrap();
+        std::fs::write(&target, "old line\nkeep").unwrap();
+        let out = execute_with_data_root(
+            "write_file",
+            &serde_json::json!({"path": "notes/a.txt", "content": "new line\nkeep"}),
+            &mut mem,
+            &dir,
+            &data,
         );
         assert!(!out.is_error, "{}", out.output);
-        let out = execute("read_file", &serde_json::json!({"path": "notes/a.txt"}), &mut mem, &dir);
-        assert_eq!(out.output, "salam");
-        let out = execute("list_files", &serde_json::json!({"path": "notes"}), &mut mem, &dir);
-        assert!(out.output.contains("a.txt"), "{}", out.output);
+        assert!(out.output.contains("NOT been applied"));
+        assert!(out.output.contains("-old line") && out.output.contains("+new line"));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old line\nkeep");
+        let edit_id = out.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
+        let applied = apply_pending_edit(edit_id, &data).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new line\nkeep");
+        let backup_id = applied.split("[ATRIA_BACKUP:").nth(1).unwrap().split(']').next().unwrap();
+        restore_file_backup(backup_id, &data).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old line\nkeep");
 
-        // absolute paths can address the whole computer (even with empty root)
-        let abs = dir.join("abs.txt");
-        let abs_s = abs.to_string_lossy().replace('\\', "/");
-        let out = execute(
+        // New files are staged too, and undo removes them rather than leaving an empty file.
+        let new_target = dir.join("abs.txt");
+        let abs_s = new_target.to_string_lossy().replace('\\', "/");
+        let out = execute_with_data_root(
             "write_file",
             &serde_json::json!({"path": abs_s, "content": "full"}),
             &mut mem,
             Path::new(""),
+            &data,
         );
-        assert!(!out.is_error, "{}", out.output);
-        let out = execute("read_file", &serde_json::json!({"path": abs_s}), &mut mem, Path::new(""));
-        assert!(!out.is_error, "{}", out.output);
-        assert_eq!(out.output, "full");
+        let edit_id = out.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
+        let applied = apply_pending_edit(edit_id, &data).unwrap();
+        assert_eq!(std::fs::read_to_string(&new_target).unwrap(), "full");
+        let backup_id = applied.split("[ATRIA_BACKUP:").nth(1).unwrap().split(']').next().unwrap();
+        restore_file_backup(backup_id, &data).unwrap();
+        assert!(!new_target.exists());
 
-        // ".." is allowed now (full access)
-        let out = execute(
+        // Explicit rejection deletes the proposal without touching the target.
+        let out = execute_with_data_root(
+            "write_file",
+            &serde_json::json!({"path": "notes/rejected.txt", "content": "no"}),
+            &mut mem,
+            &dir,
+            &data,
+        );
+        let edit_id = out.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
+        reject_pending_edit(edit_id, &data).unwrap();
+        assert!(!dir.join("notes/rejected.txt").exists());
+
+        // ".." remains supported for relative paths; no writes happen before approval.
+        let out = execute_with_data_root(
             "write_file",
             &serde_json::json!({"path": "../atria-fa-sibling.txt", "content": "x"}),
             &mut mem,
             &dir,
+            &data,
         );
-        assert!(!out.is_error, "{}", out.output);
+        let edit_id = out.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
+        apply_pending_edit(edit_id, &data).unwrap();
         let sib = dir.parent().unwrap().join("atria-fa-sibling.txt");
         assert!(sib.exists());
         let _ = std::fs::remove_file(&sib);
 
-        // empty root still disables *relative* access
         let out = execute("list_files", &serde_json::json!({}), &mut mem, Path::new(""));
         assert!(out.is_error);
-
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

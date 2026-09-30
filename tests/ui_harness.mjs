@@ -189,7 +189,9 @@ function addId(id, tag, cls, parent) {
   return el;
 }
 for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', 'btnNew', 'convList',
-  'btnSettings', 'btnMemory', 'btnSide', 'btnMin', 'btnMax', 'btnClose', 'btnScroll',
+  'btnSettings', 'btnMemory', 'btnProjects', 'btnSide', 'projectsModal', 'projectsX', 'projectList', 'projectDetail', 'projectCreate',
+  'projectName', 'projectNotes', 'projectCheckpoint', 'projectTaskCount', 'projectTasks', 'projectTaskInput', 'projectTaskAdd',
+  'projectAttach', 'projectCheckpointSave', 'projectResume', 'projectDelete', 'ctxLimitVal', 'ctxMeter', 'btnCheckUpdate', 'btnInstallUpdate', 'updateStatus', 'projectChip', 'btnMin', 'btnMax', 'btnClose', 'btnScroll',
   'modelChip', 'modelPick', 'mpName', 'modelMenu', 'chipAgent', 'chipThink', 'chipFiles',
   'settingsModal', 'settingsX', 'settingsTitle', 'settingsSubtitle', 'memoryModal', 'memoryX', 'memoryClose',
   'memList', 'memClear', 'btnWipe', 'cmdk', 'cmdkInput', 'cmdkList', 'cmdkX', 'toasts',
@@ -198,11 +200,11 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'tokenGuide', 'tokenGuideX', 'tokenGuideClose', 'connSummary', 'connList', 'connAdd', 'connForm', 'connsBody',
   'cfName', 'cfKind', 'cfTemplate', 'cfBase', 'cfKey', 'cfKeyEye', 'cfKeyLabel', 'cfTokenGuide', 'cfHint',
   'cfTags', 'cfModelInput', 'cfModelAdd', 'cfFetchModels', 'cfSrvWrap', 'cfSrvSearch', 'cfSrvList',
-  'cfDelete', 'cfSetActive', 'storageBox', 'btnRevealAtria', 'btnAttach', 'fileInput', 'imgTray',
+  'cfDelete', 'cfSetActive', 'cfTestConn', 'cfTestStatus', 'storageBox', 'btnRevealAtria', 'btnAttach', 'fileInput', 'imgTray',
   'stars', 'appVer', 'tokChip']) addId(id);
 byId.connsBody.classList.add('conns-body');
-for (const id of ['modelMenu', 'settingsModal', 'memoryModal', 'cmdk', 'tokenGuide', 'imgTray',
-  'dsSearchRow', 'btnScroll', 'tokChip', 'connForm', 'btnStop', 'cfHint', 'cfTokenGuide']) byId[id].classList.add('hidden');
+for (const id of ['modelMenu', 'settingsModal', 'memoryModal', 'projectsModal', 'cmdk', 'tokenGuide', 'imgTray',
+  'dsSearchRow', 'btnScroll', 'tokChip', 'connForm', 'btnStop', 'cfHint', 'cfTokenGuide', 'btnInstallUpdate']) byId[id].classList.add('hidden');
 for (const t of ['conn', 'behavior', 'sys']) {
   const b = new El('button'); b.className = 'stab' + (t === 'conn' ? ' active' : ''); b.dataset.tab = t; doc.body.appendChild(b);
   const p = new El('div'); p.className = 'stab-body' + (t === 'conn' ? ' active' : ''); p.dataset.tab = t; doc.body.appendChild(p);
@@ -224,10 +226,20 @@ let confirmResult = true;
 const bridgeCalls = [];
 const tauriListeners = {};
 let chatsLoadPayload = [];
+const secretStore = new Map();
 let chatsLoadCalled = 0;
-function router(cmd) {
+function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.7.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.8.0' });
+    case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
+    case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
+    case 'secret_delete': secretStore.delete(args.id); return Promise.resolve();
+    case 'test_connection': return Promise.resolve({ ok: true, latency_ms: 18, reply: 'OK', input_tokens: 3, output_tokens: 1 });
+    case 'file_apply_edit': return Promise.resolve('applied [ATRIA_BACKUP:backup-test-1]');
+    case 'file_reject_edit': return Promise.resolve();
+    case 'file_restore_backup': return Promise.resolve('restored');
+    case 'update_check': return Promise.resolve({ current_version: '0.8.0', latest_version: '0.8.0', available: false, release_url: '', download_size: 0 });
+    case 'update_install': return Promise.resolve();
     case 'chats_load': chatsLoadCalled++; return Promise.resolve(chatsLoadPayload);
     case 'dirs_info': return Promise.resolve({ chats: 'C:/u/.atria/chats', workspace: 'C:/u/.atria/workspace', memory: 'C:/u/.atria/memory.json' });
     case 'memory_list': return Promise.resolve([{ title: 'نکته', content: 'متن', ts: 'امروز' }]);
@@ -276,7 +288,9 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), '
   '\n;globalThis.__T = { st, els, boot, send, newChat, switchChat, deleteChat, finishRun, failRun,' +
   ' effModel, buildHistory, msgText, renderModelMenu, chooseModelFor, openConns, stabGo,' +
   ' wipeChats, openMemory, openCmdk, retryLast, syncChips, updateModelPick, updateConnTab,' +
-  ' setActiveConn, resetAttemptStream, USAGE_TOT };';
+  ' setActiveConn, resetAttemptStream, USAGE_TOT, createProject, openProjects, addProjectTask,' +
+  ' resumeProjectInNewChat, projectContextText, checkpointProject, toggleModelFavorite, modelCapabilities, saveConns,' +
+  ' fileEditActions, toolCardEl, checkForUpdate, installUpdate };';
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 const T = sandbox.__T;
 
@@ -287,11 +301,11 @@ localStorage.setItem('atria.conns.v1', JSON.stringify([
 localStorage.setItem('atria.activeconn.v1', 'c1');
 
 let bootError = null;
-try { doc.dispatch('DOMContentLoaded'); } catch (e) { bootError = e; }
+try { doc.dispatch('DOMContentLoaded'); if (win.__atriaBootPromise) await win.__atriaBootPromise; } catch (e) { bootError = e; }
 
 console.log('\n=== 1) پل IPC + راه‌اندازی (boot) ===');
 ok('boot بدون خطا اجرا شد', !bootError, bootError && String(bootError));
-const needed = ['chat_send', 'chat_stop', 'memory_list', 'memory_clear', 'app_meta', 'list_models',
+const needed = ['chat_send', 'chat_stop', 'memory_list', 'memory_clear', 'app_meta', 'list_models', 'test_connection', 'secret_set', 'secret_get', 'secret_delete', 'file_apply_edit', 'file_reject_edit', 'file_restore_backup', 'update_check', 'update_install',
   'minimize_win', 'maximize_win', 'close_win', 'chats_load', 'chats_sync', 'dirs_info', 'reveal_dir'];
 const bridge = win.__atria;
 ok('پل IPC همهٔ توابع لازم را دارد', needed.every((k) => typeof bridge[k] === 'function'),
@@ -307,7 +321,16 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.7.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.8.0');
+ok('کلید قدیمی به مخزن امن منتقل شد', secretStore.get('c1') === 'k1');
+const savedConns = JSON.parse(localStorage.getItem('atria.conns.v1') || '[]');
+ok('localStorage فقط metadata نگه می‌دارد و کلید را پاک کرده', savedConns.length === 2 && savedConns.every((c) => !c.key));
+ok('settings legacy نیز api_key ندارد', !Object.prototype.hasOwnProperty.call(JSON.parse(localStorage.getItem('atria.settings.v2') || '{}'), 'api_key'));
+const emptyKeyConn = T.st.conns.find((c) => c.id === 'c2');
+emptyKeyConn.key = 'credential-clear-test'; await T.saveConns();
+ok('کلید آزمایشی در مخزن امن نشست', secretStore.get('c2') === 'credential-clear-test');
+emptyKeyConn.key = ''; emptyKeyConn._secretDelete = true; await T.saveConns();
+ok('پاک‌کردن ورودی، کلید مخزن امن را هم حذف کرد', !secretStore.has('c2'));
 
 console.log('\n=== 2) مدل‌پیکر بازطراحی‌شده و جست‌وجو ===');
 byId.modelPick.click();
@@ -340,6 +363,17 @@ eq('نتیجهٔ جست‌وجوی ناموجود صفر است', byId.modelMenu
 ok('حالت «نتیجه‌ای پیدا نشد» نمایش داده شد', !byId.modelMenu.querySelector('.mp-empty').classList.contains('hidden'));
 byId.modelMenu.querySelector('.mp-clear').click();
 eq('پاک‌کردن جست‌وجو همهٔ مدل‌ها را برمی‌گرداند', byId.modelMenu.querySelectorAll('.mp-option').filter((i) => !i.classList.contains('hidden')).length, 3);
+ok('قابلیت‌های مدل به‌صورت برچسب نمایش داده می‌شوند', !!itemA.querySelector('.mp-cap.tools'));
+ok('استنتاج قابلیت تصویر برای مدل vision درست است', T.modelCapabilities({ kind: 'openai' }, 'gpt-4o').vision === true);
+const favA = itemA.querySelector('.mp-fav');
+ok('دکمهٔ علاقه‌مندی مدل هست', !!favA);
+favA.click();
+ok('مدل به علاقه‌مندی‌ها افزوده شد', T.st.conns.find((c) => c.id === 'c1').favorites.includes('model-a'));
+const onlyFav = byId.modelMenu.querySelector('.mp-favorites-toggle');
+onlyFav.click();
+eq('فیلتر فقط علاقه‌مندی‌ها اعمال شد', byId.modelMenu.querySelectorAll('.mp-option').filter((i) => !i.classList.contains('hidden')).length, 1);
+onlyFav.click();
+favA.click();
 itemA.click();
 eq('مدل انتخاب شد', T.effModel(), 'model-a');
 eq('برچسب بالای پنجره عوض شد', byId.mpName.textContent, 'model-a');
@@ -369,6 +403,10 @@ ok('📂 فایل‌ها toggle شد', typeof T.st.settings.file_tools === 'bool
 console.log('\n=== 5) جریان ارسال پیام (send → رویدادها → ذخیره) ===');
 byId.chipAgent.click(); // برگرداندن حالت ایجنت
 T.setActiveConn('c1');
+T.openConns('c1');
+byId.cfTestConn.click();
+await sleep(10);
+ok('آزمون اتصال نتیجه و latency را نشان می‌دهد', byId.cfTestStatus.textContent.includes('18 ms') && T.st.conns.find((c) => c.id === 'c1').lastHealth.ok);
 byId.input.value = 'سلام آتریا';
 bridgeCalls.length = 0;
 byId.btnSend.click();
@@ -524,19 +562,40 @@ ok('openConns → صفحهٔ تنظیمات + تب conn (بدون مودال د�
   !byId.settingsModal.classList.contains('hidden') &&
   [...doc.querySelectorAll('.stab-body')].find((b) => b.dataset.tab === 'conn').classList.contains('active'));
 
-console.log('\n=== 12) پنجرهٔ تاریخچه و متن پیام ===');
+console.log('\n=== 12) پروژه‌ها، checkpoint و ادامهٔ گفتگو ===');
+T.createProject();
+const project = T.st.projects[0];
+ok('پروژه ساخته و فعال شد', !!project && T.st.currentProjectId === project.id);
+byId.projectName.value = 'پروژهٔ آزمایشی';
+byId.projectName.dispatch('input', { target: byId.projectName });
+byId.projectNotes.value = 'هدف: انتشار امن';
+byId.projectNotes.dispatch('input', { target: byId.projectNotes });
+byId.projectTaskInput.value = 'تست انتشار';
+byId.projectTaskAdd.click();
+ok('یادداشت و کار پروژه ذخیره شدند', project.notes.includes('انتشار امن') && project.tasks[0].text === 'تست انتشار');
+T.newChat(true);
+ok('گفتگوی تازه به پروژه متصل شد', T.st.chats[0].projectId === project.id);
+ok('زمینهٔ پروژه در prompt آماده است', T.projectContextText(project).includes('تست انتشار') && T.projectContextText(project).includes('هدف'));
+T.st.chats[0].messages.push({ role: 'user', text: 'درخواست پروژه', plain: 'درخواست پروژه' }, { role: 'ai', text: 'خلاصهٔ پیشرفت', plain: 'خلاصهٔ پیشرفت' });
+T.checkpointProject(project, T.st.chats[0]);
+ok('checkpoint از گفتگو ثبت شد', project.checkpoint && project.checkpoint.summary.includes('خلاصهٔ پیشرفت'));
+T.resumeProjectInNewChat();
+ok('ادامه، گفتگوی تازه با همان پروژه می‌سازد', T.st.chats[0].projectId === project.id && T.st.currentProjectId === project.id);
+
+console.log('\n=== 13) پنجرهٔ تاریخچه و مدیریت context ===');
 {
   const chat = { messages: [] };
   for (let i = 0; i < 80; i++) chat.messages.push({ role: i % 2 ? 'ai' : 'user', text: 'پیام ' + i, plain: 'پیام ' + i });
   const { hist, dropped } = T.buildHistory(chat);
   ok('سقف تعداد پیام‌ها رعایت شد', hist.length <= 48 && dropped > 0);
+  ok('پیام‌های قدیمی خلاصه شدند نه فقط حذف', !!T.buildHistory(chat).summary);
   eq('نقش آغازین user است', hist[0].role, 'user');
   eq('msgText: ذخیره‌شده', T.msgText({ plain: 'الف', text: 'ب' }), 'الف');
   eq('msgText: سیمی', T.msgText({ content: [{ type: 'text', text: 'یک' }, { type: 'text', text: 'دو' }] }), 'یک\nدو');
   eq('msgText: رشته', T.msgText('س'), 'س');
 }
 
-console.log('\n=== 13) حافظه، فرمان‌ها، پاک‌سازی ===');
+console.log('\n=== 14) حافظه، فرمان‌ها، پاک‌سازی ===');
 await T.openMemory();
 await sleep(10);
 ok('یادداشت‌های حافظه نمایش داده شد', byId.memList.textContent.includes('نکته'));
@@ -550,7 +609,7 @@ confirmResult = true;
 T.wipeChats();
 ok('پاک‌سازی همهٔ گفتگوها + ساخت گفتگوی تازه', T.st.chats.length === 1 && before >= 1);
 
-console.log('\n=== 14) بازیابی از دیسک (ادغام) ===');
+console.log('\n=== 15) بازیابی از دیسک (ادغام) ===');
 {
   chatsLoadPayload = [JSON.stringify({ id: 'disk1', title: 'از دیسک', createdAt: 123, messages: [{ role: 'user', text: 'دیسکی', plain: 'دیسکی' }] })];
   const list = await bridge.chats_load();
@@ -566,7 +625,26 @@ console.log('\n=== 14) بازیابی از دیسک (ادغام) ===');
   ok('dirs_info از پل IPC عبور کرد', bridgeCalls.some((x) => x[0] === 'dirs_info'));
 }
 
-console.log('\n=== 15) نگهبان‌های ایمنی ===');
+console.log('\n=== 16) تغییرات فایل و به‌روزرسانی امن ===');
+const editCard = T.toolCardEl('نوشتن فایل', 'write_file', {}, false);
+const editFlowItem = { k: 'p', title: 'نوشتن فایل', name: 'write_file', ok: true, in: '', out: 'This edit is staged only and has NOT been applied. Review the diff in Atria and wait for the user to approve or reject it.\n[ATRIA_PENDING_EDIT:edit-test-1]\n--- current\n+++ proposed' };
+const editChat = T.st.chats[0];
+editChat.messages.push({ role: 'ai', plain: 'edit test', flow: [editFlowItem] });
+editCard._item = editFlowItem;
+T.fileEditActions(editCard, editFlowItem.out);
+ok('فایل‌ادیت تا تأیید در حالت انتظار می‌ماند', editCard.classList.contains('needs-approval') && !!editCard.querySelector('.file-edit-actions'));
+await editCard.querySelector('.file-edit-actions').querySelector('.btn.primary').click();
+await sleep(10);
+ok('اعمال تغییر undo قابل بازگشت می‌سازد', editCard.classList.contains('file-applied') && !!editCard.querySelector('.file-edit-actions').querySelector('.btn:not(.primary)'));
+ok('تأیید در تاریخچه به‌صورت backup ماندگار شد', editFlowItem.out.includes('[ATRIA_BACKUP:backup-test-1]') && !editFlowItem.out.includes('ATRIA_PENDING_EDIT'));
+editCard.querySelector('.file-edit-actions').children.find((button) => button.textContent === '↶ بازگردانی').click();
+await sleep(10);
+ok('Undo در تاریخچه marker را هم پاک کرد', !editFlowItem.out.includes('ATRIA_BACKUP') && editFlowItem.out.includes('undone'));
+const updateBtn = byId.btnCheckUpdate;
+await T.checkForUpdate(false);
+ok('بررسی نسخهٔ امضاشده نتیجه می‌دهد', byId.updateStatus.textContent.includes('به‌روز'));
+
+console.log('\n=== 17) نگهبان‌های ایمنی ===');
 ok('منو بدون toasts نمی‌میرد', (() => { const t = T.els.toasts; T.els.toasts = null; try { byId.modelPick.click(); byId.modelPick.click(); } catch { T.els.toasts = t; return false; } T.els.toasts = t; return true; })());
 ok('updateModelPick بدون mpName نمی‌میرد', (() => { const m = T.els.mpName; T.els.mpName = null; try { T.updateModelPick(); } catch { T.els.mpName = m; return false; } T.els.mpName = m; return true; })());
 
