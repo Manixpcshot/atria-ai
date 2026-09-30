@@ -517,7 +517,7 @@ impl DsWebClient {
         let http = reqwest::Client::builder()
             .pool_idle_timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(12))
-            .read_timeout(std::time::Duration::from_secs(300))
+            .read_timeout(std::time::Duration::from_secs(900))
             .build()
             .expect("build http client");
         Self { http }
@@ -719,6 +719,7 @@ impl DsWebClient {
         let mut feed = DsFeed::default();
         let mut text = String::new();
         let mut thinking = String::new();
+        let mut saw_terminal_event = false;
         let mut tool_seq = 0usize;
         let mut pending_tool: Option<String> = None;
 
@@ -728,8 +729,13 @@ impl DsWebClient {
             }
             let chunk = chunk?;
             for ev in dec.feed(&chunk) {
-                if ev.name != "message" {
-                    continue; // ready / update_session / finish / title / close
+                match ev.name.as_str() {
+                    "finish" | "close" => {
+                        saw_terminal_event = true;
+                        continue;
+                    }
+                    "message" => {}
+                    _ => continue, // ready / update_session / title / ping
                 }
                 let mut out = Vec::new();
                 feed.feed_frame(&ev.data, &mut out)?;
@@ -763,9 +769,18 @@ impl DsWebClient {
                     }
                 }
             }
+            if dec.is_done() {
+                saw_terminal_event = true;
+            }
         }
         if stop.load(Ordering::Relaxed) {
             return Err(CoreError::Stopped);
+        }
+        if !saw_terminal_event {
+            return Err(CoreError::Api {
+                status: 502,
+                message: "DeepSeek Web stream ended before its finish/close event; the partial answer was discarded".to_string(),
+            });
         }
 
         // 5) split tool calls out of the visible text

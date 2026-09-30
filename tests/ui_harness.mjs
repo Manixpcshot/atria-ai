@@ -48,6 +48,7 @@ class El {
     this.disabled = false;
     this.type = '';
     this.id = '';
+    this.attributes = {};
     this.title = '';
     this.placeholder = '';
     this.scrollTop = 0; this.scrollHeight = 0; this.clientHeight = 300;
@@ -96,6 +97,8 @@ class El {
   getBoundingClientRect() { return { right: 400, top: 300, bottom: 340, left: 200, width: 200, height: 40 }; }
   get offsetWidth() { return 340; }
   get offsetHeight() { return 360; }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; }
   addEventListener(t, fn) { (this._lis[t] = this._lis[t] || []).push(fn); }
   removeEventListener(t, fn) { const a = this._lis[t] || []; const i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); }
   dispatch(t, ev) {
@@ -107,7 +110,7 @@ class El {
     for (const f of [...(this._lis[t] || [])]) f.call(this, ev);
   }
   click() { this.dispatch('click', { target: this }); }
-  focus() {}
+  focus() { doc.activeElement = this; }
   blur() { if (typeof this.onblur === 'function') this.onblur({ target: this }); }
   scrollTo() {}
   scrollIntoView() {}
@@ -188,15 +191,16 @@ function addId(id, tag, cls, parent) {
 for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', 'btnNew', 'convList',
   'btnSettings', 'btnMemory', 'btnSide', 'btnMin', 'btnMax', 'btnClose', 'btnScroll',
   'modelChip', 'modelPick', 'mpName', 'modelMenu', 'chipAgent', 'chipThink', 'chipFiles',
-  'settingsModal', 'settingsX', 'settingsClose', 'memoryModal', 'memoryX', 'memoryClose',
+  'settingsModal', 'settingsX', 'settingsTitle', 'settingsSubtitle', 'memoryModal', 'memoryX', 'memoryClose',
   'memList', 'memClear', 'btnWipe', 'cmdk', 'cmdkInput', 'cmdkList', 'cmdkX', 'toasts',
   'tempVal', 'tempOut', 'thinkVal', 'memVal', 'streamVal', 'sysVal', 'maxTokVal',
   'toolsVal', 'fileToolsVal', 'wsVal', 'dsSearchRow', 'dsSearchVal',
-  'tokenGuide', 'tokenGuideX', 'tokenGuideClose', 'connSummary', 'connList', 'connAdd', 'connForm',
+  'tokenGuide', 'tokenGuideX', 'tokenGuideClose', 'connSummary', 'connList', 'connAdd', 'connForm', 'connsBody',
   'cfName', 'cfKind', 'cfTemplate', 'cfBase', 'cfKey', 'cfKeyEye', 'cfKeyLabel', 'cfTokenGuide', 'cfHint',
   'cfTags', 'cfModelInput', 'cfModelAdd', 'cfFetchModels', 'cfSrvWrap', 'cfSrvSearch', 'cfSrvList',
   'cfDelete', 'cfSetActive', 'storageBox', 'btnRevealAtria', 'btnAttach', 'fileInput', 'imgTray',
   'stars', 'appVer', 'tokChip']) addId(id);
+byId.connsBody.classList.add('conns-body');
 for (const id of ['modelMenu', 'settingsModal', 'memoryModal', 'cmdk', 'tokenGuide', 'imgTray',
   'dsSearchRow', 'btnScroll', 'tokChip', 'connForm', 'btnStop', 'cfHint', 'cfTokenGuide']) byId[id].classList.add('hidden');
 for (const t of ['conn', 'behavior', 'sys']) {
@@ -272,7 +276,7 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), '
   '\n;globalThis.__T = { st, els, boot, send, newChat, switchChat, deleteChat, finishRun, failRun,' +
   ' effModel, buildHistory, msgText, renderModelMenu, chooseModelFor, openConns, stabGo,' +
   ' wipeChats, openMemory, openCmdk, retryLast, syncChips, updateModelPick, updateConnTab,' +
-  ' setActiveConn, USAGE_TOT };';
+  ' setActiveConn, resetAttemptStream, USAGE_TOT };';
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 const T = sandbox.__T;
 
@@ -305,44 +309,50 @@ ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled
 await sleep(10);
 eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.7.0');
 
-console.log('\n=== 2) منوی انتخاب مدل ===');
+console.log('\n=== 2) مدل‌پیکر بازطراحی‌شده و جست‌وجو ===');
 byId.modelPick.click();
 ok('منو باز شد', !byId.modelMenu.classList.contains('hidden'));
-const groups = byId.modelMenu.querySelectorAll('.mm-group');
-eq('گروه‌بندی بر پایهٔ سرویس (۲ گروه)', groups.length, 2);
-ok('گروه فعال (سرویس یک) اول است', groups[0] && groups[0].textContent === 'سرویس یک');
-eq('۳ آیتم مدل + ۲ دکمهٔ پایینی', byId.modelMenu.querySelectorAll('.mm-item').length, 5);
-const items = byId.modelMenu.querySelectorAll('.mm-item');
-const itemA = items.find((i) => i.textContent.includes('model-a'));
-ok('آیتم model-a هست', !!itemA);
-ok('سبک کلاد: نام + توضیح + تیک', !!(itemA.querySelector('.mm-name') && itemA.querySelector('.mm-sub') && itemA.querySelector('.mm-tick')));
-ok('تیک فعال روی مدل انتخابی', itemA.classList.contains('active') === (T.effModel() === 'model-a'));
+ok('حالت دسترس‌پذیری و فوکوس جست‌وجو همگام شد', byId.modelPick.getAttribute('aria-expanded') === 'true'
+  && doc.activeElement === byId.modelMenu.querySelector('#mmSearch'));
+const groups = byId.modelMenu.querySelectorAll('.mp-group');
+eq('گروه‌بندی اتصال‌ها (۲ گروه)', groups.length, 2);
+ok('اتصال فعال اول است', groups[0] && groups[0].dataset.connId === 'c1');
+const options = byId.modelMenu.querySelectorAll('.mp-option');
+eq('۳ گزینهٔ مدل بدون دکمهٔ تکراری', options.length, 3);
+const itemA = options.find((i) => i.dataset.model === 'model-a');
+ok('گزینهٔ model-a هست', !!itemA);
+ok('نام، نوع API و اتصال جداگانه نمایش داده می‌شوند', !!(itemA.querySelector('.mp-model-name') && itemA.querySelector('.mp-model-meta') && itemA.querySelector('.mp-source')));
+eq('مدل فعال علامت‌گذاری شد', itemA.getAttribute('aria-selected'), 'true');
 const search = byId.modelMenu.querySelector('#mmSearch');
-ok('باکس جستجو هست', !!search);
-search.value = 'claude';
+ok('جست‌وجوی درون منو هست', !!search && search.type === 'search');
+search.value = 'messages api';
 search.dispatch('input', { target: search });
-const visAfter = byId.modelMenu.querySelectorAll('.mm-item').filter((i) => !i.classList.contains('hidden'));
-eq('جستجو فقط آیتم منطبق را نگه داشت', visAfter.length, 1);
-const hiddenGroups = byId.modelMenu.querySelectorAll('.mm-group').filter((g) => g.classList.contains('hidden'));
-eq('گروه‌های خالی جمع شدند', hiddenGroups.length, 1);
-search.value = '';
+const visAfter = byId.modelMenu.querySelectorAll('.mp-option').filter((i) => !i.classList.contains('hidden'));
+eq('جست‌وجو بر اساس گویش API فیلتر می‌کند', visAfter.length, 1);
+const hiddenGroups = byId.modelMenu.querySelectorAll('.mp-group').filter((g) => g.classList.contains('hidden'));
+eq('گروه بدون نتیجه پنهان شد', hiddenGroups.length, 1);
+search.value = 'سرویس یک';
 search.dispatch('input', { target: search });
+eq('جست‌وجو بر اساس نام اتصال همهٔ مدل‌های آن را نشان می‌دهد', byId.modelMenu.querySelectorAll('.mp-option').filter((i) => !i.classList.contains('hidden')).length, 2);
+search.value = 'مدل-ناموجود';
+search.dispatch('input', { target: search });
+eq('نتیجهٔ جست‌وجوی ناموجود صفر است', byId.modelMenu.querySelectorAll('.mp-option').filter((i) => !i.classList.contains('hidden')).length, 0);
+ok('حالت «نتیجه‌ای پیدا نشد» نمایش داده شد', !byId.modelMenu.querySelector('.mp-empty').classList.contains('hidden'));
+byId.modelMenu.querySelector('.mp-clear').click();
+eq('پاک‌کردن جست‌وجو همهٔ مدل‌ها را برمی‌گرداند', byId.modelMenu.querySelectorAll('.mp-option').filter((i) => !i.classList.contains('hidden')).length, 3);
 itemA.click();
 eq('مدل انتخاب شد', T.effModel(), 'model-a');
 eq('برچسب بالای پنجره عوض شد', byId.mpName.textContent, 'model-a');
-ok('منو بسته شد', byId.modelMenu.classList.contains('hidden'));
+ok('منو بسته و دسترس‌پذیری همگام شد', byId.modelMenu.classList.contains('hidden') && byId.modelPick.getAttribute('aria-expanded') === 'false');
 
-console.log('\n=== 3) تعویض اتصال ===');
+console.log('\n=== 3) انتخاب مدل، اتصال را هم خودکار عوض می‌کند ===');
 byId.modelPick.click();
-const sw = byId.modelMenu.querySelector('.mm-switch');
-ok('دکمهٔ تعویض اتصال هست', !!sw);
-sw.click();
-const connItems = byId.modelMenu.querySelectorAll('.mm-item');
-ok('فهرست اتصال‌ها آمد', connItems.length >= 2 && connItems[0].textContent.includes('سرویس یک'));
-const second = connItems.find((i) => i.textContent.includes('سرویس دو'));
+const second = byId.modelMenu.querySelectorAll('.mp-option').find((i) => i.dataset.model === 'claude-x');
+ok('مدل اتصال دوم در فهرست هست', !!second);
 second.click();
-eq('اتصال فعال عوض شد', T.st.activeConnId, 'c2');
+eq('انتخاب مدل اتصال فعال را هم تغییر داد', T.st.activeConnId, 'c2');
 eq('مدل همان اتصال نشست', T.effModel(), 'claude-x');
+ok('منو پس از انتخاب بسته شد', byId.modelMenu.classList.contains('hidden'));
 
 console.log('\n=== 4) چیپ‌های حالت (ایجنت/تفکر/فایل) ===');
 const toolsBefore = T.st.settings.tools_enabled;
@@ -428,7 +438,19 @@ ok('پاسخ چت حذف‌شده بی‌صدا کنار رفت', T.st.sending =
   eq('پاسخ نهایی در همان چت نشست', liveChatObj.messages[liveChatObj.messages.length - 1].plain, 'پاسخ زنده');
 }
 
-console.log('\n=== 7) خطا و تلاش مجدد ===');
+console.log('\n=== 7) بازنشانی پاسخ ناقص هنگام retry ===');
+byId.input.value = 'تولید با قطع لحظه‌ای';
+byId.btnSend.click();
+emit('atria:text', { delta: 'پاسخ نصفه از تلاش اول' });
+eq('متن تلاش اول دیده شد', T.st.runText, 'پاسخ نصفه از تلاش اول');
+emit('atria:retry', { attempt: 1, message: 'stream disconnected' });
+eq('متن ناقص دور قبلی پاک شد', T.st.runText, '');
+emit('atria:text', { delta: 'پاسخ کامل تلاش دوم' });
+eq('متن تلاش دوم از ابتدا ساخته شد', T.st.runText, 'پاسخ کامل تلاش دوم');
+emit('atria:done', { new_messages: null, final_text: 'پاسخ کامل تلاش دوم', session_id: '', input_tokens: 1, output_tokens: 4 });
+eq('فقط پاسخ کامل ذخیره شد', T.st.chats.find((c) => c.id === T.st.currentId).messages.slice(-1)[0].plain, 'پاسخ کامل تلاش دوم');
+
+console.log('\n=== 8) خطا و تلاش مجدد ===');
 byId.input.value = 'پیام چهارم';
 byId.btnSend.click();
 const runChat4 = T.st.runChatId;
@@ -444,7 +466,7 @@ ok('تلاش مجدد دوباره تولید را بالا آورد', T.st.send
 emit('atria:stopped', {});
 ok('توقف (⏹) تولید را بست', T.st.sending === false);
 
-console.log('\n=== 8) صف کلیدها: Enter و دکمهٔ ارسال ===');
+console.log('\n=== 9) صف کلیدها: Enter و دکمهٔ ارسال ===');
 ok('بدون متن، ارسال کاری نمی‌کند', (() => { byId.input.value = '  '; const n = bridgeCalls.length; byId.btnSend.click(); return bridgeCalls.length === n; })());
 byId.input.value = 'با Enter';
 byId.input.dispatch('keydown', { key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13, preventDefault() {} });
@@ -454,20 +476,25 @@ byId.input.value = 'shift+enter';
 byId.input.dispatch('keydown', { key: 'Enter', shiftKey: true, isComposing: false, keyCode: 13, preventDefault() {} });
 ok('Shift+Enter پیام نمی‌فرستد', T.st.sending === false);
 
-console.log('\n=== 9) بدون کلید → هدایت به تنظیمات ===');
+console.log('\n=== 10) بدون کلید → هدایت به تنظیمات ===');
 T.setActiveConn('c2'); // اتصال بدون کلید
 byId.input.value = 'تست';
 byId.btnSend.click();
 ok('اتصال بدون کلید: تولید بالا نیامد', T.st.sending === false);
 ok('صفحهٔ تنظیمات باز شد', !byId.settingsModal.classList.contains('hidden'));
-ok('تب کلیدها/API فعال شد', [...doc.querySelectorAll('.stab-body')].find((b) => b.dataset.tab === 'conn').classList.contains('active'));
+ok('اتصال بدون کلید به‌صورت آماده نشان داده نشد', byId.connSummary.querySelector('.conn-summary-state')?.classList.contains('missing')
+  && byId.connSummary.querySelector('.conn-status-dot')?.classList.contains('needs-key'));
+ok('تب اتصال‌ها و مدل‌ها فعال شد', [...doc.querySelectorAll('.stab-body')].find((b) => b.dataset.tab === 'conn').classList.contains('active'));
 ok('فرم همان اتصال باز شد', byId.connForm.classList.contains('hidden') === false && byId.cfName.value === 'سرویس دو');
 
-console.log('\n=== 10) تب‌های تنظیمات و فرم اتصال ===');
+console.log('\n=== 11) تب‌های تنظیمات و فرم اتصال ===');
 T.stabGo('behavior');
 ok('جابه‌جایی تب', [...doc.querySelectorAll('.stab-body')].find((b) => b.dataset.tab === 'behavior').classList.contains('active')
   && ![...doc.querySelectorAll('.stab-body')].find((b) => b.dataset.tab === 'conn').classList.contains('active'));
+eq('عنوان صفحه با تب هماهنگ شد', byId.settingsTitle.textContent, 'رفتار و پاسخ‌گویی');
 T.stabGo('conn');
+eq('عنوان اتصال‌ها برگشت', byId.settingsTitle.textContent, 'اتصال‌ها و مدل‌ها');
+ok('خلاصهٔ فعال کارت تکراری اتصال نیست', !!byId.connSummary.querySelector('.conn-active-summary') && !byId.connSummary.querySelector('.conn-card'));
 byId.cfName.value = 'سرویس دو، نام تازه';
 byId.cfName.dispatch('input', { target: byId.cfName });
 eq('ویرایش نام اتصال ذخیره شد', T.st.conns.find((c) => c.id === 'c2').name, 'سرویس دو، نام تازه');
@@ -477,6 +504,16 @@ ok('افزودن مدل به اتصال', T.st.conns.find((c) => c.id === 'c2').
 byId.cfTemplate.value = 'kimi';
 byId.cfTemplate.dispatch('change', { target: byId.cfTemplate });
 eq('قالب kimi آدرس را پر کرد', byId.cfBase.value, 'https://api.moonshot.ai/v1');
+byId.cfFetchModels.click();
+await sleep(10);
+eq('مدل‌های واقعی سرور بارگذاری شدند', byId.cfSrvList.querySelectorAll('.srv-item').length, 2);
+byId.cfSrvSearch.value = 'm-server-2';
+byId.cfSrvSearch.dispatch('input', { target: byId.cfSrvSearch });
+eq('جست‌وجوی تنظیمات فهرست سرور را واقعاً فیلتر می‌کند', byId.cfSrvList.querySelectorAll('.srv-item').length, 1);
+byId.cfSrvSearch.value = 'model-does-not-exist';
+byId.cfSrvSearch.dispatch('input', { target: byId.cfSrvSearch });
+eq('جست‌وجوی سرور حالت بدون نتیجه دارد', byId.cfSrvList.querySelectorAll('.srv-item').length, 0);
+ok('پیام بدون نتیجهٔ جست‌وجوی سرور نمایش داده شد', !!byId.cfSrvList.querySelector('.srv-empty'));
 const tplOpts = [];
 for (const key of ['opencode', 'opencode-cc', 'kimi', 'zai', 'siliconflow', 'ollama', 'lmstudio', 'apmix']) {
   if (!code.includes("'" + key + "':")) tplOpts.push(key);
@@ -487,7 +524,7 @@ ok('openConns → صفحهٔ تنظیمات + تب conn (بدون مودال د�
   !byId.settingsModal.classList.contains('hidden') &&
   [...doc.querySelectorAll('.stab-body')].find((b) => b.dataset.tab === 'conn').classList.contains('active'));
 
-console.log('\n=== 11) پنجرهٔ تاریخچه و متن پیام ===');
+console.log('\n=== 12) پنجرهٔ تاریخچه و متن پیام ===');
 {
   const chat = { messages: [] };
   for (let i = 0; i < 80; i++) chat.messages.push({ role: i % 2 ? 'ai' : 'user', text: 'پیام ' + i, plain: 'پیام ' + i });
@@ -499,7 +536,7 @@ console.log('\n=== 11) پنجرهٔ تاریخچه و متن پیام ===');
   eq('msgText: رشته', T.msgText('س'), 'س');
 }
 
-console.log('\n=== 12) حافظه، فرمان‌ها، پاک‌سازی ===');
+console.log('\n=== 13) حافظه، فرمان‌ها، پاک‌سازی ===');
 await T.openMemory();
 await sleep(10);
 ok('یادداشت‌های حافظه نمایش داده شد', byId.memList.textContent.includes('نکته'));
@@ -513,7 +550,7 @@ confirmResult = true;
 T.wipeChats();
 ok('پاک‌سازی همهٔ گفتگوها + ساخت گفتگوی تازه', T.st.chats.length === 1 && before >= 1);
 
-console.log('\n=== 13) بازیابی از دیسک (ادغام) ===');
+console.log('\n=== 14) بازیابی از دیسک (ادغام) ===');
 {
   chatsLoadPayload = [JSON.stringify({ id: 'disk1', title: 'از دیسک', createdAt: 123, messages: [{ role: 'user', text: 'دیسکی', plain: 'دیسکی' }] })];
   const list = await bridge.chats_load();
@@ -529,7 +566,7 @@ console.log('\n=== 13) بازیابی از دیسک (ادغام) ===');
   ok('dirs_info از پل IPC عبور کرد', bridgeCalls.some((x) => x[0] === 'dirs_info'));
 }
 
-console.log('\n=== 14) نگهبان‌های ایمنی ===');
+console.log('\n=== 15) نگهبان‌های ایمنی ===');
 ok('منو بدون toasts نمی‌میرد', (() => { const t = T.els.toasts; T.els.toasts = null; try { byId.modelPick.click(); byId.modelPick.click(); } catch { T.els.toasts = t; return false; } T.els.toasts = t; return true; })());
 ok('updateModelPick بدون mpName نمی‌میرد', (() => { const m = T.els.mpName; T.els.mpName = null; try { T.updateModelPick(); } catch { T.els.mpName = m; return false; } T.els.mpName = m; return true; })());
 

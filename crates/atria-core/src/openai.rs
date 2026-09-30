@@ -10,7 +10,7 @@
 //! agent mode on Atria keeps using the Messages API (`/v1/messages`) where
 //! tool use is fully supported. Other providers emit `tool_calls` normally.
 
-use crate::client::{extract_error, ClientConfig, CoreError, StreamEvent, Turn};
+use crate::client::{extract_error, is_output_limit_stop_reason, ClientConfig, CoreError, StreamEvent, Turn};
 use crate::sse::SseDecoder;
 use crate::types::{Block, Message, Role, Usage};
 use serde_json::{json, Value};
@@ -52,7 +52,7 @@ impl OpenAiClient {
         let http = reqwest::Client::builder()
             .pool_idle_timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(12))
-            .read_timeout(std::time::Duration::from_secs(300))
+            .read_timeout(std::time::Duration::from_secs(900))
             .build()
             .expect("build http client");
         Self { http }
@@ -137,7 +137,7 @@ impl OpenAiClient {
                 return Err(CoreError::Stopped);
             }
             let v: Value = resp.json().await?;
-            Ok(turn_from_value(&v))
+            turn_from_value(&v)
         }
     }
 
@@ -156,6 +156,7 @@ impl OpenAiClient {
         // tool index -> (id, name, args_json)
         let mut tool_map: BTreeMap<usize, (String, String, String)> = BTreeMap::new();
         let mut stop_reason = String::from("end_turn");
+        let mut saw_finish_reason = false;
         let mut usage = Usage::default();
 
         while let Some(chunk) = stream.next().await {
@@ -172,11 +173,12 @@ impl OpenAiClient {
                         message: extract_error(&v["error"].to_string()),
                     });
                 }
-                // data: [DONE] is not JSON — the decoder already drops it.
+                // `[DONE]` is a control marker recorded by the decoder, not a JSON event.
                 let Some(choice) = v.pointer("/choices/0") else { continue };
 
-                if let Some(fr) = choice["finish_reason"].as_str() {
+                if let Some(fr) = choice["finish_reason"].as_str().filter(|fr| !fr.trim().is_empty()) {
                     stop_reason = map_finish(fr);
+                    saw_finish_reason = true;
                 }
                 if let Some(u) = v["usage"].as_object() {
                     if let Some(n) = u.get("prompt_tokens").or(u.get("input_tokens")).and_then(Value::as_u64) {
@@ -243,6 +245,13 @@ impl OpenAiClient {
             }
         }
 
+        if !saw_finish_reason && !dec.is_done() {
+            return Err(CoreError::Api {
+                status: 502,
+                message: "stream ended before finish_reason or [DONE]; the partial answer was discarded".to_string(),
+            });
+        }
+
         let mut blocks: Vec<Block> = Vec::new();
         if !thinking.is_empty() {
             blocks.push(Block::Thinking { thinking, signature: None });
@@ -251,7 +260,14 @@ impl OpenAiClient {
             blocks.push(Block::Text { text });
         }
         for (_idx, (id, name, args)) in tool_map {
-            let input = serde_json::from_str(&args).unwrap_or_else(|_| json!({}));
+            let input = if args.trim().is_empty() {
+                if is_output_limit_stop_reason(&stop_reason) {
+                    return Err(tool_arguments_error(true));
+                }
+                json!({})
+            } else {
+                parse_tool_arguments(&args, &stop_reason)?
+            };
             blocks.push(Block::ToolUse {
                 id: if id.is_empty() { format!("call_{name}") } else { id },
                 name,
@@ -268,14 +284,43 @@ impl OpenAiClient {
 }
 
 fn map_finish(reason: &str) -> String {
-    match reason {
+    match reason.trim().to_ascii_lowercase().as_str() {
         "tool_calls" | "function_call" => "tool_use".to_string(),
-        other => other.to_string(),
+        "length" | "max_tokens" | "max_output_tokens" | "token_limit" | "output_limit" => "max_tokens".to_string(),
+        _ => reason.trim().to_string(),
     }
 }
 
-fn turn_from_value(v: &Value) -> Turn {
+fn tool_arguments_error(output_limited: bool) -> CoreError {
+    CoreError::Api {
+        status: if output_limited { 422 } else { 502 },
+        message: if output_limited {
+            "model hit the output-token limit while finishing a tool call; raise the output limit and retry".to_string()
+        } else {
+            "provider returned incomplete or invalid tool-call JSON; the partial tool call was discarded".to_string()
+        },
+    }
+}
+
+fn parse_tool_arguments(args: &str, stop_reason: &str) -> Result<Value, CoreError> {
+    let output_limited = is_output_limit_stop_reason(stop_reason);
+    let input = serde_json::from_str::<Value>(args).map_err(|_| tool_arguments_error(output_limited))?;
+    if !input.is_object() {
+        return Err(tool_arguments_error(output_limited));
+    }
+    Ok(input)
+}
+
+fn turn_from_value(v: &Value) -> Result<Turn, CoreError> {
     let msg = v.pointer("/choices/0/message").cloned().unwrap_or(Value::Null);
+    let finish_reason = v.pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        .filter(|reason| !reason.trim().is_empty())
+        .ok_or_else(|| CoreError::Api {
+            status: 502,
+            message: "provider response omitted finish_reason; response may be incomplete".to_string(),
+        })?;
+    let stop_reason = map_finish(finish_reason);
     let mut blocks: Vec<Block> = Vec::new();
 
     for key in ["reasoning_content", "reasoning"] {
@@ -293,19 +338,28 @@ fn turn_from_value(v: &Value) -> Turn {
     }
     if let Some(calls) = msg["tool_calls"].as_array() {
         for c in calls {
-            let args =
-                c.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("{}");
+            let output_limited = is_output_limit_stop_reason(&stop_reason);
+            let args_value = c.pointer("/function/arguments");
+            let input = match args_value {
+                Some(Value::Object(object)) => Value::Object(object.clone()),
+                Some(Value::String(args)) => parse_tool_arguments(args, &stop_reason)?,
+                None if !output_limited => json!({}),
+                _ => return Err(tool_arguments_error(output_limited)),
+            };
+            if !input.is_object() {
+                return Err(tool_arguments_error(output_limited));
+            }
             blocks.push(Block::ToolUse {
                 id: c["id"].as_str().unwrap_or_default().to_string(),
                 name: c.pointer("/function/name").and_then(Value::as_str).unwrap_or_default().to_string(),
-                input: serde_json::from_str(args).unwrap_or_else(|_| json!({})),
+                input,
             });
         }
     }
 
-    Turn {
+    Ok(Turn {
         message: Message { role: Role::Assistant, content: blocks },
-        stop_reason: map_finish(v.pointer("/choices/0/finish_reason").and_then(Value::as_str).unwrap_or("stop")),
+        stop_reason,
         usage: Usage {
             input_tokens: v.pointer("/usage/prompt_tokens").and_then(Value::as_u64).unwrap_or(0) as u32,
             output_tokens: v
@@ -313,7 +367,7 @@ fn turn_from_value(v: &Value) -> Turn {
                 .and_then(Value::as_u64)
                 .unwrap_or(0) as u32,
         },
-    }
+    })
 }
 
 /// Convert unified messages to the OpenAI `messages` array.
@@ -453,6 +507,33 @@ mod tests {
     fn maps_tool_calls_finish_reason() {
         assert_eq!(map_finish("tool_calls"), "tool_use");
         assert_eq!(map_finish("stop"), "stop");
+        assert_eq!(map_finish("length"), "max_tokens");
+        assert_eq!(map_finish("max_output_tokens"), "max_tokens");
+    }
+
+    #[test]
+    fn non_stream_response_must_have_terminal_finish_reason() {
+        let partial = json!({
+            "choices": [{ "message": { "role": "assistant", "content": "partial" } }]
+        });
+        assert!(matches!(turn_from_value(&partial), Err(CoreError::Api { status: 502, .. })));
+    }
+
+    #[test]
+    fn output_limited_tool_call_with_incomplete_arguments_is_rejected() {
+        let partial = json!({
+            "choices": [{
+                "finish_reason": "length",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "function": { "name": "write_file", "arguments": "{\"path\":\"x\"" }
+                    }]
+                }
+            }]
+        });
+        assert!(matches!(turn_from_value(&partial), Err(CoreError::Api { status: 422, .. })));
     }
 
     #[test]
@@ -474,7 +555,7 @@ mod tests {
             }],
             "usage": { "prompt_tokens": 10, "completion_tokens": 20 }
         });
-        let turn = turn_from_value(&v);
+        let turn = turn_from_value(&v).unwrap();
         assert_eq!(turn.stop_reason, "tool_use");
         assert!(matches!(turn.message.content[0], Block::Thinking { .. }));
         match &turn.message.content[1] {

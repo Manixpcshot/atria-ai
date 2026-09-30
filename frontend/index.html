@@ -29,7 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
-        <span class="app-ver" id="appVer">v0.7.4</span>
+        <span class="app-ver" id="appVer">v0.7.6</span>
         <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
@@ -86,9 +86,11 @@
             </button>
           </div>
           <div class="composer-bar">
-            <button class="model-pick" id="modelPick" title="انتخاب مدل">
-              <span class="mp-name" id="mpName">Atria-Dawn-Preview</span>
-              <span class="mp-caret">▾</span>
+            <button class="model-pick" id="modelPick" type="button" title="انتخاب مدل"
+                    aria-haspopup="dialog" aria-controls="modelMenu" aria-expanded="false">
+              <span class="mp-indicator" aria-hidden="true"></span>
+              <span class="mp-name" id="mpName" dir="ltr">Atria-Dawn-Preview</span>
+              <span class="mp-caret" aria-hidden="true">⌄</span>
             </button>
             
             <div class="mode-chips">
@@ -110,21 +112,27 @@
   <div class="settings-page hidden" id="settingsModal">
     <div class="sp-wrap">
       <aside class="sp-side">
-        <div class="sp-title">⚙︎&nbsp; تنظیمات <span class="sp-ver">v0.7.4</span></div>
-        <nav class="sp-nav">
-          <button class="stab active" data-tab="conn">🔑&nbsp; کلیدها و API</button>
-          <button class="stab" data-tab="behavior">🎛&nbsp; رفتار</button>
-          <button class="stab" data-tab="sys">🖥&nbsp; سیستم</button>
+        <div class="sp-brand">
+          <span class="sp-brand-mark" aria-hidden="true">✦</span>
+          <span class="sp-brand-copy"><strong>Atria</strong><small>کنترل برنامه</small></span>
+        </div>
+        <nav class="sp-nav" aria-label="بخش‌های تنظیمات">
+          <button class="stab active" type="button" data-tab="conn" aria-selected="true">🔑&nbsp; اتصال‌ها و مدل‌ها</button>
+          <button class="stab" type="button" data-tab="behavior" aria-selected="false">🎛&nbsp; رفتار و پاسخ</button>
+          <button class="stab" type="button" data-tab="sys" aria-selected="false">🖥&nbsp; سیستم و ابزارها</button>
         </nav>
         <div class="sp-foot">
-          <button class="btn danger" id="btnWipe">حذف همه گفتگوها</button>
-          <button class="btn primary" id="settingsClose">بستن</button>
+          <button class="btn danger" id="btnWipe" type="button">حذف همه گفتگوها</button>
+          <span class="sp-save-note">تغییرات به‌صورت خودکار ذخیره می‌شوند.</span>
         </div>
       </aside>
       <main class="sp-main">
         <header class="sp-head">
-          <h2>تنظیمات</h2>
-          <button class="x" id="settingsX">✕</button>
+          <div class="sp-head-copy">
+            <h2 id="settingsTitle">اتصال‌ها و مدل‌ها</h2>
+            <p id="settingsSubtitle">ارائه‌دهنده‌ها، آدرس API، کلیدها و مدل‌های قابل انتخاب را مدیریت کن.</p>
+          </div>
+          <button class="x" id="settingsX" type="button" title="بستن تنظیمات" aria-label="بستن تنظیمات">✕</button>
         </header>
         <div class="sp-body">
         <div class="stab-body active" data-tab="conn">
@@ -179,7 +187,7 @@
               <button class="btn tiny" id="cfFetchModels">🔎 دریافت از سرور</button>
             </div>
             <div class="srv-models hidden" id="cfSrvWrap">
-              <input type="text" class="mm-search" id="cfSrvSearch" placeholder="جست‌وجو در مدل‌های سرور…" spellcheck="false">
+              <input type="search" class="mm-search" id="cfSrvSearch" dir="auto" autocomplete="off" aria-label="جست‌وجو در مدل‌های سرور" placeholder="جست‌وجو در مدل‌های سرور…" spellcheck="false">
               <div class="srv-list" id="cfSrvList"></div>
             </div>
             <span class="fhint">فقط مدل‌هایی که همین‌جا اضافه کنی در منوی چت نمایش داده می‌شوند. با «دریافت از سرور» فهرست مدل‌های واقعی سرور می‌آید؛ روی هرکدام کلیک کن تا اضافه یا برداشته شود.</span>
@@ -257,9 +265,9 @@
             <input type="text" id="wsVal" dir="ltr" spellcheck="false" placeholder="پیش‌فرض: .atria/workspace در پوشهٔ کاربر">
           </div>
           <div class="field">
-            <label class="flabel">حداکثر طول پاسخ (توکن خروجی)</label>
+            <label class="flabel">حداکثر طول هر بخش پاسخ (توکن خروجی)</label>
             <input type="number" id="maxTokVal" min="256" max="65536" step="256" inputmode="numeric" dir="ltr">
-            <span class="fhint">سقف سرویس ۶۵۵۳۶ است — سقفِ طول پاسخ است و ربطی به موجودی/اعتبار حساب ندارد.</span>
+            <span class="fhint">اگر پاسخ به سقف برسد، برنامه تا ۳ بار ادامه‌اش می‌دهد. سقف هر بخش حداکثر ۶۵۵۳۶ توکن است و ربطی به اعتبار حساب ندارد.</span>
           </div>
           <div class="set-sec-title">ذخیره‌سازی</div>
           <div class="field">

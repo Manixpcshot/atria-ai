@@ -60,7 +60,7 @@ const DEFAULTS = {
   temp: 0.7,
   stream: true,
   system: PERSONA,
-  max_tokens: 4096,
+  max_tokens: 8192,
   tools_enabled: true,
   file_tools: true,
   workspace: '',
@@ -98,7 +98,7 @@ function loadSettings() {
   try { s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}') }; }
   catch { s = { ...DEFAULTS }; }
   // سقف سرویس 65536 — مقدارهای خراب قدیمی را خودکار درمان کن
-  s.max_tokens = Math.min(65536, Math.max(256, Number(s.max_tokens) || 4096));
+  s.max_tokens = Math.min(65536, Math.max(256, Number(s.max_tokens) || 8192));
   return s;
 }
 function saveSettings() {
@@ -216,7 +216,7 @@ function normConn(c) {
     key: String(c.key || ''),
     lastModel: String(c.lastModel || ''),
     enabled: c.enabled !== false,
-    models: Array.isArray(c.models) ? c.models.map(String).filter(Boolean) : [],
+    models: Array.isArray(c.models) ? [...new Set(c.models.map((m) => String(m || '').trim()).filter(Boolean))] : [],
   };
 }
 function loadConns() {
@@ -261,7 +261,7 @@ function migrateConns() {
   }
   if (hasSavedList) {
     const clean = st.conns.filter((c) => !isPhantomDefaultConn(c) && !isEmptyAutoConn(c));
-    if (clean.length !== st.conns.length) {
+    if (clean.length !== st.conns.length || JSON.stringify(clean) !== JSON.stringify(st.conns)) {
       st.conns = clean;
       saveConns();
     }
@@ -331,13 +331,25 @@ function kindLabel(kind) {
 let connEditId = null;
 let connSrv = [];
 let connSrvRequest = 0;
-let menuShowConns = false;
 
 function editConn() { return st.conns.find((c) => c.id === connEditId) || null; }
 
+const SETTINGS_TAB_COPY = {
+  conn: ['اتصال‌ها و مدل‌ها', 'ارائه‌دهنده‌ها، آدرس API، کلیدها و مدل‌های قابل انتخاب را مدیریت کن.'],
+  behavior: ['رفتار و پاسخ‌گویی', 'طول پاسخ، تفکر، حافظه و حالت جریان زنده را تنظیم کن.'],
+  sys: ['سیستم و ابزارها', 'شخصیت دستیار، دسترسی فایل و محل ذخیره‌سازی را پیکربندی کن.'],
+};
+
 function stabGo(tab) {
-  document.querySelectorAll('.stab').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
-  document.querySelectorAll('.stab-body').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
+  const selected = SETTINGS_TAB_COPY[tab] ? tab : 'conn';
+  document.querySelectorAll('.stab').forEach((x) => {
+    const active = x.dataset.tab === selected;
+    x.classList.toggle('active', active);
+    if (x.setAttribute) x.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  document.querySelectorAll('.stab-body').forEach((x) => x.classList.toggle('active', x.dataset.tab === selected));
+  if (els.settingsTitle) els.settingsTitle.textContent = SETTINGS_TAB_COPY[selected][0];
+  if (els.settingsSubtitle) els.settingsSubtitle.textContent = SETTINGS_TAB_COPY[selected][1];
 }
 
 function openConns(id) {
@@ -398,6 +410,8 @@ function matchingTemplate(conn) {
 function loadConnForm() {
   const c = editConn();
   els.connForm.classList.toggle('hidden', !c);
+  const connsBody = document.querySelector('.conns-body');
+  if (connsBody) connsBody.classList.toggle('has-form', !!c);
   els.cfKey.type = 'password';
   els.cfKeyEye.textContent = '👁';
   els.cfModelInput.value = '';
@@ -683,20 +697,37 @@ function updateConnTab() {
   if (els.connSummary) {
     els.connSummary.innerHTML = '';
     if (!c) {
-      els.connSummary.innerHTML = '<div class="mem-empty">اتصالی نیست — برای شروع «اتصال جدید» را بزن</div>';
+      const empty = document.createElement('div');
+      empty.className = 'conn-empty-summary';
+      empty.textContent = 'هنوز اتصالی ساخته نشده است. از فهرست پایین «اتصال جدید» را بزن.';
+      els.connSummary.appendChild(empty);
     } else {
-      const d = document.createElement('div');
-      d.className = 'conn-card active';
-      d.innerHTML = '<div class="cc-name"></div><div class="cc-meta"></div>';
-      d.querySelector('.cc-name').textContent = '⭐ ' + (c.name || 'اتصال بی‌نام');
-      const meta = d.querySelector('.cc-meta');
-      meta.innerHTML = '<span class="cc-chip"></span><span class="cc-chip ltr"></span><span class="cc-chip"></span>';
-      const chips = meta.querySelectorAll('.cc-chip');
-      chips[0].textContent = kindLabel(c.kind);
-      chips[1].textContent = c.base || 'بدون آدرس';
-      chips[2].textContent = (Array.isArray(c.models) ? c.models.length : 0) + ' مدل · ' + (c.key ? 'کلید دارد' : 'بدون کلید');
-      d.onclick = () => openConns(c.id);
-      els.connSummary.appendChild(d);
+      const summary = document.createElement('div');
+      summary.className = 'conn-active-summary';
+      const hasCredentials = !!String(c.key || '').trim() || c.kind === 'deepseek_web';
+      const status = document.createElement('span');
+      status.className = 'conn-status-dot' + (hasCredentials ? '' : ' needs-key');
+      status.setAttribute?.('aria-hidden', 'true');
+      const name = document.createElement('bdi');
+      name.className = 'conn-summary-name';
+      name.dir = 'auto';
+      name.textContent = c.name || 'اتصال بی‌نام';
+      const model = document.createElement('bdi');
+      model.className = 'conn-summary-model';
+      model.dir = 'ltr';
+      model.textContent = effModel() || 'مدلی انتخاب نشده';
+      const kind = document.createElement('span');
+      kind.className = 'conn-summary-kind';
+      kind.textContent = kindLabel(c.kind);
+      const state = document.createElement('span');
+      state.className = 'conn-summary-state' + (hasCredentials ? '' : ' missing');
+      state.textContent = hasCredentials ? 'آمادهٔ استفاده' : 'کلید API وارد نشده';
+      summary.appendChild(status);
+      summary.appendChild(name);
+      summary.appendChild(model);
+      summary.appendChild(kind);
+      summary.appendChild(state);
+      els.connSummary.appendChild(summary);
     }
   }
   if (els.dsSearchRow) {
@@ -721,7 +752,8 @@ function cacheEls() {
     modelChip: $('#modelChip'),
     modelPick: $('#modelPick'), mpName: $('#mpName'), modelMenu: $('#modelMenu'),
     chipAgent: $('#chipAgent'), chipThink: $('#chipThink'), chipFiles: $('#chipFiles'),
-    settingsModal: $('#settingsModal'), settingsX: $('#settingsX'), settingsClose: $('#settingsClose'),
+    settingsModal: $('#settingsModal'), settingsX: $('#settingsX'),
+    settingsTitle: $('#settingsTitle'), settingsSubtitle: $('#settingsSubtitle'),
     memoryModal: $('#memoryModal'), memoryX: $('#memoryX'), memoryClose: $('#memoryClose'),
     memList: $('#memList'), memClear: $('#memClear'), btnWipe: $('#btnWipe'),
     cmdk: $('#cmdk'), cmdkInput: $('#cmdkInput'), cmdkList: $('#cmdkList'), cmdkX: $('#cmdkX'),
@@ -790,15 +822,9 @@ function scrollBottom(instant) {
 /* ---------------- settings ---------------- */
 
 function bindSettings() {
-  // تب‌های بالای تنظیمات (اتصال/رفتار/سیستم) — سیم‌کشی جابه‌جایی پنل‌ها
+  // یک مسیر واحد برای همگام‌سازی تب، محتوای صفحه و عنوان.
   document.querySelectorAll('.stab').forEach((b) => {
-    b.addEventListener('click', () => {
-      document.querySelectorAll('.stab').forEach((x) => x.classList.remove('active'));
-      document.querySelectorAll('.stab-body').forEach((x) => x.classList.remove('active'));
-      b.classList.add('active');
-      const body = document.querySelector('.stab-body[data-tab="' + b.dataset.tab + '"]');
-      if (body) body.classList.add('active');
-    });
+    b.addEventListener('click', () => stabGo(b.dataset.tab));
   });
   els.tempVal.value = st.settings.temp;
   els.tempOut.textContent = Number(st.settings.temp).toFixed(1);
@@ -815,7 +841,7 @@ function bindSettings() {
   els.streamVal.onchange = () => { st.settings.stream = els.streamVal.checked; saveSettings(); };
 
   els.sysVal.value = st.settings.system || '';
-  els.maxTokVal.value = st.settings.max_tokens || 4096;
+  els.maxTokVal.value = st.settings.max_tokens || 8192;
   els.toolsVal.checked = !!st.settings.tools_enabled;
   els.fileToolsVal.checked = !!st.settings.file_tools;
   els.wsVal.value = st.settings.workspace || '';
@@ -824,7 +850,7 @@ function bindSettings() {
   els.sysVal.onblur = saveSettings;
   els.maxTokVal.onchange = () => {
     let v = Math.round(Number(els.maxTokVal.value));
-    if (!Number.isFinite(v)) v = 4096;
+    if (!Number.isFinite(v)) v = 8192;
     v = Math.min(65536, Math.max(256, v));
     st.settings.max_tokens = v;
     els.maxTokVal.value = v;
@@ -1201,7 +1227,7 @@ function startTurn() {
       api_key: conn ? conn.key : '',
       base_url: (conn && conn.base) || (conn && conn.kind === 'anthropic' ? 'https://api.anthropic.com' : conn && conn.kind === 'deepseek_web' ? 'https://chat.deepseek.com' : ''),
       model: effModel() || 'Atria-Dawn-Preview',
-      max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 4096)),
+      max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 8192)),
       temperature: Number(st.settings.temp),
       system: st.settings.system || '',
       tools_enabled: !!st.settings.tools_enabled,
@@ -1547,6 +1573,18 @@ function closeLive() {
   if (st.live) { st.live.done(); st.live = null; }
 }
 
+function resetAttemptStream() {
+  closeLive();
+  st.runText = '';
+  if (st.mdEl) st.mdEl.innerHTML = '';
+  if (st.run) {
+    st.run.thinkStep = null;
+    st.run.thinkTn = null;
+    st.run.thinkLen = 0;
+    st.run.thinkKind = '';
+  }
+}
+
 function failRun(msg) {
   stopBlink();
   closeLive();
@@ -1624,7 +1662,7 @@ function listenEvents() {
       closeLive();
       ensurePanel();
       st.run.thinkStep = null;
-      addChip('↻ مرحلهٔ ابزار ' + e.payload.round);
+      addChip('↻ مرحلهٔ مدل ' + e.payload.round);
     }
   });
   t.listen('atria:tool_pending', (e) => onToolPending(e.payload.id, e.payload.name));
@@ -1633,9 +1671,9 @@ function listenEvents() {
     onToolStart(e.payload.id, e.payload.name, e.payload.label, e.payload.input));
   t.listen('atria:tool_end', (e) => onToolEnd(e.payload.id, e.payload.ok, e.payload.output));
   t.listen('atria:retry', (e) => {
-    closeLive();
+    resetAttemptStream();
     ensurePanel();
-    addChip('↻ تلاش مجدد (' + e.payload.attempt + ' از ۳)…');
+    addChip('↻ تلاش دوباره (' + e.payload.attempt + ' از ۳) — پاسخ ناتمام دور ریخته شد');
   });
   t.listen('atria:done', (e) => {
     lastSession = e.payload.session_id || '';
@@ -1703,129 +1741,275 @@ function renderCmdkList(q) {
 
 function updateModelPick() {
   const label = effModel() || '—';
+  const conn = activeConn();
   if (els.mpName) els.mpName.textContent = label;
   if (els.modelChip) els.modelChip.textContent = label;
+  if (els.modelPick) {
+    els.modelPick.title = conn ? `${label} · ${conn.name}` : 'انتخاب مدل';
+    els.modelPick.setAttribute?.('aria-label', conn
+      ? `مدل انتخاب‌شده: ${label}؛ اتصال: ${conn.name}`
+      : 'انتخاب مدل');
+  }
 }
 
-function closeModelMenu() { els.modelMenu.classList.add('hidden'); }
+function closeModelMenu() {
+  if (els.modelMenu) els.modelMenu.classList.add('hidden');
+  if (els.modelPick) els.modelPick.setAttribute?.('aria-expanded', 'false');
+}
 
 function renderModelMenu() {
-  els.modelMenu.innerHTML = '';
-  const tools = document.createElement('div');
-  tools.className = 'mm-tools';
-  tools.innerHTML =
-    '<input class="mm-search" id="mmSearch" dir="auto" placeholder="جست‌وجوی مدل…" spellcheck="false">' +
-    '<button class="mm-fetch" id="mmManage" title="مدیریت اتصال‌ها و مدل‌ها">⚙︎</button>';
-  els.modelMenu.appendChild(tools);
-
-  const c = activeConn();
-  const head = document.createElement('div');
-  head.className = 'mm-head mm-conn-head';
-  if (menuShowConns) {
-    head.textContent = 'انتخاب اتصال:';
-    els.modelMenu.appendChild(head);
-    if (!st.conns.length) {
-      const e2 = document.createElement('div');
-      e2.className = 'mem-empty mm-empty-state';
-      e2.textContent = 'اتصالی نیست';
-      els.modelMenu.appendChild(e2);
-    }
-    for (const cc of st.conns) {
-      const it = document.createElement('button');
-      const isCur = c && cc.id === c.id;
-      it.className = 'mm-item mm-option' + (isCur ? ' active' : '');
-      it.innerHTML = '<span class="mm-main"><span class="mm-name"></span><span class="mm-sub"></span></span><span class="mm-tick"></span>';
-      it.querySelector('.mm-name').textContent = cc.name || 'اتصال بی‌نام';
-      it.querySelector('.mm-sub').textContent =
-        kindLabel(cc.kind) + ' · ' + (Array.isArray(cc.models) ? cc.models.length : 0) + ' مدل' + (cc.key ? '' : ' · بدون کلید');
-      it.querySelector('.mm-tick').textContent = isCur ? '✓' : '';
-      it.onclick = () => {
-        setActiveConn(cc.id);
-        menuShowConns = false;
-        renderModelMenu();
-        toast('اتصال: ' + cc.name, 'ok');
-      };
-      els.modelMenu.appendChild(it);
-    }
-  } else {
-    head.innerHTML = '<span class="mm-conn-name"></span><button class="mm-switch" title="تعویض اتصال">↻ تعویض اتصال</button>';
-    head.querySelector('.mm-conn-name').textContent = 'اتصال: ' + (c ? c.name : '—');
-    head.querySelector('.mm-switch').onclick = (e) => {
-      e.stopPropagation();
-      menuShowConns = true;
-      renderModelMenu();
-    };
-    els.modelMenu.appendChild(head);
-    let any = false;
-    const grouped = st.conns.filter((cc) => cc.enabled !== false && cc.models && cc.models.length);
-    grouped.sort((a, b) => (c && a.id === c.id ? -1 : c && b.id === c.id ? 1 : 0));
-    for (const cc of grouped) {
-      const g = document.createElement('div');
-      g.className = 'mm-group';
-      g.textContent = cc.name;
-      els.modelMenu.appendChild(g);
-      for (const m of (Array.isArray(cc.models) ? cc.models : [])) {
-        const it = document.createElement('button');
-        const isAct = c && cc.id === c.id && m === effModel();
-        it.className = 'mm-item mm-option' + (isAct ? ' active' : '');
-        it.innerHTML = '<span class="mm-main"><span class="mm-name"></span><span class="mm-sub"></span></span><span class="mm-tick"></span>';
-        it.querySelector('.mm-name').textContent = m;
-        it.querySelector('.mm-sub').textContent = cc.name + ' · ' + kindLabel(cc.kind);
-        it.querySelector('.mm-tick').textContent = isAct ? '✓' : '';
-        it.onclick = () => chooseModelFor(cc.id, m);
-        els.modelMenu.appendChild(it);
-        any = true;
-      }
-    }
-    if (!any) {
-      const e2 = document.createElement('div');
-      e2.className = 'mem-empty mm-empty-state';
-      e2.textContent = 'مدلی تعیین نکرده‌ای — «↻ تعویض اتصال» یا ⚙︎';
-      els.modelMenu.appendChild(e2);
-    }
-    const addBtn = document.createElement('button');
-    addBtn.className = 'mm-item mm-custom mm-action';
-    addBtn.textContent = '＋ افزودن/حذف مدل‌های اتصال‌ها…';
-    addBtn.onclick = () => { closeModelMenu(); openConns(null); };
-    els.modelMenu.appendChild(addBtn);
+  const menu = els.modelMenu;
+  if (!menu) return;
+  menu.innerHTML = '';
+  menu.classList.add('model-menu');
+  menu.setAttribute?.('role', 'dialog');
+  menu.setAttribute?.('aria-label', 'انتخاب مدل و اتصال');
+  menu.setAttribute?.('aria-modal', 'false');
+  if (els.modelPick) {
+    els.modelPick.setAttribute?.('aria-haspopup', 'dialog');
+    els.modelPick.setAttribute?.('aria-controls', 'modelMenu');
+    els.modelPick.setAttribute?.('aria-expanded', 'true');
   }
-  const manage = document.createElement('button');
-  manage.className = 'mm-item mm-custom mm-action';
-  manage.textContent = '⚙︎ مدیریت اتصال‌ها و مدل‌ها…';
-  manage.onclick = () => { closeModelMenu(); openConns(null); };
-  els.modelMenu.appendChild(manage);
 
-  const searchInput = tools.querySelector('#mmSearch');
-  const searchEmpty = document.createElement('div');
-  searchEmpty.className = 'mem-empty mm-search-empty hidden';
-  searchEmpty.textContent = 'نتیجه‌ای با این عبارت پیدا نشد';
-  els.modelMenu.appendChild(searchEmpty);
-  searchInput.oninput = (e) => {
-    const q = String(e.target.value || '').trim().toLocaleLowerCase();
-    let visible = 0;
-    els.modelMenu.querySelectorAll('.mm-option').forEach((it) => {
-      const haystack = it.textContent.toLocaleLowerCase();
-      const hit = !q || haystack.includes(q);
-      it.classList.toggle('hidden', !hit);
-      if (hit) visible++;
-    });
-    els.modelMenu.querySelectorAll('.mm-action, .mm-empty-state').forEach((it) =>
-      it.classList.toggle('hidden', !!q));
-    els.modelMenu.querySelectorAll('.mm-group').forEach((g) => {
-      let n = g.nextElementSibling, hasVisibleOption = false;
-      while (n && !n.classList.contains('mm-group')) {
-        if (n.classList.contains('mm-option') && !n.classList.contains('hidden')) hasVisibleOption = true;
-        n = n.nextElementSibling;
-      }
-      g.classList.toggle('hidden', !hasVisibleOption);
-    });
-    searchEmpty.classList.toggle('hidden', !q || visible > 0);
-  };
-  tools.querySelector('#mmManage').onclick = (e) => {
-    e.stopPropagation();
+  const active = activeConn();
+  const selectedModel = effModel();
+  const head = document.createElement('header');
+  head.className = 'mp-head';
+  const headCopy = document.createElement('div');
+  headCopy.className = 'mp-head-copy';
+  const title = document.createElement('strong');
+  title.className = 'mp-title';
+  title.textContent = 'انتخاب مدل';
+  const hint = document.createElement('span');
+  hint.className = 'mp-head-hint';
+  hint.textContent = 'مدل را انتخاب کن؛ اتصال هم خودکار عوض می‌شود.';
+  headCopy.appendChild(title);
+  headCopy.appendChild(hint);
+  head.appendChild(headCopy);
+  menu.appendChild(head);
+
+  const current = document.createElement('div');
+  current.className = 'mp-current';
+  const currentMark = document.createElement('span');
+  currentMark.className = 'mp-current-mark';
+  currentMark.textContent = '●';
+  currentMark.setAttribute?.('aria-hidden', 'true');
+  const currentCopy = document.createElement('div');
+  currentCopy.className = 'mp-current-copy';
+  const currentLabel = document.createElement('span');
+  currentLabel.className = 'mp-current-label';
+  currentLabel.textContent = 'در حال استفاده';
+  const currentName = document.createElement('bdi');
+  currentName.className = 'mp-current-model';
+  currentName.dir = 'ltr';
+  currentName.textContent = selectedModel || 'مدلی انتخاب نشده';
+  const currentConn = document.createElement('bdi');
+  currentConn.className = 'mp-current-conn';
+  currentConn.dir = 'auto';
+  currentConn.textContent = active ? `${active.name} · ${kindLabel(active.kind)}` : 'اتصالی انتخاب نشده';
+  currentCopy.appendChild(currentLabel);
+  currentCopy.appendChild(currentName);
+  currentCopy.appendChild(currentConn);
+  current.appendChild(currentMark);
+  current.appendChild(currentCopy);
+  menu.appendChild(current);
+
+  const searchWrap = document.createElement('div');
+  searchWrap.className = 'mp-search-wrap';
+  const searchIcon = document.createElement('span');
+  searchIcon.className = 'mp-search-icon';
+  searchIcon.textContent = '⌕';
+  searchIcon.setAttribute?.('aria-hidden', 'true');
+  const searchInput = document.createElement('input');
+  searchInput.className = 'mp-search';
+  searchInput.id = 'mmSearch';
+  searchInput.type = 'search';
+  searchInput.dir = 'auto';
+  searchInput.autocomplete = 'off';
+  searchInput.spellcheck = false;
+  searchInput.placeholder = 'جست‌وجوی مدل، اتصال یا API…';
+  searchInput.setAttribute?.('aria-label', 'جست‌وجوی مدل، اتصال یا API');
+  const clearSearch = document.createElement('button');
+  clearSearch.className = 'mp-clear hidden';
+  clearSearch.type = 'button';
+  clearSearch.title = 'پاک‌کردن جست‌وجو';
+  clearSearch.textContent = '×';
+  clearSearch.setAttribute?.('aria-label', 'پاک‌کردن جست‌وجو');
+  searchWrap.appendChild(searchIcon);
+  searchWrap.appendChild(searchInput);
+  searchWrap.appendChild(clearSearch);
+  menu.appendChild(searchWrap);
+
+  const results = document.createElement('div');
+  results.className = 'mp-results';
+  results.setAttribute?.('role', 'listbox');
+  results.setAttribute?.('aria-label', 'مدل‌های موجود');
+  menu.appendChild(results);
+
+  const allConnections = st.conns
+    .filter((conn) => conn && conn.enabled !== false)
+    .slice()
+    .sort((a, b) => (a.id === (active && active.id) ? -1 : b.id === (active && active.id) ? 1 : 0));
+  const groups = [];
+  let modelCount = 0;
+
+  for (const conn of allConnections) {
+    const models = Array.isArray(conn.models) ? [...new Set(conn.models.map((m) => String(m || '').trim()).filter(Boolean))] : [];
+    const group = document.createElement('section');
+    group.className = 'mp-group';
+    group.dataset.connId = conn.id;
+    const groupHead = document.createElement('div');
+    groupHead.className = 'mp-group-head';
+    const groupName = document.createElement('bdi');
+    groupName.className = 'mp-group-name';
+    groupName.dir = 'auto';
+    groupName.textContent = conn.name || 'اتصال بی‌نام';
+    const groupMeta = document.createElement('span');
+    groupMeta.className = 'mp-group-meta';
+    groupMeta.textContent = `${kindLabel(conn.kind)} · ${models.length} مدل`;
+    const groupState = document.createElement('span');
+    groupState.className = 'mp-group-state' + (active && conn.id === active.id ? ' active' : '');
+    groupState.textContent = active && conn.id === active.id ? 'فعال' : '';
+    groupHead.appendChild(groupName);
+    groupHead.appendChild(groupMeta);
+    groupHead.appendChild(groupState);
+    group.appendChild(groupHead);
+
+    const rows = [];
+    for (const model of models) {
+      const option = document.createElement('button');
+      option.className = 'mp-option';
+      option.type = 'button';
+      option.dataset.connectionId = conn.id;
+      option.dataset.model = model;
+      option.setAttribute?.('role', 'option');
+      const isCurrent = !!(active && conn.id === active.id && model === selectedModel);
+      option.setAttribute?.('aria-selected', isCurrent ? 'true' : 'false');
+      if (isCurrent) option.classList.add('active');
+
+      const identity = document.createElement('span');
+      identity.className = 'mp-option-identity';
+      const modelName = document.createElement('bdi');
+      modelName.className = 'mp-model-name';
+      modelName.dir = 'ltr';
+      modelName.textContent = model;
+      const modelMeta = document.createElement('span');
+      modelMeta.className = 'mp-model-meta';
+      modelMeta.textContent = kindLabel(conn.kind);
+      identity.appendChild(modelName);
+      identity.appendChild(modelMeta);
+      const source = document.createElement('bdi');
+      source.className = 'mp-source';
+      source.dir = 'auto';
+      source.textContent = conn.name || 'اتصال بی‌نام';
+      const check = document.createElement('span');
+      check.className = 'mp-check';
+      check.textContent = isCurrent ? '✓' : '';
+      check.setAttribute?.('aria-hidden', 'true');
+      option.appendChild(identity);
+      option.appendChild(source);
+      option.appendChild(check);
+      option.onclick = () => chooseModelFor(conn.id, model);
+      option.onkeydown = (event) => {
+        if (event.key === 'Escape') { event.preventDefault(); closeModelMenu(); els.modelPick?.focus(); return; }
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        event.preventDefault();
+        const visible = Array.from(menu.querySelectorAll('.mp-option')).filter((item) => !item.classList.contains('hidden'));
+        const index = visible.indexOf(option);
+        const next = visible[(index + (event.key === 'ArrowDown' ? 1 : visible.length - 1)) % visible.length];
+        if (next) next.focus();
+      };
+      group.appendChild(option);
+      rows.push(option);
+      modelCount++;
+    }
+
+    let noModels = null;
+    if (!models.length) {
+      noModels = document.createElement('div');
+      noModels.className = 'mp-no-models';
+      noModels.textContent = conn.key || conn.kind === 'deepseek_web'
+        ? 'برای این اتصال هنوز مدلی اضافه نشده است.'
+        : 'مدل و کلید این اتصال را در تنظیمات تکمیل کن.';
+      group.appendChild(noModels);
+    }
+    results.appendChild(group);
+    groups.push({ root: group, conn, rows, noModels });
+  }
+
+  const empty = document.createElement('div');
+  empty.className = 'mp-empty hidden';
+  const emptyIcon = document.createElement('span');
+  emptyIcon.className = 'mp-empty-icon';
+  emptyIcon.textContent = '⌕';
+  const emptyTitle = document.createElement('strong');
+  emptyTitle.className = 'mp-empty-title';
+  const emptyCopy = document.createElement('span');
+  emptyCopy.className = 'mp-empty-copy';
+  empty.appendChild(emptyIcon);
+  empty.appendChild(emptyTitle);
+  empty.appendChild(emptyCopy);
+  menu.appendChild(empty);
+
+  const footer = document.createElement('footer');
+  footer.className = 'mp-footer';
+  const footerNote = document.createElement('span');
+  footerNote.className = 'mp-footer-note';
+  footerNote.textContent = 'جست‌وجو بین نام مدل، اتصال و نوع API';
+  const manage = document.createElement('button');
+  manage.className = 'mp-manage';
+  manage.type = 'button';
+  manage.textContent = '⚙ مدیریت اتصال‌ها';
+  manage.onclick = (event) => {
+    event.stopPropagation();
     closeModelMenu();
     openConns(null);
   };
+  footer.appendChild(footerNote);
+  footer.appendChild(manage);
+  menu.appendChild(footer);
+
+  function filterModels(rawQuery) {
+    const query = String(rawQuery || '').normalize('NFKC').trim().toLocaleLowerCase();
+    let visibleCount = 0;
+    for (const entry of groups) {
+      const connectionText = `${entry.conn.name || ''} ${kindLabel(entry.conn.kind)} ${entry.conn.base || ''}`
+        .normalize('NFKC').toLocaleLowerCase();
+      const connectionMatches = !!query && connectionText.includes(query);
+      let groupVisible = false;
+      for (const option of entry.rows) {
+        const model = String(option.dataset.model || '').normalize('NFKC').toLocaleLowerCase();
+        const matches = !query || connectionMatches || model.includes(query);
+        option.classList.toggle('hidden', !matches);
+        if (matches) { visibleCount++; groupVisible = true; }
+      }
+      if (entry.noModels && (!query || connectionMatches)) groupVisible = true;
+      entry.root.classList.toggle('hidden', !groupVisible);
+    }
+    clearSearch.classList.toggle('hidden', !searchInput.value);
+    const noMatch = !!query && visibleCount === 0;
+    const noModels = modelCount === 0;
+    empty.classList.toggle('hidden', !noMatch && !noModels);
+    emptyTitle.textContent = noMatch ? 'نتیجه‌ای پیدا نشد' : 'هنوز مدلی برای انتخاب نیست';
+    emptyCopy.textContent = noMatch
+      ? 'عبارت جست‌وجو را کوتاه‌تر کن یا آن را پاک کن.'
+      : 'از تنظیمات، یک اتصال بساز و مدل‌های آن را اضافه کن.';
+    results.classList.toggle('hidden', noModels && !allConnections.length);
+  }
+
+  searchInput.oninput = () => filterModels(searchInput.value);
+  clearSearch.onclick = () => {
+    searchInput.value = '';
+    filterModels('');
+    searchInput.focus();
+  };
+  searchInput.onkeydown = (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); closeModelMenu(); els.modelPick?.focus(); return; }
+    const visible = Array.from(menu.querySelectorAll('.mp-option')).filter((item) => !item.classList.contains('hidden'));
+    if (event.key === 'ArrowDown' && visible.length) { event.preventDefault(); visible[0].focus(); }
+    if (event.key === 'Enter' && visible.length) { event.preventDefault(); visible[0].click(); }
+  };
+  filterModels('');
 }
 
 function chooseModelFor(connId, model) {
@@ -1881,7 +2065,6 @@ function boot() {
     el.addEventListener('mousedown', (e) => e.stopPropagation()));
 
   els.settingsX.onclick = () => closeModal(els.settingsModal);
-  els.settingsClose.onclick = () => closeModal(els.settingsModal);
   els.memoryX.onclick = () => closeModal(els.memoryModal);
   els.memoryClose.onclick = () => closeModal(els.memoryModal);
   els.cmdkX.onclick = () => closeModal(els.cmdk);
@@ -1939,7 +2122,7 @@ function boot() {
   document.addEventListener('visibilitychange', () => { if (document.hidden && (dirtyChats.size || goneChats.size)) flushChats(); });
   els.modelPick.onclick = (e) => {
     e.stopPropagation();
-    if (els.modelMenu.classList.contains('hidden')) { renderModelMenu(); els.modelMenu.classList.remove('hidden'); }
+    if (els.modelMenu.classList.contains('hidden')) openModelMenuAt(els.modelPick);
     else closeModelMenu();
   };
   document.addEventListener('click', (e) => {
@@ -1980,8 +2163,19 @@ function boot() {
       els.cmdk.classList.contains('hidden') ? openCmdk() : closeModal(els.cmdk);
     }
     if (e.key === 'Escape') {
+      if (els.modelMenu && !els.modelMenu.classList.contains('hidden')) {
+        closeModelMenu();
+        return;
+      }
+      if (els.tokenGuide && !els.tokenGuide.classList.contains('hidden')) {
+        closeModal(els.tokenGuide);
+        return;
+      }
+      if (els.settingsModal && !els.settingsModal.classList.contains('hidden')) {
+        closeModal(els.settingsModal);
+        return;
+      }
       closeModal(els.cmdk);
-      closeModal(els.settingsModal);
       closeModal(els.memoryModal);
     }
   });
@@ -2026,6 +2220,8 @@ function openModelMenuAt(el) {
     m.style.left = left + 'px';
     m.style.top = top + 'px';
     m.style.bottom = 'auto';
+    const search = m.querySelector('#mmSearch');
+    if (search) search.focus();
   } catch (err) {
     toast('منوی مدل باز نشد: ' + err, 'err');
   }
@@ -2058,9 +2254,6 @@ function onUsage(i, o) {
 
 function vInit() {
   cx0();
-  if (els.modelPick) els.modelPick.addEventListener('click', () => {
-    if (els.modelMenu && !els.modelMenu.classList.contains('hidden')) openModelMenuAt(els.modelPick);
-  });
   // نسخهٔ برنامه بالای پنجره
   try {
     if (window.__atria && window.__atria.invoke) {

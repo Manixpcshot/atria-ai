@@ -67,7 +67,7 @@ impl Default for ClientConfig {
             api_key: String::new(),
             base_url: "https://api.atria-asi.ai".to_string(),
             model: "Atria-Dawn-Preview".to_string(),
-            max_tokens: 4096,
+            max_tokens: 8192,
             temperature: 0.7,
             system: String::new(),
             stream: true,
@@ -112,6 +112,14 @@ pub enum CoreError {
     Stopped,
 }
 
+/// Provider stop reasons that mean the answer hit its configured output-token cap.
+pub(crate) fn is_output_limit_stop_reason(reason: &str) -> bool {
+    matches!(
+        reason.trim().to_ascii_lowercase().as_str(),
+        "max_tokens" | "length" | "max_output_tokens" | "token_limit" | "output_limit"
+    )
+}
+
 /// HTTP client for `POST /v1/messages`.
 pub struct AtriaClient {
     http: reqwest::Client,
@@ -128,7 +136,7 @@ impl AtriaClient {
         let http = reqwest::Client::builder()
             .pool_idle_timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(12))
-            .read_timeout(std::time::Duration::from_secs(300))
+            .read_timeout(std::time::Duration::from_secs(900))
             .build()
             .expect("build http client");
         Self { http }
@@ -190,7 +198,7 @@ impl AtriaClient {
                 return Err(CoreError::Stopped);
             }
             let v: Value = resp.json().await?;
-            Ok(turn_from_value(&v))
+            turn_from_value(&v)
         }
     }
 
@@ -206,6 +214,8 @@ impl AtriaClient {
         let mut dec = SseDecoder::new();
         let mut blocks: Vec<Acc> = Vec::new();
         let mut stop_reason = String::from("end_turn");
+        let mut saw_stop_reason = false;
+        let mut saw_message_stop = false;
         let mut usage = Usage::default();
 
         while let Some(chunk) = stream.next().await {
@@ -237,6 +247,8 @@ impl AtriaClient {
                                 let id = cb["id"].as_str().unwrap_or("").to_string();
                                 let name = cb["name"].as_str().unwrap_or("").to_string();
                                 on_event(StreamEvent::ToolStart { id: id.clone(), name: name.clone() });
+                                // Anthropic opens tool blocks with `input: {}`; real
+                                // arguments arrive in subsequent input_json_delta events.
                                 blocks.push(Acc::ToolUse { id, name, input_json: String::new() });
                             }
                             _ => blocks.push(Acc::Skip),
@@ -293,6 +305,7 @@ impl AtriaClient {
                             ev.data.pointer("/delta/stop_reason").and_then(Value::as_str)
                         {
                             stop_reason = sr.to_string();
+                            saw_stop_reason = !sr.trim().is_empty();
                         }
                         usage.output_tokens = ev
                             .data
@@ -300,6 +313,7 @@ impl AtriaClient {
                             .and_then(Value::as_u64)
                             .unwrap_or(0) as u32;
                     }
+                    "message_stop" => saw_message_stop = true,
                     "error" => {
                         return Err(CoreError::Api {
                             status: 400,
@@ -314,6 +328,31 @@ impl AtriaClient {
                     _ => {} // message_stop, ping, ...
                 }
             }
+        }
+
+        if !saw_message_stop && !saw_stop_reason {
+            return Err(CoreError::Api {
+                status: 502,
+                message: "stream ended before the provider sent a completion event; the partial answer was discarded".to_string(),
+            });
+        }
+        let output_limited = is_output_limit_stop_reason(&stop_reason);
+        let malformed_tool = blocks.iter().any(|block| match block {
+            Acc::ToolUse { input_json, .. } if input_json.trim().is_empty() => output_limited,
+            Acc::ToolUse { input_json, .. } => serde_json::from_str::<Value>(input_json)
+                .map(|input| !input.is_object())
+                .unwrap_or(true),
+            _ => false,
+        });
+        if malformed_tool {
+            return Err(CoreError::Api {
+                status: if output_limited { 422 } else { 502 },
+                message: if output_limited {
+                    "model hit the output-token limit while finishing a tool call; raise the output limit and retry".to_string()
+                } else {
+                    "provider ended with incomplete or invalid tool-call JSON; the partial tool call was discarded".to_string()
+                },
+            });
         }
 
         Ok(Turn {
@@ -371,18 +410,36 @@ fn to_anthropic_messages(messages: &[Message]) -> Vec<Value> {
         .collect()
 }
 
-fn turn_from_value(v: &Value) -> Turn {
-    Turn {
-        message: Message {
-            role: Role::Assistant,
-            content: Block::from_api_array(&v["content"]),
-        },
-        stop_reason: v["stop_reason"].as_str().unwrap_or("end_turn").to_string(),
+fn turn_from_value(v: &Value) -> Result<Turn, CoreError> {
+    let stop_reason = v["stop_reason"].as_str().filter(|reason| !reason.trim().is_empty()).ok_or_else(|| {
+        CoreError::Api {
+            status: 502,
+            message: "provider response omitted stop_reason; response may be incomplete".to_string(),
+        }
+    })?.to_string();
+    let content = Block::from_api_array(&v["content"]);
+    let malformed_tool = content.iter().any(|block| {
+        matches!(block, Block::ToolUse { input, .. } if !input.is_object())
+    });
+    if malformed_tool {
+        let output_limited = is_output_limit_stop_reason(&stop_reason);
+        return Err(CoreError::Api {
+            status: if output_limited { 422 } else { 502 },
+            message: if output_limited {
+                "model hit the output-token limit while finishing a tool call; raise the output limit and retry".to_string()
+            } else {
+                "provider returned an invalid tool-call input; the partial tool call was discarded".to_string()
+            },
+        });
+    }
+    Ok(Turn {
+        message: Message { role: Role::Assistant, content },
+        stop_reason,
         usage: Usage {
             input_tokens: v.pointer("/usage/input_tokens").and_then(Value::as_u64).unwrap_or(0) as u32,
             output_tokens: v.pointer("/usage/output_tokens").and_then(Value::as_u64).unwrap_or(0) as u32,
         },
-    }
+    })
 }
 
 /// Normalize a user-entered base URL to the full Messages endpoint.
@@ -498,6 +555,34 @@ pub fn strip_thinking(messages: &mut [Message]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_common_output_token_limit_reasons() {
+        for reason in ["max_tokens", "length", "max_output_tokens", "token_limit", " output_limit "] {
+            assert!(is_output_limit_stop_reason(reason), "{reason}");
+        }
+        for reason in ["end_turn", "stop", "tool_use", "content_filter"] {
+            assert!(!is_output_limit_stop_reason(reason), "{reason}");
+        }
+    }
+
+    #[test]
+    fn non_stream_anthropic_response_must_have_terminal_reason() {
+        let partial = json!({ "content": [{ "type": "text", "text": "partial" }] });
+        assert!(matches!(turn_from_value(&partial), Err(CoreError::Api { status: 502, .. })));
+
+        let complete = json!({ "stop_reason": "max_tokens", "content": [{ "type": "text", "text": "partial" }] });
+        assert_eq!(turn_from_value(&complete).unwrap().stop_reason, "max_tokens");
+    }
+
+    #[test]
+    fn non_stream_anthropic_rejects_invalid_tool_input() {
+        let invalid = json!({
+            "stop_reason": "tool_use",
+            "content": [{ "type": "tool_use", "id": "t1", "name": "calculator", "input": null }]
+        });
+        assert!(matches!(turn_from_value(&invalid), Err(CoreError::Api { status: 502, .. })));
+    }
 
     #[test]
     fn messages_url_normalizes() {

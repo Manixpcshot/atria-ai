@@ -19,11 +19,17 @@ pub struct SseDecoder {
     buf: Vec<u8>,
     event_name: String,
     data_lines: Vec<String>,
+    done: bool,
 }
 
 impl SseDecoder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether an OpenAI-compatible stream sent its explicit `[DONE]` marker.
+    pub fn is_done(&self) -> bool {
+        self.done
     }
 
     /// Feed a chunk of the response body; returns all events completed by it.
@@ -50,7 +56,9 @@ impl SseDecoder {
                     let data = self.data_lines.join("\n");
                     self.data_lines.clear();
                     self.event_name.clear();
-                    if let Ok(v) = serde_json::from_str::<Value>(&data) {
+                    if data.trim() == "[DONE]" {
+                        self.done = true;
+                    } else if let Ok(v) = serde_json::from_str::<Value>(&data) {
                         events.push(SseEvent { name, data: v });
                     }
                 }
@@ -106,6 +114,14 @@ mod tests {
         let mut d = SseDecoder::new();
         let evs = d.feed(b": keepalive\n\nevent: e\ndata: not-json\n\n");
         assert!(evs.is_empty());
+    }
+
+    #[test]
+    fn records_openai_done_marker_without_emitting_json() {
+        let mut d = SseDecoder::new();
+        assert!(!d.is_done());
+        assert!(d.feed(b"data: [DONE]\n\n").is_empty());
+        assert!(d.is_done());
     }
 
     #[test]
