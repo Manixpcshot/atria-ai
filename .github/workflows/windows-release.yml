@@ -67,17 +67,8 @@ jobs:
           Copy-Item update-manifest.json release-assets/
           Copy-Item update-manifest.sig release-assets/
 
-      - name: Upload pre-release verification assets
-        if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.ref_name }}-windows-preflight
-          path: release-assets/*
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload signed assets to the GitHub release
-        if: github.event_name == 'release'
+      - name: Upload signed assets to the draft or published release
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -86,5 +77,7 @@ jobs:
             release-assets/SHA256SUMS.txt
             release-assets/update-manifest.json
             release-assets/update-manifest.sig
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ github.event.release.tag_name || github.ref_name }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
           overwrite_files: true
+          fail_on_unmatched_files: true
