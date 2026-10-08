@@ -5,7 +5,7 @@
 
 use reqwest::{redirect, Client, Url};
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::Path;
 #[cfg(any(target_os = "windows", target_os = "macos", unix))]
 use std::process::Command;
@@ -27,21 +27,39 @@ struct SearchResult {
 fn blocked_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
             ip.is_private()
                 || ip.is_loopback()
                 || ip.is_link_local()
                 || ip.is_unspecified()
                 || ip.is_broadcast()
                 || ip.is_multicast()
-                || ip.octets()[0] == 0
+                || a == 0
+                // Non-global and special-purpose ranges omitted by some of
+                // the standard library's convenience predicates.
+                || (a == 100 && (b & 0xc0) == 0x40) // RFC 6598 CGNAT / metadata
+                || (a == 192 && b == 0 && c == 0) // protocol assignments
+                || (a == 192 && b == 0 && c == 2) // TEST-NET-1
+                || (a == 192 && b == 88 && c == 99) // deprecated 6to4 relay
+                || (a == 198 && (b == 18 || b == 19)) // benchmarking
+                || (a == 198 && b == 51 && c == 100) // TEST-NET-2
+                || (a == 203 && b == 0 && c == 113) // TEST-NET-3
+                || a >= 240 // reserved/future use
         }
         IpAddr::V6(ip) => {
+            let segments = ip.segments();
+            let in_global_unicast = segments[0] & 0xe000 == 0x2000; // 2000::/3
             ip.is_loopback()
                 || ip.is_unspecified()
                 || ip.is_multicast()
                 || ip.is_unique_local()
                 || ip.is_unicast_link_local()
+                || !in_global_unicast
                 || ip.to_ipv4_mapped().is_some_and(|v4| blocked_ip(IpAddr::V4(v4)))
+                || (segments[0] == 0x2001 && segments[1] & 0xfe00 == 0) // 2001::/23 special-purpose
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8) // documentation prefix
+                || segments[0] == 0x2002 // 6to4 tunnels can embed private IPv4
+                || (segments[0] == 0x3fff && segments[1] & 0xf000 == 0) // documentation prefix
         }
     }
 }
@@ -171,26 +189,76 @@ fn launch_public_url(url: &Url) -> Result<(), String> {
     }
 }
 
-fn public_client() -> Result<Client, String> {
-    let builder = Client::builder()
+fn validate_resolved_addresses(addrs: &[SocketAddr]) -> Result<(), String> {
+    if addrs.is_empty() || addrs.iter().any(|addr| blocked_ip(addr.ip())) {
+        return Err("DNS for this host includes an empty or non-public address; request blocked".into());
+    }
+    Ok(())
+}
+
+async fn public_client_for(url: &Url) -> Result<Client, String> {
+    validate_public_url(url.as_str())?;
+    let host = url.host_str().ok_or_else(|| "URL میزبان ندارد".to_string())?;
+    let port = url.port_or_known_default().ok_or_else(|| "درگاه URL معتبر نیست".to_string())?;
+    let mut builder = Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(18))
-        .redirect(redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() >= 5 {
-                return attempt.error("too many redirects");
-            }
-            if validate_public_url(attempt.url().as_str()).is_err() {
-                return attempt.error("redirect to a blocked/local URL");
-            }
-            attempt.follow()
-        }));
+        // Environment proxies may resolve the destination themselves and
+        // bypass our checked/pinned DNS addresses.
+        .no_proxy()
+        .redirect(redirect::Policy::none());
+
+    let ip_host = host.trim_start_matches('[').trim_end_matches(']');
+    if ip_host.parse::<IpAddr>().is_err() {
+        let lookup_host = host.to_string();
+        let addrs = tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::task::spawn_blocking(move || {
+                (lookup_host.as_str(), port).to_socket_addrs()
+                    .map(|addrs| addrs.collect::<Vec<SocketAddr>>())
+            }),
+        ).await.map_err(|_| "DNS lookup timed out".to_string())?
+            .map_err(|e| format!("DNS worker failed: {e}"))?
+            .map_err(|e| format!("DNS lookup failed for public host: {e}"))?;
+        validate_resolved_addresses(&addrs)?;
+        let domain = host.trim_end_matches('.').to_ascii_lowercase();
+        builder = builder.resolve_to_addrs(&domain, &addrs);
+    }
+
     builder.build().map_err(|e| format!("ساخت کلاینت وب ناموفق بود: {e}"))
+}
+
+/// Make a GET while pinning each host to DNS addresses that were checked as
+/// globally routable. Redirects are followed manually so every target gets the
+/// same validation and pinning before a connection is opened.
+async fn public_get(mut url: Url, accept: &str) -> Result<reqwest::Response, String> {
+    for followed in 0..=5 {
+        let client = public_client_for(&url).await?;
+        let response = client.get(url.clone())
+            .header(reqwest::header::ACCEPT, accept)
+            .send().await
+            .map_err(|e| format!("request failed: {e}"))?;
+        if !response.status().is_redirection() {
+            return Ok(response);
+        }
+        let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
+            return Ok(response);
+        };
+        if followed == 5 {
+            return Err("too many redirects".into());
+        }
+        let location = location.to_str().map_err(|_| "redirect location is not valid text".to_string())?;
+        let next = response.url().join(location).map_err(|e| format!("invalid redirect URL: {e}"))?;
+        validate_public_url(next.as_str())?;
+        url = next;
+    }
+    Err("too many redirects".into())
 }
 
 async fn read_bounded(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>, String> {
     if let Some(length) = response.content_length() {
-        if length as usize > limit {
+        if length > limit as u64 {
             return Err("پاسخ وب از سقف اندازهٔ مجاز بزرگ‌تر است".into());
         }
     }
@@ -211,13 +279,9 @@ pub async fn search(query: &str, count: usize) -> Result<String, String> {
         return Err("عبارت جست‌وجو باید بین ۱ تا ۵۰۰ نویسه باشد".into());
     }
     let count = count.clamp(1, 10);
-    let client = public_client()?;
     let mut url = Url::parse("https://html.duckduckgo.com/html/").expect("static URL is valid");
     url.query_pairs_mut().append_pair("q", query);
-    let response = client
-        .get(url)
-        .header(reqwest::header::ACCEPT, "text/html")
-        .send()
+    let response = public_get(url, "text/html")
         .await
         .map_err(|e| format!("جست‌وجوی وب ناموفق بود: {e}"))?;
     if !response.status().is_success() {
@@ -242,11 +306,7 @@ pub async fn search(query: &str, count: usize) -> Result<String, String> {
 /// Fetch a public page and return bounded readable text.
 pub async fn open_page(raw_url: &str) -> Result<String, String> {
     let url = validate_public_url(raw_url)?;
-    let client = public_client()?;
-    let response = client
-        .get(url)
-        .header(reqwest::header::ACCEPT, "text/html, text/plain, application/json;q=0.9, */*;q=0.1")
-        .send()
+    let response = public_get(url, "text/html, text/plain, application/json;q=0.9, */*;q=0.1")
         .await
         .map_err(|e| format!("دریافت صفحه ناموفق بود: {e}"))?;
     if !response.status().is_success() {
@@ -479,6 +539,29 @@ mod tests {
             assert!(validate_public_url(url).is_err(), "accepted {url}");
         }
         assert!(validate_public_url("https://example.com/path?q=one").is_ok());
+    }
+
+    #[test]
+    fn blocks_non_global_and_special_purpose_ip_ranges() {
+        for raw in [
+            "100.64.0.1", "100.100.100.200", "192.0.2.1", "198.18.0.1",
+            "203.0.113.4", "240.0.0.1", "2001:db8::1", "2001:1::1",
+            "2002:7f00:1::1", "3fff::1",
+        ] {
+            let ip: IpAddr = raw.parse().unwrap();
+            assert!(blocked_ip(ip), "special-use address was accepted: {raw}");
+        }
+        assert!(!blocked_ip("8.8.8.8".parse().unwrap()));
+        assert!(!blocked_ip("2606:4700:4700::1111".parse().unwrap()));
+    }
+
+    #[test]
+    fn rejects_dns_answers_if_any_address_is_non_public() {
+        let public = SocketAddr::from(([8, 8, 8, 8], 443));
+        let private = SocketAddr::from(([100, 100, 100, 200], 443));
+        assert!(validate_resolved_addresses(&[public]).is_ok());
+        assert!(validate_resolved_addresses(&[]).is_err());
+        assert!(validate_resolved_addresses(&[public, private]).is_err());
     }
 
     #[test]

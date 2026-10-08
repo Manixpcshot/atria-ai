@@ -46,7 +46,8 @@ impl SseDecoder {
             let line = String::from_utf8_lossy(&line).into_owned();
 
             if line.is_empty() {
-                // dispatch
+                // A blank line ends the event even when it has no data; reset
+                // the event type so it cannot leak into the next default event.
                 if !self.data_lines.is_empty() {
                     let name = if self.event_name.is_empty() {
                         "message".to_string()
@@ -61,6 +62,8 @@ impl SseDecoder {
                     } else if let Ok(v) = serde_json::from_str::<Value>(&data) {
                         events.push(SseEvent { name, data: v });
                     }
+                } else {
+                    self.event_name.clear();
                 }
             } else if let Some(rest) = line.strip_prefix("event:") {
                 self.event_name = rest.trim().to_string();
@@ -114,6 +117,16 @@ mod tests {
         let mut d = SseDecoder::new();
         let evs = d.feed(b": keepalive\n\nevent: e\ndata: not-json\n\n");
         assert!(evs.is_empty());
+    }
+
+    #[test]
+    fn empty_event_resets_name_before_the_next_default_message() {
+        let mut d = SseDecoder::new();
+        assert!(d.feed(b"event: heartbeat\n\n").is_empty());
+        let events = d.feed(b"data: {\"ok\":true}\n\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, "message");
+        assert_eq!(events[0].data["ok"], true);
     }
 
     #[test]

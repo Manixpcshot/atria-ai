@@ -232,7 +232,7 @@ let urlOpenBehavior = 'ok';
 let chatsLoadCalled = 0;
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.11.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.12.0' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -253,7 +253,7 @@ function router(cmd, args = {}) {
       if (urlOpenBehavior === 'network-error') return Promise.reject(new Error('open failed'));
       return Promise.resolve('opened');
     case 'reject_pending_url': return Promise.resolve();
-    case 'update_check': return Promise.resolve({ current_version: '0.11.0', latest_version: '0.11.0', available: false, release_url: '', download_size: 0 });
+    case 'update_check': return Promise.resolve({ current_version: '0.12.0', latest_version: '0.12.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'chats_load': chatsLoadCalled++; return Promise.resolve(chatsLoadPayload);
     case 'dirs_info': return Promise.resolve({ chats: 'C:/u/.atria/chats', workspace: 'C:/u/.atria/workspace', memory: 'C:/u/.atria/memory.json' });
@@ -337,7 +337,10 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.11.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.12.0');
+const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
+ok('UI می‌گوید خواندن و فهرست‌کردن فایل فقط در ورک‌اسپیس است', indexHtml.includes('خواندن و فهرست‌کردن فقط داخل ورک‌اسپیس'));
+ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود می‌ماند'));
 ok('کلید قدیمی به مخزن امن منتقل شد', secretStore.get('c1') === 'k1');
 const savedConns = JSON.parse(localStorage.getItem('atria.conns.v1') || '[]');
 ok('localStorage فقط metadata نگه می‌دارد و کلید را پاک کرده', savedConns.length === 2 && savedConns.every((c) => !c.key));

@@ -3,6 +3,7 @@
 use crate::memory::MemoryStore;
 use serde_json::Value;
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -75,16 +76,16 @@ pub fn file_tool_catalog_for_access(
         } else {
             "a relative path inside the configured workspace"
         };
-        format!("Write a UTF-8 text file automatically, without a separate approval, only within {scope}. A restorable backup is created and the tool result is the source of truth. Absolute/traversal paths and protected locations are blocked.")
+        format!("Write a UTF-8 text file automatically, without a separate approval, only within {scope}. A restorable backup is created and the tool result is the source of truth. Absolute/traversal paths, symlinks, and protected credential/browser locations are blocked. Reads and listings remain restricted to the configured workspace.")
     } else if autonomous_mode {
-        "Prepare a UTF-8 text file change. In autonomous mode, only a relative path inside the configured workspace may be applied automatically, and a restorable backup is created. In ask-first mode, show the diff and wait for explicit approval. Never write outside the workspace in autonomous mode.".to_string()
+        "Prepare a UTF-8 text file change. In autonomous mode, only a relative path inside the configured workspace may be applied automatically, and a restorable backup is created. Absolute paths, traversal, symlinks, and sensitive credential/browser locations are blocked. In ask-first mode, show the diff and wait for explicit approval. Never write outside the workspace in autonomous mode.".to_string()
     } else {
-        "Prepare a UTF-8 text file change and show a diff. Wait for the user's separate approval in Atria before applying it. Treat the tool result as the source of truth.".to_string()
+        "Prepare a UTF-8 text file change only inside the configured workspace and show a diff. Absolute paths, traversal, symlinks, and sensitive credential/browser locations are blocked. Wait for the user's separate approval in Atria before applying it. Treat the tool result as the source of truth.".to_string()
     };
     vec![
         serde_json::json!({
             "name": "list_files",
-            "description": "List files and folders. Path can be relative to the workspace folder or an absolute path anywhere on the computer (e.g. 'C:/Users/...' or 'C:\\\\Users\\\\...').",
+            "description": "List only files and folders inside the configured workspace using a relative path. Absolute paths, traversal, symlinks, and sensitive credential/browser locations are blocked.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -94,7 +95,7 @@ pub fn file_tool_catalog_for_access(
         }),
         serde_json::json!({
             "name": "read_file",
-            "description": "Read a UTF-8 text file. Path can be relative to the workspace folder or an absolute path anywhere on the computer.",
+            "description": "Read a UTF-8 text file only inside the configured workspace using a relative path. Absolute paths, traversal, symlinks, and sensitive credential/browser locations are blocked.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -423,42 +424,167 @@ fn user_data_root() -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Full file access — absolute paths address the whole computer; relative
-// paths resolve under the workspace folder (which is only the default base).
+// Workspace-scoped file tools. Reads and staged writes never address arbitrary
+// absolute paths, traversal, symlinks, or known credential/browser stores.
 // ---------------------------------------------------------------------------
 
 const MAX_READ: usize = 256 * 1024;
 
-/// Resolve a file-tool path. Absolute paths (drive `C:/...`, UNC `//server/...`,
-/// or `/...`) can address any location on the computer; relative paths resolve
-/// under `root` (the workspace folder) as the default base.
-fn sandbox(root: &Path, rel: &str) -> Result<std::path::PathBuf, String> {
-    let raw = rel.trim().replace('\\', "/");
-    let is_abs = raw.starts_with('/')
-        || (raw.len() >= 3
-            && raw.as_bytes()[0].is_ascii_alphabetic()
-            && raw.as_bytes()[1] == b':'
-            && raw.as_bytes()[2] == b'/');
-    if is_abs {
-        return Ok(std::path::PathBuf::from(raw));
-    }
-    if root.as_os_str().is_empty() {
-        return Err("file tools are disabled (no workspace set)".to_string());
-    }
-    let mut p = root.to_path_buf();
-    for comp in raw.split('/') {
-        match comp {
-            "" | "." => continue,
-            c => p.push(c),
+struct ScopedPath {
+    root: PathBuf,
+    path: PathBuf,
+    relative: String,
+}
+
+fn is_protected_file_component(component: &str) -> bool {
+    let normalized = component.trim_end_matches(|c| c == '.' || c == ' ');
+    let lower = normalized.to_lowercase();
+    let compact: String = lower.chars().filter(|c| !matches!(c, '-' | '_' | ' ')).collect();
+    is_protected_profile_component(normalized)
+        || matches!(lower.as_str(),
+            ".git" | ".mozilla" | ".thunderbird" | "user data" | "application support" |
+            "browser" | "browsers" | "cookies" | "cookies.sqlite" | "cookie.sqlite" |
+            "login data" | "web data" | "local state" | "key4.db" | "key3.db" |
+            "logins.json" | "profiles.ini" | "local storage" | "session storage" | "indexeddb" |
+            "auth.json" | "tokens.json" | "token.json" | "master.key" | "passwords.csv")
+        || lower.starts_with(".env")
+        || lower.starts_with("cookies-")
+        || lower.starts_with("login data ")
+        || compact.contains("credential")
+        || compact.contains("password")
+        || compact.contains("passwd")
+        || matches!(compact.as_str(), "secret" | "secrets")
+        || compact.contains("apikey")
+        || matches!(compact.as_str(), "token" | "tokens" | "accesstoken" | "refreshtoken" | "authtoken")
+        || matches!(Path::new(normalized).extension().and_then(|ext| ext.to_str()).map(str::to_ascii_lowercase).as_deref(),
+            Some("pem" | "key" | "p12" | "pfx" | "jks" | "keystore" | "kdbx" | "ppk"))
+}
+
+/// A conservative last-resort guard for common secret assignments and token
+/// formats, so a credential accidentally placed in an ordinary workspace file
+/// is not echoed into a model-visible read or diff.
+fn contains_credential_material(text: &str) -> bool {
+    const LABELS: &[&str] = &[
+        "api_key", "api-key", "apikey", "client_secret", "client-secret",
+        "access_token", "access-token", "refresh_token", "refresh-token",
+        "auth_token", "auth-token", "github_token", "github-token", "password",
+        "passwd", "secret_key", "secret-key", "private_key", "private-key", "authorization",
+    ];
+    const PREFIXES: &[&str] = &["github_pat_", "ghp_", "gho_", "ghs_", "ghr_", "xoxb-", "xoxp-", "AIza"];
+    for line in text.lines() {
+        let lower = line.to_ascii_lowercase();
+        for label in LABELS {
+            let mut search_from = 0;
+            while let Some(found) = lower[search_from..].find(label) {
+                let after_label = search_from + found + label.len();
+                let tail = &lower[after_label..];
+                let Some(separator) = tail.find(|c| c == '=' || c == ':') else { break };
+                if separator > 16 { break; }
+                let value = tail[separator + 1..].trim_start();
+                let value = value.strip_prefix("bearer ").unwrap_or(value);
+                let token = value.trim_start_matches(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+                    .split(|c: char| c.is_whitespace() || matches!(c, '\'' | '"' | ',' | ';' | ')' | '}' | '#'))
+                    .next().unwrap_or("");
+                let candidate = token.to_ascii_lowercase();
+                let min_len = if *label == "password" || *label == "passwd" { 4 } else { 8 };
+                let placeholder = ["example", "placeholder", "redacted", "changeme", "your_", "your-", "dummy", "fake", "${", "{{", "os.environ", "process.env", "std::env", "env::var", "getenv"]
+                    .iter().any(|p| candidate.contains(p));
+                if token.len() >= min_len && !placeholder {
+                    return true;
+                }
+                search_from = after_label;
+                if search_from >= lower.len() { break; }
+            }
+        }
+        for prefix in PREFIXES {
+            if lower.find(&prefix.to_ascii_lowercase()).is_some_and(|at| {
+                line[at + prefix.len()..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').count() >= 16
+            }) {
+                return true;
+            }
         }
     }
-    Ok(p)
+    false
+}
+
+fn resolve_scoped_path(root: &Path, raw: &str, allow_missing: bool) -> Result<ScopedPath, String> {
+    if root.as_os_str().is_empty() {
+        return Err("file tools need a configured workspace folder".into());
+    }
+    let normalized = raw.trim().replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    let drive_prefixed = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    if normalized.starts_with('/') || drive_prefixed {
+        return Err("absolute paths are blocked; use a relative path inside the configured workspace".into());
+    }
+
+    let mut components = Vec::<String>::new();
+    for value in normalized.split('/') {
+        match value {
+            "" | "." => continue,
+            ".." => return Err("path traversal using '..' is blocked for file tools".into()),
+            value if value.chars().any(char::is_control) => return Err("path contains a control character".into()),
+            value if value.contains(':') => return Err("colon/Windows alternate data stream paths are blocked".into()),
+            value if value.ends_with('.') || value.ends_with(' ') => return Err("path components ending in a dot or space are ambiguous on Windows".into()),
+            value => {
+                let device = value.split('.').next().unwrap_or("").to_ascii_uppercase();
+                if matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" | "CLOCK$" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9") {
+                    return Err("reserved Windows device names are blocked".into());
+                }
+                if is_protected_file_component(value) {
+                    return Err(format!("access to sensitive credential/browser path component '{value}' is blocked"));
+                }
+                components.push(value.to_string());
+            }
+        }
+    }
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|e| format!("cannot resolve the configured workspace: {e}"))?;
+    if !canonical_root.is_dir() {
+        return Err("the configured workspace is not a directory".into());
+    }
+    let mut candidate = canonical_root.clone();
+    for (index, component) in components.iter().enumerate() {
+        candidate.push(component);
+        match std::fs::symlink_metadata(&candidate) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err("symlink paths are blocked for file tools".into());
+                }
+                let resolved = std::fs::canonicalize(&candidate)
+                    .map_err(|e| format!("cannot resolve workspace path: {e}"))?;
+                if !resolved.starts_with(&canonical_root) {
+                    return Err("resolved path escapes the configured workspace".into());
+                }
+                if let Ok(relative) = resolved.strip_prefix(&canonical_root) {
+                    if relative.components().any(|part| matches!(part, std::path::Component::Normal(name) if is_protected_file_component(&name.to_string_lossy()))) {
+                        return Err("resolved path points into a protected credential/browser location".into());
+                    }
+                }
+                candidate = resolved;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && allow_missing => {
+                for rest in components.iter().skip(index + 1) {
+                    candidate.push(rest);
+                }
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(format!("workspace path does not exist: {error}"));
+            }
+            Err(error) => return Err(format!("cannot inspect workspace path: {error}")),
+        }
+    }
+    if !candidate.starts_with(&canonical_root) {
+        return Err("path escapes the configured workspace".into());
+    }
+    Ok(ScopedPath { root: canonical_root, path: candidate, relative: components.join("/") })
 }
 
 fn file_list(input: &Value, root: &Path) -> ToolOutcome {
     let rel = input["path"].as_str().unwrap_or("").trim();
-    let dir = match sandbox(root, if rel.is_empty() { "." } else { rel }) {
-        Ok(p) => p,
+    let dir = match resolve_scoped_path(root, if rel.is_empty() { "." } else { rel }, false) {
+        Ok(scoped) => scoped.path,
         Err(e) => return ToolOutcome { output: e, is_error: true },
     };
     let rd = match std::fs::read_dir(&dir) {
@@ -466,14 +592,23 @@ fn file_list(input: &Value, root: &Path) -> ToolOutcome {
         Err(e) => return ToolOutcome { output: format!("cannot read folder: {e}"), is_error: true },
     };
     let mut entries: Vec<String> = Vec::new();
-    for entry in rd.flatten().take(300) {
+    let mut scanned = 0usize;
+    for entry in rd.flatten() {
+        scanned += 1;
+        if scanned > 1_000 { break; }
         let name = entry.file_name().to_string_lossy().to_string();
-        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        if is_protected_file_component(&name) { continue; }
+        let file_type = match entry.file_type() {
+            Ok(file_type) if !file_type.is_symlink() => file_type,
+            _ => continue,
+        };
+        if file_type.is_dir() {
             entries.push(format!("{name}/"));
         } else {
             let len = entry.metadata().map(|m| m.len()).unwrap_or(0);
             entries.push(format!("{name} ({len} bytes)"));
         }
+        if entries.len() >= 300 { break; }
     }
     entries.sort();
     if entries.is_empty() {
@@ -485,29 +620,47 @@ fn file_list(input: &Value, root: &Path) -> ToolOutcome {
 
 fn file_read(input: &Value, root: &Path) -> ToolOutcome {
     let rel = input["path"].as_str().unwrap_or("").trim();
-    let path = match sandbox(root, rel) {
-        Ok(p) => p,
+    if rel.is_empty() {
+        return ToolOutcome { output: "a relative file path inside the workspace is required".into(), is_error: true };
+    }
+    let path = match resolve_scoped_path(root, rel, false) {
+        Ok(scoped) => scoped.path,
         Err(e) => return ToolOutcome { output: e, is_error: true },
     };
-    match std::fs::read(&path) {
-        Ok(bytes) => {
-            let slice = &bytes[..bytes.len().min(MAX_READ)];
-            match std::str::from_utf8(slice) {
-                Ok(s) => {
-                    let mut out = s.to_string();
-                    if bytes.len() > MAX_READ {
-                        out.push_str("\n… (truncated)");
-                    }
-                    ToolOutcome { output: out, is_error: false }
-                }
-                Err(_) => ToolOutcome {
-                    output: "file is not valid UTF-8 text".to_string(),
-                    is_error: true,
-                },
+    let file = match std::fs::File::open(&path) {
+        Ok(file) => file,
+        Err(e) => return ToolOutcome { output: format!("cannot read file: {e}"), is_error: true },
+    };
+    let metadata = match file.metadata() {
+        Ok(metadata) if metadata.is_file() => metadata,
+        Ok(_) => return ToolOutcome { output: "only regular UTF-8 text files can be read".into(), is_error: true },
+        Err(e) => return ToolOutcome { output: format!("cannot inspect file: {e}"), is_error: true },
+    };
+    let capacity = metadata.len().min((MAX_READ + 1) as u64) as usize;
+    let mut bytes = Vec::with_capacity(capacity);
+    if let Err(e) = file.take((MAX_READ + 1) as u64).read_to_end(&mut bytes) {
+        return ToolOutcome { output: format!("cannot read file: {e}"), is_error: true };
+    }
+    let truncated = bytes.len() > MAX_READ;
+    let slice = &bytes[..bytes.len().min(MAX_READ)];
+    let text = match std::str::from_utf8(slice) {
+        Ok(text) => text,
+        Err(error) if truncated && error.error_len().is_none() => {
+            match std::str::from_utf8(&slice[..error.valid_up_to()]) {
+                Ok(text) => text,
+                Err(_) => return ToolOutcome { output: "file is not valid UTF-8 text".into(), is_error: true },
             }
         }
-        Err(e) => ToolOutcome { output: format!("cannot read file: {e}"), is_error: true },
+        Err(_) => return ToolOutcome { output: "file is not valid UTF-8 text".into(), is_error: true },
+    };
+    if contains_credential_material(text) {
+        return ToolOutcome { output: "possible credential material detected; file contents were withheld from the model".into(), is_error: true };
     }
+    let mut output = text.to_string();
+    if truncated {
+        output.push_str("\n… (truncated)");
+    }
+    ToolOutcome { output, is_error: false }
 }
 
 const MAX_WRITE: usize = 2 * 1024 * 1024;
@@ -516,6 +669,10 @@ static NEXT_EDIT_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PendingEdit {
     path: PathBuf,
+    #[serde(default)]
+    scope_root: PathBuf,
+    #[serde(default)]
+    relative_path: String,
     expected_old: Option<String>,
     content: String,
 }
@@ -523,6 +680,10 @@ struct PendingEdit {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FileBackup {
     path: PathBuf,
+    #[serde(default)]
+    scope_root: Option<PathBuf>,
+    #[serde(default)]
+    relative_path: Option<String>,
     backup_path: Option<PathBuf>,
     existed: bool,
     applied_content: String,
@@ -559,23 +720,55 @@ fn diff_preview(old: &str, new: &str) -> String {
     out
 }
 
+fn read_utf8_file_capped(path: &Path, limit: usize) -> Result<String, String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("cannot read file: {e}"))?;
+    let metadata = file.metadata().map_err(|e| format!("cannot inspect file: {e}"))?;
+    if !metadata.is_file() {
+        return Err("only regular text files can be edited".into());
+    }
+    if metadata.len() > limit as u64 {
+        return Err(format!("file exceeds the {limit}-byte edit limit"));
+    }
+    let mut bytes = Vec::with_capacity((metadata.len() as usize).min(limit));
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("cannot read file: {e}"))?;
+    if bytes.len() > limit {
+        return Err(format!("file grew beyond the {limit}-byte edit limit while being read"));
+    }
+    String::from_utf8(bytes).map_err(|_| "refusing to replace a non-UTF-8/binary file with a text edit".into())
+}
+
 fn file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutcome {
     let rel = input["path"].as_str().unwrap_or("").trim();
     let content = input["content"].as_str().unwrap_or("");
+    if rel.is_empty() {
+        return ToolOutcome { output: "a relative path inside the configured workspace is required".into(), is_error: true };
+    }
     if content.len() > MAX_WRITE {
         return ToolOutcome { output: format!("proposed file is larger than {} bytes", MAX_WRITE), is_error: true };
     }
-    let path = match sandbox(root, rel) {
-        Ok(p) => p,
-        Err(e) => return ToolOutcome { output: e, is_error: true },
+    let scoped = match resolve_scoped_path(root, rel, true) {
+        Ok(path) => path,
+        Err(error) => return ToolOutcome { output: error, is_error: true },
     };
-    let (old, expected_old) = match std::fs::read(&path) {
-        Ok(bytes) => match String::from_utf8(bytes) {
+    let path = scoped.path.clone();
+    let (old, expected_old) = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return ToolOutcome { output: "symlink paths are blocked for file edits".into(), is_error: true };
+        }
+        Ok(metadata) if !metadata.is_file() => {
+            return ToolOutcome { output: "only regular text files can be edited".into(), is_error: true };
+        }
+        Ok(_) => match read_utf8_file_capped(&path, MAX_WRITE) {
+            Ok(text) if contains_credential_material(&text) => {
+                return ToolOutcome { output: "possible credential material detected; diff and edit were blocked to protect secrets from the model".into(), is_error: true };
+            }
             Ok(text) => (text.clone(), Some(text)),
-            Err(_) => return ToolOutcome { output: "refusing to replace a non-UTF-8/binary file with a text edit".into(), is_error: true },
+            Err(error) => return ToolOutcome { output: error, is_error: true },
         },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
-        Err(e) => return ToolOutcome { output: format!("cannot inspect file: {e}"), is_error: true },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
+        Err(error) => return ToolOutcome { output: format!("cannot inspect file: {error}"), is_error: true },
     };
     if old == content {
         return ToolOutcome { output: "proposed content is identical; no change needed".into(), is_error: false };
@@ -585,7 +778,13 @@ fn file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutcome {
     if let Err(e) = std::fs::create_dir_all(&dir) {
         return ToolOutcome { output: format!("cannot stage edit: {e}"), is_error: true };
     }
-    let pending = PendingEdit { path: path.clone(), expected_old, content: content.to_string() };
+    let pending = PendingEdit {
+        path: path.clone(),
+        scope_root: scoped.root,
+        relative_path: scoped.relative,
+        expected_old,
+        content: content.to_string(),
+    };
     let file = dir.join(format!("{id}.json"));
     let serialized = match serde_json::to_vec(&pending) {
         Ok(v) => v,
@@ -724,8 +923,8 @@ fn validate_auto_write_path(
                 if matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" | "CLOCK$" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9") {
                     return Err("نام دستگاه رزروشدهٔ ویندوز در مسیر مجاز نیست".into());
                 }
-                if profile_scope && is_protected_profile_component(value) {
-                    return Err(format!("نوشتن خودکار در مسیر محافظت‌شدهٔ پروفایل ({value}) مسدود است"));
+                if is_protected_file_component(value) {
+                    return Err(format!("نوشتن خودکار در مسیر محافظت‌شده ({value}) مسدود است"));
                 }
                 components.push(value);
             }
@@ -760,15 +959,9 @@ fn validate_auto_write_path(
             if !resolved.starts_with(&canonical_root) {
                 return Err("مسیر با resolve از محدودهٔ مجاز خارج می‌شود".into());
             }
-            if profile_scope {
-                if let Ok(relative) = resolved.strip_prefix(&canonical_root) {
-                    for component in relative.components() {
-                        if let std::path::Component::Normal(name) = component {
-                            if is_protected_profile_component(&name.to_string_lossy()) {
-                                return Err("نام resolveشده به مسیر محافظت‌شدهٔ پروفایل اشاره می‌کند".into());
-                            }
-                        }
-                    }
+            if let Ok(relative) = resolved.strip_prefix(&canonical_root) {
+                if relative.components().any(|part| matches!(part, std::path::Component::Normal(name) if is_protected_file_component(&name.to_string_lossy()))) {
+                    return Err("نام resolveشده به مسیر محافظت‌شدهٔ کلید/مرورگر اشاره می‌کند".into());
                 }
             }
         }
@@ -777,13 +970,11 @@ fn validate_auto_write_path(
         return Err("مسیر از محدودهٔ مجاز خارج می‌شود".into());
     }
 
-    // Profile-wide access must never overlap Atria's private state, even when a
-    // non-default workspace/data location happens to be inside the profile.
-    if profile_scope {
-        if let Ok(private_root) = std::fs::canonicalize(data_root) {
-            if candidate.starts_with(&private_root) {
-                return Err("نوشتن در داده‌های خصوصی Atria مسدود است".into());
-            }
+    // Automatic writes must never overlap Atria's private state, whether the
+    // selected scope is the profile or a workspace that contains the data root.
+    if let Ok(private_root) = std::fs::canonicalize(data_root) {
+        if candidate.starts_with(&private_root) {
+            return Err("نوشتن در داده‌های خصوصی Atria مسدود است".into());
         }
     }
     Ok(canonical_root)
@@ -809,10 +1000,19 @@ pub fn apply_pending_edit(id: &str, data_root: &Path) -> Result<String, String> 
     let pending_path = data_root.join("pending-edits").join(format!("{id}.json"));
     let pending: PendingEdit = serde_json::from_slice(&std::fs::read(&pending_path).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    let current = match std::fs::read(&pending.path) {
-        Ok(bytes) => Some(String::from_utf8(bytes).map_err(|_| "file is no longer UTF-8 text".to_string())?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("cannot re-check target before applying: {e}")),
+    if pending.scope_root.as_os_str().is_empty() || pending.relative_path.is_empty() {
+        return Err("this staged edit predates workspace scoping; recreate its preview before applying".into());
+    }
+    let scoped = resolve_scoped_path(&pending.scope_root, &pending.relative_path, true)?;
+    if scoped.path != pending.path {
+        return Err("workspace path changed after preview; recreate the diff before applying".into());
+    }
+    let current = match std::fs::symlink_metadata(&pending.path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => return Err("target became a symlink after preview; edit was not applied".into()),
+        Ok(metadata) if !metadata.is_file() => return Err("target is no longer a regular file".into()),
+        Ok(_) => Some(read_utf8_file_capped(&pending.path, MAX_WRITE)?),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("cannot re-check target before applying: {error}")),
     };
     if current != pending.expected_old {
         return Err("file changed after the preview was created; refresh the diff before applying".into());
@@ -821,13 +1021,20 @@ pub fn apply_pending_edit(id: &str, data_root: &Path) -> Result<String, String> 
     let backup_id = new_id("backup");
     let backup_dir = data_root.join("backups");
     std::fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
-    let existed = pending.path.exists();
+    let existed = current.is_some();
     let backup_path = if existed {
         let p = backup_dir.join(format!("{backup_id}.bak"));
         std::fs::copy(&pending.path, &p).map_err(|e| format!("cannot back up current file: {e}"))?;
         Some(p)
     } else { None };
-    let backup = FileBackup { path: pending.path.clone(), backup_path, existed, applied_content: pending.content.clone() };
+    let backup = FileBackup {
+        path: pending.path.clone(),
+        scope_root: Some(pending.scope_root.clone()),
+        relative_path: Some(pending.relative_path.clone()),
+        backup_path,
+        existed,
+        applied_content: pending.content.clone(),
+    };
     std::fs::write(backup_dir.join(format!("{backup_id}.json")), serde_json::to_vec(&backup).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     if let Err(e) = std::fs::write(&pending.path, pending.content.as_bytes()) {
@@ -849,17 +1056,40 @@ pub fn restore_file_backup(id: &str, data_root: &Path) -> Result<String, String>
     let file = dir.join(format!("{id}.json"));
     let meta: FileBackup = serde_json::from_slice(&std::fs::read(file).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    let current = match std::fs::read_to_string(&meta.path) {
-        Ok(text) => Some(text),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("cannot verify file before undo: {e}")),
+    let scope_root = meta.scope_root.as_ref().ok_or_else(|| "legacy backup has no workspace scope; refusing unsafe restore".to_string())?;
+    let relative_path = meta.relative_path.as_deref().filter(|path| !path.is_empty())
+        .ok_or_else(|| "backup has no relative workspace path; refusing unsafe restore".to_string())?;
+    let scoped = resolve_scoped_path(scope_root, relative_path, true)?;
+    if scoped.path != meta.path {
+        return Err("workspace path changed since this edit; refusing to restore outside its original scope".into());
+    }
+    let current = match std::fs::symlink_metadata(&meta.path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => return Err("target is now a symlink; refusing to overwrite it".into()),
+        Ok(metadata) if !metadata.is_file() => return Err("target is no longer a regular file".into()),
+        Ok(_) => Some(read_utf8_file_capped(&meta.path, MAX_WRITE)?),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("cannot verify file before undo: {error}")),
     };
+    if !meta.existed && current.is_none() {
+        return Ok("File was already absent.".into());
+    }
     if current.as_deref() != Some(meta.applied_content.as_str()) {
         return Err("file has changed since this edit was applied; refusing to overwrite newer changes".into());
     }
     if meta.existed {
         let backup = meta.backup_path.ok_or_else(|| "backup data missing".to_string())?;
+        let expected_backup = dir.join(format!("{id}.bak"));
+        if backup != expected_backup {
+            return Err("backup path does not match its protected backup slot".into());
+        }
+        let backup_meta = std::fs::symlink_metadata(&backup).map_err(|e| format!("cannot inspect backup: {e}"))?;
+        if backup_meta.file_type().is_symlink() || !backup_meta.is_file() || backup_meta.len() > MAX_WRITE as u64 {
+            return Err("backup is not a regular file or exceeds the safe restore limit".into());
+        }
         let bytes = std::fs::read(backup).map_err(|e| e.to_string())?;
+        if std::str::from_utf8(&bytes).is_err() {
+            return Err("backup contents are not valid UTF-8 text".into());
+        }
         if let Some(parent) = meta.path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
         std::fs::write(&meta.path, bytes).map_err(|e| e.to_string())?;
         Ok(format!("Restored previous contents of {}.", meta.path.display()))
@@ -1094,22 +1324,34 @@ mod tests {
         restore_file_backup(backup_id, &data).unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "old line\nkeep");
 
-        // New files are staged too, and undo removes them rather than leaving an empty file.
+        // Absolute paths are rejected; model-visible diffs must never read outside the workspace.
         let new_target = dir.join("abs.txt");
         let abs_s = new_target.to_string_lossy().replace('\\', "/");
         let out = execute_with_data_root(
             "write_file",
             &serde_json::json!({"path": abs_s, "content": "full"}),
             &mut mem,
-            Path::new(""),
+            &dir,
+            &data,
+        );
+        assert!(out.is_error);
+        assert!(!new_target.exists());
+
+        // Undo of an already-missing newly-created file is idempotent.
+        let out = execute_with_data_root(
+            "write_file",
+            &serde_json::json!({"path":"notes/new.txt", "content":"temporary"}),
+            &mut mem,
+            &dir,
             &data,
         );
         let edit_id = out.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
         let applied = apply_pending_edit(edit_id, &data).unwrap();
-        assert_eq!(std::fs::read_to_string(&new_target).unwrap(), "full");
         let backup_id = applied.split("[ATRIA_BACKUP:").nth(1).unwrap().split(']').next().unwrap();
-        restore_file_backup(backup_id, &data).unwrap();
-        assert!(!new_target.exists());
+        let created = dir.join("notes/new.txt");
+        assert!(created.exists());
+        std::fs::remove_file(&created).unwrap();
+        assert!(restore_file_backup(backup_id, &data).unwrap().contains("already absent"));
 
         // Explicit rejection deletes the proposal without touching the target.
         let out = execute_with_data_root(
@@ -1123,7 +1365,8 @@ mod tests {
         reject_pending_edit(edit_id, &data).unwrap();
         assert!(!dir.join("notes/rejected.txt").exists());
 
-        // ".." remains supported for relative paths; no writes happen before approval.
+        // Traversal is rejected even in the preview/approval mode.
+        let sibling = dir.parent().unwrap().join("atria-fa-sibling.txt");
         let out = execute_with_data_root(
             "write_file",
             &serde_json::json!({"path": "../atria-fa-sibling.txt", "content": "x"}),
@@ -1131,11 +1374,8 @@ mod tests {
             &dir,
             &data,
         );
-        let edit_id = out.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
-        apply_pending_edit(edit_id, &data).unwrap();
-        let sib = dir.parent().unwrap().join("atria-fa-sibling.txt");
-        assert!(sib.exists());
-        let _ = std::fs::remove_file(&sib);
+        assert!(out.is_error);
+        assert!(!sibling.exists());
 
         let out = execute("list_files", &serde_json::json!({}), &mut mem, Path::new(""));
         assert!(out.is_error);
@@ -1237,6 +1477,118 @@ mod tests {
             assert!(!external.join("escape.txt").exists());
         }
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn credential_detector_catches_common_assignments_without_flagging_placeholders() {
+        assert!(contains_credential_material("password: \"correct-horse\""));
+        assert!(contains_credential_material("Authorization: Bearer abcdefghijklmnopqrstuvwxyz"));
+        assert!(contains_credential_material("API_KEY=sk-proj-01234567890123456789"));
+        assert!(!contains_credential_material("api_key: your_api_key_here"));
+        assert!(!contains_credential_material("password = ${PASSWORD}"));
+    }
+
+    #[test]
+    fn file_tools_are_workspace_scoped_and_hide_sensitive_paths() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("atria-file-scope-{}-{nonce}", std::process::id()));
+        let workspace = root.join("workspace");
+        let data = root.join("app-data");
+        std::fs::create_dir_all(workspace.join(".git")).unwrap();
+        std::fs::write(workspace.join("notes.txt"), "safe note").unwrap();
+        std::fs::write(workspace.join(".env"), "API_KEY=must-not-leak").unwrap();
+        std::fs::write(workspace.join("credentials.json"), "password=must-not-leak").unwrap();
+        std::fs::write(workspace.join("cookies.sqlite"), "session=must-not-leak").unwrap();
+        std::fs::write(workspace.join(".git/config"), "[remote] token=must-not-leak").unwrap();
+        std::fs::write(workspace.join("config.txt"), "api_key = \"sk-proj-01234567890123456789\"\n").unwrap();
+        let outside = root.join("outside-secret.txt");
+        let outside_path = outside.to_string_lossy().into_owned();
+        std::fs::write(&outside, "outside secret").unwrap();
+        let mut mem = MemoryStore::in_memory();
+
+        let safe = execute_with_data_root(
+            "read_file", &serde_json::json!({"path":"notes.txt"}), &mut mem, &workspace, &data,
+        );
+        assert!(!safe.is_error);
+        assert_eq!(safe.output, "safe note");
+
+        for path in [
+            "../outside-secret.txt",
+            outside_path.as_str(),
+            "C:/Users/test/.ssh/id_ed25519",
+            ".env",
+            "credentials.json",
+            "cookies.sqlite",
+            ".git/config",
+            "config.txt",
+        ] {
+            let result = execute_with_data_root(
+                "read_file", &serde_json::json!({"path":path}), &mut mem, &workspace, &data,
+            );
+            assert!(result.is_error, "read should be blocked: {path}");
+        }
+
+        let listing = execute_with_data_root(
+            "list_files", &serde_json::json!({"path":"."}), &mut mem, &workspace, &data,
+        );
+        assert!(!listing.is_error);
+        assert!(listing.output.contains("notes.txt"));
+        for sensitive in [".env", "credentials.json", "cookies.sqlite", ".git"] {
+            assert!(!listing.output.contains(sensitive), "sensitive entry leaked in listing: {sensitive}");
+        }
+        let traversal = execute_with_data_root(
+            "list_files", &serde_json::json!({"path":"../"}), &mut mem, &workspace, &data,
+        );
+        assert!(traversal.is_error);
+
+        let overwrite_credential = execute_with_data_root(
+            "write_file", &serde_json::json!({"path":"config.txt", "content":"replacement"}),
+            &mut mem, &workspace, &data,
+        );
+        assert!(overwrite_credential.is_error);
+        assert!(std::fs::read_to_string(workspace.join("config.txt")).unwrap().contains("sk-proj-"));
+
+        let write_outside = execute_with_data_root(
+            "write_file", &serde_json::json!({"path":"../outside-secret.txt", "content":"changed"}),
+            &mut mem, &workspace, &data,
+        );
+        assert!(write_outside.is_error);
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "outside secret");
+
+        #[cfg(unix)] {
+            use std::os::unix::fs::symlink;
+            symlink(&outside, workspace.join("outside-link.txt")).unwrap();
+            let linked = execute_with_data_root(
+                "read_file", &serde_json::json!({"path":"outside-link.txt"}), &mut mem, &workspace, &data,
+            );
+            assert!(linked.is_error);
+            let listing = execute_with_data_root(
+                "list_files", &serde_json::json!({"path":"."}), &mut mem, &workspace, &data,
+            );
+            assert!(!listing.output.contains("outside-link.txt"));
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn file_read_truncation_never_splits_utf8() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("atria-file-utf8-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut text = "a".repeat(MAX_READ - 1);
+        text.push('é');
+        text.push('x');
+        std::fs::write(root.join("unicode.txt"), text).unwrap();
+        let mut mem = MemoryStore::in_memory();
+        let result = execute_with_data_root(
+            "read_file", &serde_json::json!({"path":"unicode.txt"}), &mut mem, &root, &root.join("data"),
+        );
+        assert!(!result.is_error, "{}", result.output);
+        let marker = result.output.find("\n… (truncated)").unwrap();
+        let returned_text = &result.output[..marker];
+        assert!(returned_text.is_char_boundary(returned_text.len()));
+        assert_eq!(returned_text.len(), MAX_READ - 1);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -1254,7 +1254,7 @@ function setFullAccessMode(enabled) {
     const scopeLabel = els.fullAccessProfileVal && els.fullAccessProfileVal.value === 'profile'
       ? 'پروفایل کاربر ویندوز (به‌جز مسیرهای محافظت‌شده)'
       : 'فقط ورک‌اسپیس';
-    const accepted = !window.confirm || window.confirm(`دسترسی خودکار گسترده پرخطر است: عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی و نوشتن فایل در ${scopeLabel} بدون تأیید جداگانه اجرا می‌شوند. محتوای فایل‌های خوانده‌شده ممکن است به مدل فعال ارسال شود. توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ شِل/مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`);
+    const accepted = !window.confirm || window.confirm(`دسترسی خودکار گسترده پرخطر است: عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی و نوشتن فایل در ${scopeLabel} بدون تأیید جداگانه اجرا می‌شوند. محتوای فایل‌های خوانده‌شده از ورک‌اسپیسِ مجاز ممکن است به مدل فعال ارسال شود. توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ شِل/مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`);
     if (!accepted) {
       if (els.fullAccessVal) els.fullAccessVal.checked = false;
       syncChips();

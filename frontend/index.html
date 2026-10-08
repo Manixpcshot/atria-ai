@@ -29,7 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
-        <span class="app-ver" id="appVer">v0.11.0</span>
+        <span class="app-ver" id="appVer">v0.12.0</span>
         <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
@@ -272,7 +272,7 @@
           <div class="set-row">
             <div class="set-row-text">
               <div class="set-label">دسترسی به فایل‌ها</div>
-              <div class="set-desc">خواندن/فهرست‌کردن فایل‌ها؛ در حالت پرسش، هر نوشتن پیش‌نمایش می‌شود و با تأیید اعمال می‌شود.</div>
+              <div class="set-desc">خواندن و فهرست‌کردن فقط داخل ورک‌اسپیس؛ مسیرهای حساس و خارج از محدوده مسدودند. در حالت پرسش، هر نوشتن پیش‌نمایش می‌شود و با تأیید اعمال می‌شود.</div>
             </div>
             <label class="switch-field sm"><input type="checkbox" id="fileToolsVal"><span class="switch"></span></label>
           </div>
@@ -311,7 +311,7 @@
               <option value="profile">پروفایل کاربر ویندوز — گسترده</option>
               <option value="workspace">فقط ورک‌اسپیس</option>
             </select>
-            <span class="fhint">پروفایل یعنی مسیرهای نسبی داخل پوشهٔ کاربر؛ AppData، داده‌های خصوصی آتریا، پوشه‌های حساس کلید/اعتبارنامه/پیکربندی (مثل .ssh و .config)، فایل‌های .env و مسیرهای symlink مسدودند. نوشتن پشتیبان قابل‌بازگردانی می‌سازد. مجوز توکن GitHub گسترش نمی‌یابد؛ شِل، دسترسی مدیر، حذف مستقیم، merge، secrets یا تنظیمات GitHub فعال نمی‌شوند (نوشتن محلی و به‌روزرسانی GitHub می‌توانند محتوای فایل را جایگزین کنند). محتوای فایل‌های خوانده‌شده ممکن است برای تحلیل به مدل فعال فرستاده شود.</span>
+            <span class="fhint">این محدوده فقط برای نوشتن خودکار است. خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود می‌ماند؛ مسیرهای مطلق، traversal، symlinkها، داده‌های مرورگر و مسیرهای کلید/اعتبارنامه مثل AppData، .ssh، .config و .env مسدودند. نوشتن پشتیبان قابل‌بازگردانی می‌سازد. مجوز توکن GitHub گسترش نمی‌یابد؛ شِل، دسترسی مدیر، حذف مستقیم، merge، secrets یا تنظیمات GitHub فعال نمی‌شوند (نوشتن محلی و به‌روزرسانی GitHub می‌توانند محتوای فایل را جایگزین کنند). محتوای فایل‌های خوانده‌شده از ورک‌اسپیسِ مجاز ممکن است برای تحلیل به مدل فعال فرستاده شود.</span>
           </div>
           <div class="set-sec-title">GitHub — دسترسی امن</div>
           <div class="field">
