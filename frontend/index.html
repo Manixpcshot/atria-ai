@@ -29,7 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
-        <span class="app-ver" id="appVer">v0.8.0</span>
+        <span class="app-ver" id="appVer">v0.9.0</span>
         <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
@@ -271,9 +271,42 @@
           <div class="set-row">
             <div class="set-row-text">
               <div class="set-label">دسترسی به فایل‌ها</div>
-              <div class="set-desc">خواندن/فهرست‌کردن فایل‌ها؛ هر نوشتن ابتدا diff می‌سازد و فقط با تأیید تو اعمال می‌شود، با backup و بازگردانی.</div>
+              <div class="set-desc">خواندن/فهرست‌کردن فایل‌ها؛ در حالت پرسش، هر نوشتن پیش‌نمایش می‌شود و با تأیید اعمال می‌شود.</div>
             </div>
             <label class="switch-field sm"><input type="checkbox" id="fileToolsVal"><span class="switch"></span></label>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">وب و مرورگر</div>
+              <div class="set-desc">جست‌وجو/خواندن برای همهٔ ارائه‌دهنده‌ها؛ بازکردن URL عمومی در مرورگر هم تابع سیاست تأیید بالاست. بدون اجرای اسکریپت یا دریافت فایل باینری.</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="webToolsVal"><span class="switch"></span></label>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">ابزارهای GitHub</div>
+              <div class="set-desc">خواندن مخزن/issue/PR و آماده‌سازی تغییر؛ هر نوشتن GitHub همیشه نیازمند تأیید جداگانه است.</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="githubToolsVal"><span class="switch"></span></label>
+          </div>
+          <div class="field">
+            <label class="flabel" for="autoModeVal">سیاست کنترل رایانه</label>
+            <select id="autoModeVal">
+              <option value="ask">پرسش پیش از اقدام — پیش‌فرض</option>
+              <option value="autonomous">خودکارِ محدود — فقط وب عمومی و ورک‌اسپیس</option>
+            </select>
+            <span class="fhint">حالت خودکار فقط می‌تواند پیوند عمومی را در مرورگر پیش‌فرض باز کند و فایل نسبیِ داخل ورک‌اسپیس را با پشتیبان تغییر دهد. GitHub همچنان برای هر تغییر تأیید می‌خواهد؛ شِل، دسترسی مدیر، حذف، و کنترل سراسری ماوس/صفحه‌کلید در این نسخه فعال نیست.</span>
+          </div>
+          <div class="set-sec-title">GitHub — دسترسی امن</div>
+          <div class="field">
+            <label class="flabel" for="githubTokenInput">توکن Fine-grained (فقط در همین برنامه وارد شود)</label>
+            <div class="key-row">
+              <input type="password" id="githubTokenInput" dir="ltr" spellcheck="false" autocomplete="off" placeholder="توکن تازهٔ GitHub؛ هرگز در چت نچسبان">
+              <button class="btn tiny primary" id="githubConnect" type="button">ذخیره و آزمون</button>
+              <button class="btn tiny danger" id="githubDisconnect" type="button">قطع اتصال</button>
+            </div>
+            <div class="storage-box" id="githubStatus" aria-live="polite">وضعیت اتصال در حال بررسی…</div>
+            <span class="fhint">توکن فقط در Windows Credential Manager ذخیره می‌شود و به مدل/گفتگو فرستاده نمی‌شود. محتوای خصوصی‌ای که ابزار GitHub می‌خواند، برای تحلیل به مدل فعال فرستاده می‌شود. حداقل دسترسی پیشنهادی: Metadata خواندنی؛ برای نوشتن، فقط Contents (read/write)، Issues (read/write) و Pull requests (read/write) در مخزن‌های لازم. هیچ توکنی را در این گفتگو نفرست.</span>
           </div>
           <div class="field">
             <label class="flabel">پوشهٔ کاری (Workspace)</label>
@@ -425,6 +458,13 @@
       file_apply_edit: function (a) { return invoke('file_apply_edit', a); },
       file_reject_edit: function (a) { return invoke('file_reject_edit', a); },
       file_restore_backup: function (a) { return invoke('file_restore_backup', a); },
+      github_connect: function (a) { return invoke('github_connect', a); },
+      github_status: function () { return invoke('github_status'); },
+      github_disconnect: function () { return invoke('github_disconnect'); },
+      github_apply_action: function (a) { return invoke('github_apply_action', a); },
+      github_reject_action: function (a) { return invoke('github_reject_action', a); },
+      open_pending_url: function (a) { return invoke('open_pending_url', a); },
+      reject_pending_url: function (a) { return invoke('reject_pending_url', a); },
       update_check: function () { return invoke('update_check'); },
       update_install: function () { return invoke('update_install'); },
       chats_load: function () { return invoke('chats_load'); },

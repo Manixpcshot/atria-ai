@@ -2,7 +2,7 @@
 
 use crate::client::{send, strip_thinking, is_output_limit_stop_reason, ClientConfig, CoreError, StreamEvent};
 use crate::memory::MemoryStore;
-use crate::tools::{execute_with_data_root, file_tool_catalog, tool_catalog, tool_label};
+use crate::tools::{auto_file_write, execute_async_tool, execute_with_data_root, file_tool_catalog, github_tool_catalog, tool_catalog, tool_label, web_tool_catalog};
 use crate::types::{Block, Message, Role};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,6 +13,10 @@ pub const MAX_ROUNDS: u32 = 16;
 /// Automatically request more output when the provider reports an output-token cap.
 const MAX_OUTPUT_CONTINUATIONS: u32 = 3;
 const CONTINUATION_PROMPT: &str = "Continue exactly from where the previous assistant message stopped at the output limit. Do not repeat already generated text. Finish the user's original request and preserve its format.";
+
+fn tool_is_enabled(tools: &[serde_json::Value], name: &str) -> bool {
+    tools.iter().any(|tool| tool.get("name").and_then(serde_json::Value::as_str) == Some(name))
+}
 
 /// Everything that happens while a turn is being generated.
 #[derive(Debug, Clone)]
@@ -105,12 +109,20 @@ pub async fn run_agent(
         if cfg.file_tools {
             tools.extend(file_tool_catalog());
         }
+        if cfg.web_tools {
+            tools.extend(web_tool_catalog());
+        }
+        if cfg.github_tools {
+            tools.extend(github_tool_catalog());
+        }
+        let mut request_cfg = cfg.clone();
+        request_cfg.tool_use_enabled = !tools.is_empty();
 
         let mut attempt = 0u32;
         let mut turn = loop {
             let mut filt = crate::toolfmt::LiveFilter::default();
             let send_res = send(
-                cfg,
+                &request_cfg,
                 &messages,
                 &tools,
                 |ev| match ev {
@@ -215,7 +227,25 @@ pub async fn run_agent(
                         label: tool_label(name).to_string(),
                         input: input.clone(),
                     });
-                    let res = execute_with_data_root(name, input, mem, root, data_root);
+                    let tool_enabled = tool_is_enabled(&tools, &name);
+                    let res = if !tool_enabled {
+                        crate::tools::ToolOutcome {
+                            output: format!("tool {name:?} is disabled in the current settings"),
+                            is_error: true,
+                        }
+                    } else if name == "write_file" && cfg.autonomous_mode {
+                        auto_file_write(input, root, data_root)
+                    } else if let Some(res) = execute_async_tool(
+                        name,
+                        input,
+                        &cfg.github_token,
+                        cfg.autonomous_mode,
+                        data_root,
+                    ).await {
+                        res
+                    } else {
+                        execute_with_data_root(name, input, mem, root, data_root)
+                    };
                     emit(AgentEvent::ToolEnd {
                         id: id.clone(),
                         name: name.clone(),
@@ -315,6 +345,16 @@ mod tests {
     fn agent_round_cap_is_extended_and_output_continuation_is_bounded() {
         assert_eq!(MAX_ROUNDS, 16);
         assert_eq!(MAX_OUTPUT_CONTINUATIONS, 3);
+    }
+
+    #[test]
+    fn disabled_tool_families_are_not_executable_from_stale_model_calls() {
+        let web = crate::tools::web_tool_catalog();
+        let github = crate::tools::github_tool_catalog();
+        assert!(tool_is_enabled(&web, "web_search"));
+        assert!(!tool_is_enabled(&web, "github_propose_change"));
+        assert!(!tool_is_enabled(&[], "web_search"));
+        assert!(tool_is_enabled(&github, "github_propose_change"));
     }
 
     #[test]

@@ -78,6 +78,7 @@ jobs:
             release-assets/update-manifest.json
             release-assets/update-manifest.sig
           tag_name: ${{ github.event.release.tag_name || github.ref_name }}
+          body_path: docs/releases/${{ github.event.release.tag_name || github.ref_name }}.md
           draft: ${{ github.event_name == 'workflow_dispatch' }}
           overwrite_files: true
           fail_on_unmatched_files: true

@@ -33,7 +33,7 @@ impl ApiKind {
 }
 
 /// Connection + generation settings.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClientConfig {
     pub api_key: String,
     pub base_url: String,
@@ -43,8 +43,10 @@ pub struct ClientConfig {
     pub system: String,
     /// Use SSE streaming (`"stream": true`).
     pub stream: bool,
-    /// Advertise built-in tools (agent mode).
+    /// Advertise built-in tools (calculator, time, memory).
     pub tools: bool,
+    /// Derived per request: true if any enabled tool family is available.
+    pub tool_use_enabled: bool,
     /// Which API dialect to use.
     pub kind: ApiKind,
     /// Local file-access tools (`list_files` / `read_file` / staged `write_file`).
@@ -53,6 +55,15 @@ pub struct ClientConfig {
     pub workspace: String,
     /// Private app data directory for staged edits/backups.
     pub app_data: String,
+    /// Provider-independent public web search/page tools.
+    pub web_tools: bool,
+    /// GitHub read and staged-write tools.
+    pub github_tools: bool,
+    /// GitHub token loaded natively from Windows Credential Manager (never sent to a model).
+    pub github_token: String,
+    /// Enables bounded autonomous actions: public browser launch and backed-up
+    /// file writes only inside the configured workspace. GitHub writes remain approval-gated.
+    pub autonomous_mode: bool,
     /// DeepSeek-web: the site's DeepThink toggle.
     pub web_thinking: bool,
     /// DeepSeek-web: the site's web-search toggle.
@@ -61,6 +72,33 @@ pub struct ClientConfig {
     pub web_session: String,
     /// DeepSeek-web: write-back channel for the session id actually used.
     pub web_session_out: Option<Arc<std::sync::Mutex<String>>>,
+}
+
+impl std::fmt::Debug for ClientConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientConfig")
+            .field("api_key", &"<redacted>")
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("max_tokens", &self.max_tokens)
+            .field("temperature", &self.temperature)
+            .field("system", &"<omitted>")
+            .field("stream", &self.stream)
+            .field("tools", &self.tools)
+            .field("tool_use_enabled", &self.tool_use_enabled)
+            .field("kind", &self.kind)
+            .field("file_tools", &self.file_tools)
+            .field("workspace", &self.workspace)
+            .field("app_data", &self.app_data)
+            .field("web_tools", &self.web_tools)
+            .field("github_tools", &self.github_tools)
+            .field("github_token", &"<redacted>")
+            .field("autonomous_mode", &self.autonomous_mode)
+            .field("web_thinking", &self.web_thinking)
+            .field("web_search", &self.web_search)
+            .field("web_session", &"<omitted>")
+            .finish()
+    }
 }
 
 impl Default for ClientConfig {
@@ -74,10 +112,15 @@ impl Default for ClientConfig {
             system: String::new(),
             stream: true,
             tools: true,
+            tool_use_enabled: false,
             kind: ApiKind::Anthropic,
             file_tools: false,
             workspace: String::new(),
             app_data: String::new(),
+            web_tools: false,
+            github_tools: false,
+            github_token: String::new(),
+            autonomous_mode: false,
             web_thinking: true,
             web_search: false,
             web_session: String::new(),
@@ -166,7 +209,7 @@ impl AtriaClient {
         if !cfg.system.trim().is_empty() {
             body["system"] = Value::String(cfg.system.clone());
         }
-        if cfg.tools && !tools.is_empty() {
+        if cfg.tool_use_enabled && !tools.is_empty() {
             body["tools"] = Value::Array(tools.to_vec());
             body["tool_choice"] = json!({ "type": "auto" });
         }
@@ -622,5 +665,16 @@ mod tests {
             crate::openai::chat_completions_url("https://generativelanguage.googleapis.com/v1beta/openai"),
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         );
+    }
+
+    #[test]
+    fn client_debug_never_prints_provider_or_github_secrets() {
+        let mut cfg = ClientConfig::default();
+        cfg.api_key = "model-api-secret".into();
+        cfg.github_token = "github-pat-secret".into();
+        let shown = format!("{cfg:?}");
+        assert!(!shown.contains("model-api-secret"));
+        assert!(!shown.contains("github-pat-secret"));
+        assert!(shown.contains("<redacted>"));
     }
 }

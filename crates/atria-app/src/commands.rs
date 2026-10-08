@@ -32,9 +32,18 @@ pub struct ChatPayload {
     /// "anthropic" (Messages API) or "openai" (Chat Completions).
     #[serde(default)]
     pub kind: String,
-    /// Enable local file tools; each write is staged for user review and approval.
+    /// Enable local file tools; writes are staged unless the bounded autonomous mode is selected.
     #[serde(default)]
     pub file_tools: bool,
+    /// Provider-independent public web tools.
+    #[serde(default = "default_true")]
+    pub web_tools: bool,
+    /// GitHub read and staged-write tools.
+    #[serde(default = "default_true")]
+    pub github_tools: bool,
+    /// Bounded autonomy: automatic public URL launches and backed-up workspace-only file writes.
+    #[serde(default)]
+    pub autonomous_mode: bool,
     /// Workspace root for the file tools.
     #[serde(default)]
     pub workspace: String,
@@ -87,10 +96,15 @@ pub async fn test_connection(base: String, key: String, model: String, kind: Str
         system: "Reply with a short connection-test acknowledgement only.".into(),
         stream: false,
         tools: false,
+        tool_use_enabled: false,
         kind: ApiKind::parse(&kind),
         file_tools: false,
         workspace: String::new(),
         app_data: String::new(),
+        web_tools: false,
+        github_tools: false,
+        github_token: String::new(),
+        autonomous_mode: false,
         web_thinking: false,
         web_search: false,
         web_session: String::new(),
@@ -127,6 +141,58 @@ pub fn file_reject_edit(id: String, state: State<'_, AppState>) -> Result<(), St
 pub fn file_restore_backup(id: String, state: State<'_, AppState>) -> Result<String, String> {
     let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
     atria_core::tools::restore_file_backup(&id, root)
+}
+
+/// Validate and store a fresh GitHub credential in the current Windows user's Credential Manager.
+#[tauri::command]
+pub async fn github_connect(token: String, state: State<'_, AppState>) -> Result<atria_core::github::GithubIdentity, String> {
+    let token = token.trim().to_string();
+    if token.is_empty() || token.len() > 2500 {
+        return Err("توکن GitHub معتبر نیست".into());
+    }
+    let identity = atria_core::github::identity(&token).await?;
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    crate::secrets::set(root, "github-api-token", &token)?;
+    Ok(identity)
+}
+
+#[tauri::command]
+pub async fn github_status(state: State<'_, AppState>) -> Result<Option<atria_core::github::GithubIdentity>, String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let Some(token) = crate::secrets::get(root, "github-api-token")? else { return Ok(None) };
+    atria_core::github::identity(&token).await.map(Some)
+}
+
+#[tauri::command]
+pub fn github_disconnect(state: State<'_, AppState>) -> Result<(), String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    crate::secrets::delete(root, "github-api-token")
+}
+
+/// Apply/reject staged GitHub changes. The token is reloaded inside Rust and never returned to JS.
+#[tauri::command]
+pub async fn github_apply_action(id: String, state: State<'_, AppState>) -> Result<String, String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let token = crate::secrets::get(root, "github-api-token")?.ok_or("توکن GitHub در تنظیمات ذخیره نشده است")?;
+    atria_core::github::apply_pending_action(&id, &token, root).await
+}
+
+#[tauri::command]
+pub fn github_reject_action(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    atria_core::github::reject_pending_action(&id, root)
+}
+
+#[tauri::command]
+pub fn open_pending_url(id: String, state: State<'_, AppState>) -> Result<String, String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    atria_core::web::open_pending_url(&id, root)
+}
+
+#[tauri::command]
+pub fn reject_pending_url(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    atria_core::web::reject_pending_url(&id, root)
 }
 
 /// Store provider credentials in the current Windows user’s Credential Manager.
@@ -312,6 +378,11 @@ pub async fn chat_send(
     let sess_out = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
 
     tauri::async_runtime::spawn(async move {
+        let app_data_path = mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        // The credential is loaded natively and is used only for api.github.com requests.
+        // It is never added to the conversation, tool arguments, or frontend payload.
+        let github_token = crate::secrets::get(app_data_path, "github-api-token")
+            .ok().flatten().unwrap_or_default();
         let cfg = ClientConfig {
             api_key: payload.api_key,
             base_url: payload.base_url,
@@ -321,10 +392,15 @@ pub async fn chat_send(
             system: payload.system,
             stream: payload.stream,
             tools: payload.tools_enabled,
+            tool_use_enabled: false, // derived from enabled catalogs in the agent loop
             kind: ApiKind::parse(&payload.kind),
             file_tools: payload.file_tools,
             workspace,
-            app_data: mem_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_string_lossy().to_string(),
+            app_data: app_data_path.to_string_lossy().to_string(),
+            web_tools: payload.web_tools,
+            github_tools: payload.github_tools,
+            github_token,
+            autonomous_mode: payload.autonomous_mode,
             web_thinking: payload.thinking,
             web_search: payload.web_search,
             web_session: payload.session_id,

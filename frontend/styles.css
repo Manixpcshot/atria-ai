@@ -1481,7 +1481,7 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
 .file-edit-actions .btn { padding: 5px 9px; font-size: 10px; }
 .file-edit-status { color: #a8d9bd; font-size: 10px; }
 .tool-card.needs-approval { border-color: rgba(255,196,108,.46); box-shadow: 0 0 0 1px rgba(255,196,108,.08); }
-.tool-card.file-applied { border-color: rgba(80,210,150,.32); }
+.tool-card.file-applied, .tool-card.github-applied { border-color: rgba(80,210,150,.32); }
 
 @media (max-width: 720px) {
   .project-modal { width: calc(100vw - 14px); max-height: calc(100vh - 18px); border-radius: 15px; }

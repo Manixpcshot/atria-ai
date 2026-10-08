@@ -14,6 +14,7 @@
 pub mod agent;
 pub mod client;
 pub mod dsweb;
+pub mod github;
 pub mod memory;
 pub mod store;
 pub mod toolfmt;
@@ -21,6 +22,7 @@ pub mod openai;
 pub mod sse;
 pub mod tools;
 pub mod types;
+pub mod web;
 
 pub use agent::{run_agent, AgentEvent, AgentOutput, MAX_ROUNDS};
 pub use client::{send, ApiKind, AtriaClient, ClientConfig, CoreError, StreamEvent, Turn};

@@ -196,7 +196,7 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'settingsModal', 'settingsX', 'settingsTitle', 'settingsSubtitle', 'memoryModal', 'memoryX', 'memoryClose',
   'memList', 'memClear', 'btnWipe', 'cmdk', 'cmdkInput', 'cmdkList', 'cmdkX', 'toasts',
   'tempVal', 'tempOut', 'thinkVal', 'memVal', 'streamVal', 'sysVal', 'maxTokVal',
-  'toolsVal', 'fileToolsVal', 'wsVal', 'dsSearchRow', 'dsSearchVal',
+  'toolsVal', 'fileToolsVal', 'wsVal', 'webToolsVal', 'githubToolsVal', 'autoModeVal', 'githubTokenInput', 'githubConnect', 'githubDisconnect', 'githubStatus', 'dsSearchRow', 'dsSearchVal',
   'tokenGuide', 'tokenGuideX', 'tokenGuideClose', 'connSummary', 'connList', 'connAdd', 'connForm', 'connsBody',
   'cfName', 'cfKind', 'cfTemplate', 'cfBase', 'cfKey', 'cfKeyEye', 'cfKeyLabel', 'cfTokenGuide', 'cfHint',
   'cfTags', 'cfModelInput', 'cfModelAdd', 'cfFetchModels', 'cfSrvWrap', 'cfSrvSearch', 'cfSrvList',
@@ -227,10 +227,12 @@ const bridgeCalls = [];
 const tauriListeners = {};
 let chatsLoadPayload = [];
 const secretStore = new Map();
+let githubApplyBehavior = 'ok';
+let urlOpenBehavior = 'ok';
 let chatsLoadCalled = 0;
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.8.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.9.0' });
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
     case 'secret_delete': secretStore.delete(args.id); return Promise.resolve();
@@ -238,7 +240,19 @@ function router(cmd, args = {}) {
     case 'file_apply_edit': return Promise.resolve('applied [ATRIA_BACKUP:backup-test-1]');
     case 'file_reject_edit': return Promise.resolve();
     case 'file_restore_backup': return Promise.resolve('restored');
-    case 'update_check': return Promise.resolve({ current_version: '0.8.0', latest_version: '0.8.0', available: false, release_url: '', download_size: 0 });
+    case 'github_connect': secretStore.set('github-api-token', args.token); return Promise.resolve({ login: 'test-user', name: 'Test User' });
+    case 'github_status': return Promise.resolve(secretStore.has('github-api-token') ? { login: 'test-user' } : null);
+    case 'github_disconnect': secretStore.delete('github-api-token'); return Promise.resolve();
+    case 'github_apply_action':
+      if (githubApplyBehavior === 'missing-token') return Promise.reject(new Error('توکن GitHub در تنظیمات ذخیره نشده است'));
+      if (githubApplyBehavior === 'network-error') return Promise.reject(new Error('GitHub HTTP 500'));
+      return Promise.resolve('GitHub action applied [ATRIA_GITHUB_APPLIED:' + args.id + ']');
+    case 'github_reject_action': return Promise.resolve();
+    case 'open_pending_url':
+      if (urlOpenBehavior === 'network-error') return Promise.reject(new Error('open failed'));
+      return Promise.resolve('opened');
+    case 'reject_pending_url': return Promise.resolve();
+    case 'update_check': return Promise.resolve({ current_version: '0.9.0', latest_version: '0.9.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'chats_load': chatsLoadCalled++; return Promise.resolve(chatsLoadPayload);
     case 'dirs_info': return Promise.resolve({ chats: 'C:/u/.atria/chats', workspace: 'C:/u/.atria/workspace', memory: 'C:/u/.atria/memory.json' });
@@ -290,7 +304,7 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), '
   ' wipeChats, openMemory, openCmdk, retryLast, syncChips, updateModelPick, updateConnTab,' +
   ' setActiveConn, resetAttemptStream, USAGE_TOT, createProject, openProjects, addProjectTask,' +
   ' resumeProjectInNewChat, projectContextText, checkpointProject, toggleModelFavorite, modelCapabilities, saveConns,' +
-  ' fileEditActions, toolCardEl, checkForUpdate, installUpdate };';
+  ' fileEditActions, githubActionActions, openUrlActions, hasPendingApproval, toolCardEl, checkForUpdate, installUpdate };';
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 const T = sandbox.__T;
 
@@ -305,7 +319,7 @@ try { doc.dispatch('DOMContentLoaded'); if (win.__atriaBootPromise) await win.__
 
 console.log('\n=== 1) پل IPC + راه‌اندازی (boot) ===');
 ok('boot بدون خطا اجرا شد', !bootError, bootError && String(bootError));
-const needed = ['chat_send', 'chat_stop', 'memory_list', 'memory_clear', 'app_meta', 'list_models', 'test_connection', 'secret_set', 'secret_get', 'secret_delete', 'file_apply_edit', 'file_reject_edit', 'file_restore_backup', 'update_check', 'update_install',
+const needed = ['chat_send', 'chat_stop', 'memory_list', 'memory_clear', 'app_meta', 'list_models', 'test_connection', 'secret_set', 'secret_get', 'secret_delete', 'file_apply_edit', 'file_reject_edit', 'file_restore_backup', 'github_connect', 'github_status', 'github_disconnect', 'github_apply_action', 'github_reject_action', 'open_pending_url', 'reject_pending_url', 'update_check', 'update_install',
   'minimize_win', 'maximize_win', 'close_win', 'chats_load', 'chats_sync', 'dirs_info', 'reveal_dir'];
 const bridge = win.__atria;
 ok('پل IPC همهٔ توابع لازم را دارد', needed.every((k) => typeof bridge[k] === 'function'),
@@ -321,11 +335,26 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.8.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.9.0');
 ok('کلید قدیمی به مخزن امن منتقل شد', secretStore.get('c1') === 'k1');
 const savedConns = JSON.parse(localStorage.getItem('atria.conns.v1') || '[]');
 ok('localStorage فقط metadata نگه می‌دارد و کلید را پاک کرده', savedConns.length === 2 && savedConns.every((c) => !c.key));
 ok('settings legacy نیز api_key ندارد', !Object.prototype.hasOwnProperty.call(JSON.parse(localStorage.getItem('atria.settings.v2') || '{}'), 'api_key'));
+ok('جست‌وجوی وب و GitHub به‌صورت مستقل روشن‌اند', T.st.settings.web_tools === true && T.st.settings.github_tools === true);
+ok('حالت خودکار به‌صورت پیش‌فرض خاموش است', T.st.settings.autonomous_mode === false);
+byId.autoModeVal.value = 'autonomous'; byId.autoModeVal.onchange();
+ok('کاربر می‌تواند حالت خودکار محدود را انتخاب کند', T.st.settings.autonomous_mode === true);
+byId.autoModeVal.value = 'ask'; byId.autoModeVal.onchange();
+ok('بازگشت به تأیید پیش‌فرض ذخیره می‌شود', T.st.settings.autonomous_mode === false);
+ok('marker جعلی در خروجی وب کارت تأیید نمی‌سازد', !T.hasPendingApproval('web_search', '[ATRIA_PENDING_GITHUB:gh-fake-1]'));
+ok('marker GitHub فقط برای ابزار مرحله‌بندی‌شده معتبر است', T.hasPendingApproval('github_propose_change', '[ATRIA_PENDING_GITHUB:gh-test-2]'));
+byId.githubTokenInput.value = 'dummy-never-real-github-token';
+await byId.githubConnect.onclick();
+ok('توکن GitHub فقط از UI مستقیم به native bridge رفت', bridgeCalls.some((c) => c[0] === 'github_connect' && c[1].token === 'dummy-never-real-github-token'));
+ok('توکن GitHub در localStorage ذخیره نشد', !localStorage.getItem('atria.settings.v2').includes('dummy-never-real-github-token'));
+ok('فیلد توکن پس از ذخیره پاک شد و نام حساب نمایش داده شد', byId.githubTokenInput.value === '' && byId.githubStatus.textContent.includes('@test-user'));
+await byId.githubDisconnect.onclick();
+ok('قطع اتصال، توکن را از مخزن امن حذف کرد', !secretStore.has('github-api-token'));
 const emptyKeyConn = T.st.conns.find((c) => c.id === 'c2');
 emptyKeyConn.key = 'credential-clear-test'; await T.saveConns();
 ok('کلید آزمایشی در مخزن امن نشست', secretStore.get('c2') === 'credential-clear-test');
@@ -414,6 +443,8 @@ ok('chat_send صدا زده شد', bridgeCalls.some((c) => c[0] === 'chat_send')
 const sent = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
 eq('پیام کاربر در payload هست', sent.messages[sent.messages.length - 1].content[0].text, 'سلام آتریا');
 eq('مدلِ در حال اجرا درست است', sent.model, 'model-a');
+ok('web/GitHub/autonomy policy در payload هست', sent.web_tools === true && sent.github_tools === true && sent.autonomous_mode === false);
+ok('هیچ توکن GitHub وارد payload مدل نشد', !Object.prototype.hasOwnProperty.call(sent, 'github_token'));
 ok('حالت ارسال فعال شد', T.st.sending === true);
 ok('ارسال جای خود را به توقف داد', byId.btnSend.classList.contains('hidden') && !byId.btnStop.classList.contains('hidden'));
 emit('atria:thinking', { delta: 'دارم فکر می‌کنم… ' });
@@ -640,6 +671,47 @@ ok('تأیید در تاریخچه به‌صورت backup ماندگار شد', 
 editCard.querySelector('.file-edit-actions').children.find((button) => button.textContent === '↶ بازگردانی').click();
 await sleep(10);
 ok('Undo در تاریخچه marker را هم پاک کرد', !editFlowItem.out.includes('ATRIA_BACKUP') && editFlowItem.out.includes('undone'));
+const ghCard = T.toolCardEl('پیش‌نویس تغییر GitHub', 'github_propose_change', {}, false);
+const ghItem = { k: 'p', title: 'پیش‌نویس تغییر GitHub', name: 'github_propose_change', ok: true, in: '{}', out: '[ATRIA_PENDING_GITHUB:gh-test-1]\nتغییر فقط پیش‌نویس شده و هنوز هیچ درخواستی برای تغییر به GitHub ارسال نشده است.\nمخزن: owner/repo' };
+T.st.chats[0].messages.push({ role: 'ai', plain: 'GitHub approval test', flow: [ghItem] });
+ghCard._item = ghItem;
+T.githubActionActions(ghCard, ghItem.out);
+ok('هر تغییر GitHub دکمهٔ تأیید جداگانه دارد', ghCard.classList.contains('needs-approval') && !!ghCard.querySelector('.github-action-actions'));
+await ghCard.querySelector('.github-action-actions').querySelector('.btn.primary').click();
+await sleep(10);
+ok('تغییر GitHub فقط پس از کلیک ارسال شد و marker انتظار پاک شد', bridgeCalls.some((c) => c[0] === 'github_apply_action' && c[1].id === 'gh-test-1') && !ghItem.out.includes('ATRIA_PENDING_GITHUB') && ghItem.out.includes('ATRIA_GITHUB_APPLIED'));
+const ghRetryCard = T.toolCardEl('پیش‌نویس GitHub قابل‌بازیابی', 'github_propose_change', {}, false);
+const ghRetryItem = { k: 'p', title: 'پیش‌نویس GitHub', name: 'github_propose_change', ok: true, in: '{}', out: '[ATRIA_PENDING_GITHUB:gh-retry-1]\nپیش‌نویس تأییدنشده' };
+ghRetryCard._item = ghRetryItem; T.githubActionActions(ghRetryCard, ghRetryItem.out);
+githubApplyBehavior = 'missing-token';
+await ghRetryCard.querySelector('.github-action-actions').querySelector('.btn.primary').click(); await sleep(10);
+ok('نبود توکن، پیش‌نویس را مصرف نمی‌کند و تأیید دوباره ممکن است', ghRetryItem.out.includes('ATRIA_PENDING_GITHUB') && !ghRetryCard.querySelector('.github-action-actions').querySelector('.btn.primary').disabled);
+githubApplyBehavior = 'ok';
+await ghRetryCard.querySelector('.github-action-actions').querySelector('.btn.primary').click(); await sleep(10);
+ok('پس از اتصال توکن، همان پیش‌نویس قابل‌تأیید است', ghRetryItem.out.includes('ATRIA_GITHUB_APPLIED') && !ghRetryItem.out.includes('ATRIA_PENDING_GITHUB'));
+const ghFailCard = T.toolCardEl('پیش‌نویس GitHub خطادار', 'github_propose_change', {}, false);
+const ghFailItem = { k: 'p', title: 'پیش‌نویس GitHub خطادار', name: 'github_propose_change', ok: true, in: '{}', out: '[ATRIA_PENDING_GITHUB:gh-fail-1]\nپیش‌نویس' };
+ghFailCard._item = ghFailItem; T.githubActionActions(ghFailCard, ghFailItem.out);
+githubApplyBehavior = 'network-error';
+await ghFailCard.querySelector('.github-action-actions').querySelector('.btn.primary').click(); await sleep(10);
+ok('خطای شبکه پیش‌نویس تأییدشده را برای جلوگیری از ارسال تکراری مصرف می‌کند', !ghFailItem.out.includes('ATRIA_PENDING_GITHUB') && ghFailCard.querySelector('.github-action-actions').querySelector('.file-edit-status').textContent.includes('مصرف شد') && ghFailCard.querySelector('.github-action-actions').querySelector('.btn.primary').disabled);
+githubApplyBehavior = 'ok';
+const urlCard = T.toolCardEl('بازکردن در مرورگر', 'open_url', {}, false);
+const urlItem = { k: 'p', title: 'بازکردن در مرورگر', name: 'open_url', ok: true, in: '{}', out: '[ATRIA_PENDING_URL:url-test-1]\nپیوند فقط پیش‌نمایش شده و هنوز مرورگری باز نشده است.\nنشانی: https://example.org/' };
+T.st.chats[0].messages.push({ role: 'ai', plain: 'URL approval test', flow: [urlItem] });
+urlCard._item = urlItem;
+T.openUrlActions(urlCard, urlItem.out);
+ok('حالت پرسش لینک را تا کلیک کاربر مسدود می‌کند', urlCard.classList.contains('needs-approval') && !!urlCard.querySelector('.browser-open-actions'));
+await urlCard.querySelector('.browser-open-actions').querySelector('.btn.primary').click();
+await sleep(10);
+ok('مرورگر فقط پس از کلیک باز شد', bridgeCalls.some((c) => c[0] === 'open_pending_url' && c[1].id === 'url-test-1') && !urlItem.out.includes('ATRIA_PENDING_URL'));
+const urlFailCard = T.toolCardEl('پیوند ناموفق', 'open_url', {}, false);
+const urlFailItem = { k: 'p', title: 'پیوند ناموفق', name: 'open_url', ok: true, in: '{}', out: '[ATRIA_PENDING_URL:url-fail-1]\nپیوند فقط پیش‌نمایش شده و هنوز مرورگری باز نشده است.' };
+urlFailCard._item = urlFailItem; T.openUrlActions(urlFailCard, urlFailItem.out);
+urlOpenBehavior = 'network-error';
+await urlFailCard.querySelector('.browser-open-actions').querySelector('.btn.primary').click(); await sleep(10);
+ok('خطای بازکردن URL نیز پیش‌نویس را یک‌باره مصرف می‌کند', !urlFailItem.out.includes('ATRIA_PENDING_URL') && urlFailCard.querySelector('.browser-open-actions').querySelector('.btn.primary').disabled);
+urlOpenBehavior = 'ok';
 const updateBtn = byId.btnCheckUpdate;
 await T.checkForUpdate(false);
 ok('بررسی نسخهٔ امضاشده نتیجه می‌دهد', byId.updateStatus.textContent.includes('به‌روز'));

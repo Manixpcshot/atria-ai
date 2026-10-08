@@ -64,6 +64,9 @@ const DEFAULTS = {
   context_tokens: 32768,
   tools_enabled: true,
   file_tools: true,
+  web_tools: true,
+  github_tools: true,
+  autonomous_mode: false,
   workspace: '',
   ds_search: false,
 };
@@ -105,6 +108,9 @@ function loadSettings() {
   // سقف سرویس 65536 — مقدارهای خراب قدیمی را خودکار درمان کن
   s.max_tokens = Math.min(65536, Math.max(256, Number(s.max_tokens) || 8192));
   s.context_tokens = Math.min(200000, Math.max(4096, Number(s.context_tokens) || 32768));
+  s.web_tools = s.web_tools !== false;
+  s.github_tools = s.github_tools !== false;
+  s.autonomous_mode = s.autonomous_mode === true;
   return s;
 }
 function saveSettings() {
@@ -1021,6 +1027,8 @@ function cacheEls() {
     thinkVal: $('#thinkVal'), memVal: $('#memVal'), streamVal: $('#streamVal'),
     sysVal: $('#sysVal'), maxTokVal: $('#maxTokVal'),
     toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'),
+    webToolsVal: $('#webToolsVal'), githubToolsVal: $('#githubToolsVal'), autoModeVal: $('#autoModeVal'),
+    githubTokenInput: $('#githubTokenInput'), githubConnect: $('#githubConnect'), githubDisconnect: $('#githubDisconnect'), githubStatus: $('#githubStatus'),
     dsSearchRow: $('#dsSearchRow'), dsSearchVal: $('#dsSearchVal'),
     tokenGuide: $('#tokenGuide'), tokenGuideX: $('#tokenGuideX'), tokenGuideClose: $('#tokenGuideClose'),
     connSummary: $('#connSummary'),
@@ -1080,6 +1088,62 @@ function scrollBottom(instant) {
 
 /* ---------------- settings ---------------- */
 
+function paintGithubStatus(identity, error) {
+  if (!els.githubStatus) return;
+  if (error) {
+    els.githubStatus.textContent = 'وضعیت GitHub: ' + error;
+    if (els.githubDisconnect) els.githubDisconnect.disabled = true;
+    return;
+  }
+  if (identity && identity.login) {
+    els.githubStatus.textContent = 'متصل با حساب @' + identity.login + ' — کلید در Credential Manager است.';
+    if (els.githubDisconnect) els.githubDisconnect.disabled = false;
+  } else {
+    els.githubStatus.textContent = 'متصل نیست؛ خواندن مخزن‌های عمومی بدون توکن همچنان ممکن است.';
+    if (els.githubDisconnect) els.githubDisconnect.disabled = true;
+  }
+}
+
+async function refreshGithubStatus() {
+  if (!els.githubStatus || !window.__atria || !window.__atria.github_status) return;
+  els.githubStatus.textContent = 'در حال بررسی Credential Manager…';
+  try { paintGithubStatus(await window.__atria.github_status()); }
+  catch (e) { paintGithubStatus(null, String(e && e.message ? e.message : e)); }
+}
+
+async function connectGithub() {
+  if (!els.githubTokenInput || !window.__atria || !window.__atria.github_connect) return;
+  let token = String(els.githubTokenInput.value || '').trim();
+  if (!token) { toast('توکن را در همین بخش تنظیمات وارد کن؛ در چت نفرست.', 'warn'); return; }
+  els.githubConnect.disabled = true;
+  els.githubStatus.textContent = 'در حال آزمون توکن و ذخیرهٔ امن…';
+  try {
+    const identity = await window.__atria.github_connect({ token });
+    els.githubTokenInput.value = '';
+    paintGithubStatus(identity);
+    toast('اتصال GitHub با موفقیت ذخیره شد.', 'ok');
+  } catch (e) {
+    const message = String(e && e.message ? e.message : e).split(token).join('[پنهان]');
+    els.githubTokenInput.value = '';
+    paintGithubStatus(null, message);
+    toast('ذخیرهٔ GitHub ناموفق بود؛ جزئیات در تنظیمات است.', 'err');
+  } finally {
+    token = '';
+    els.githubConnect.disabled = false;
+  }
+}
+
+async function disconnectGithub() {
+  if (!window.__atria || !window.__atria.github_disconnect) return;
+  if (window.confirm && !window.confirm('توکن GitHub از Windows Credential Manager حذف شود؟')) return;
+  try {
+    await window.__atria.github_disconnect();
+    if (els.githubTokenInput) els.githubTokenInput.value = '';
+    paintGithubStatus(null);
+    toast('اتصال GitHub قطع شد.', 'ok');
+  } catch (e) { paintGithubStatus(null, String(e && e.message ? e.message : e)); }
+}
+
 function bindSettings() {
   // یک مسیر واحد برای همگام‌سازی تب، محتوای صفحه و عنوان.
   document.querySelectorAll('.stab').forEach((b) => {
@@ -1127,6 +1191,25 @@ function bindSettings() {
   };
   els.toolsVal.onchange = () => { st.settings.tools_enabled = els.toolsVal.checked; saveSettings(); syncChips(); };
   els.fileToolsVal.onchange = () => { st.settings.file_tools = els.fileToolsVal.checked; saveSettings(); syncChips(); };
+  if (els.webToolsVal) {
+    els.webToolsVal.checked = st.settings.web_tools !== false;
+    els.webToolsVal.onchange = () => { st.settings.web_tools = els.webToolsVal.checked; saveSettings(); };
+  }
+  if (els.githubToolsVal) {
+    els.githubToolsVal.checked = st.settings.github_tools !== false;
+    els.githubToolsVal.onchange = () => { st.settings.github_tools = els.githubToolsVal.checked; saveSettings(); };
+  }
+  if (els.autoModeVal) {
+    els.autoModeVal.value = st.settings.autonomous_mode ? 'autonomous' : 'ask';
+    els.autoModeVal.onchange = () => {
+      st.settings.autonomous_mode = els.autoModeVal.value === 'autonomous';
+      saveSettings();
+      toast(st.settings.autonomous_mode ? 'حالت خودکار محدود فعال شد؛ GitHub همچنان تأیید می‌خواهد.' : 'حالت پرسش پیش از اقدام فعال شد.', 'ok');
+    };
+  }
+  if (els.githubConnect) els.githubConnect.onclick = connectGithub;
+  if (els.githubDisconnect) els.githubDisconnect.onclick = disconnectGithub;
+  refreshGithubStatus();
   els.dsSearchVal.checked = !!st.settings.ds_search;
   els.dsSearchVal.onchange = () => { st.settings.ds_search = els.dsSearchVal.checked; saveSettings(); };
   // ورک‌اسپیس: حین تایپ trim نشود (مکان‌نما نپرد) — فقط در blur
@@ -1229,7 +1312,14 @@ function avatarEl(role) {
 }
 
 function clearMarkerOutput(value) {
-  return String(value || '').replace(/\[ATRIA_(?:PENDING_EDIT|BACKUP):[A-Za-z0-9_-]+\]/g, '').trim();
+  return String(value || '').replace(/\[ATRIA_(?:PENDING_EDIT|BACKUP|PENDING_GITHUB|GITHUB_APPLIED|PENDING_URL):[A-Za-z0-9_-]+\]/g, '').trim();
+}
+function hasPendingApproval(name, output) {
+  const value = String(output || '');
+  if (name === 'write_file') return /\[ATRIA_PENDING_EDIT:[A-Za-z0-9_-]+\]/.test(value);
+  if (name === 'github_propose_change') return /\[ATRIA_PENDING_GITHUB:[A-Za-z0-9_-]+\]/.test(value);
+  if (name === 'open_url') return /\[ATRIA_PENDING_URL:[A-Za-z0-9_-]+\]/.test(value);
+  return false;
 }
 function persistFileEditItem(item) {
   if (!item) return;
@@ -1315,6 +1405,127 @@ function fileEditActions(card, rawOutput) {
   }
 }
 
+function persistToolOutput(card, output) {
+  if (card && card._item) {
+    card._item.out = String(output || '');
+    persistFileEditItem(card._item);
+  }
+  const out = card && card.querySelector('.tool-out');
+  if (out) out.textContent = clearMarkerOutput(output);
+}
+
+function githubActionActions(card, rawOutput) {
+  const pending = /^\[ATRIA_PENDING_GITHUB:([A-Za-z0-9_-]+)\]/.exec(String(rawOutput || ''));
+  if (!pending || !card) return;
+  const io = card.querySelector('.tool-io');
+  if (!io) return;
+  card.classList.add('needs-approval');
+  let actions = card.querySelector('.github-action-actions');
+  if (!actions) { actions = document.createElement('div'); actions.className = 'file-edit-actions github-action-actions'; io.appendChild(actions); }
+  actions.innerHTML = '';
+  const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'btn tiny primary'; approve.textContent = '✓ تأیید و ارسال به GitHub';
+  const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'btn tiny danger'; reject.textContent = 'رد تغییر';
+  const status = document.createElement('span'); status.className = 'file-edit-status'; status.textContent = 'هنوز به GitHub ارسال نشده؛ ورودی و پیش‌نمایش را بررسی کن.';
+  approve.onclick = async () => {
+    approve.disabled = true; reject.disabled = true; status.textContent = 'در حال ارسال اقدام تأییدشده…';
+    try {
+      const result = await window.__atria.github_apply_action({ id: pending[1] });
+      card.classList.remove('needs-approval'); card.classList.add('github-applied');
+      card.querySelector('.tool-state').textContent = '✓ تأیید و ارسال شد';
+      status.textContent = '✓ تغییر با تأیید شما به GitHub ارسال شد.';
+      let next = String(card._item && card._item.out || rawOutput)
+        .replace(/تغییر فقط پیش‌نویس شده و هنوز هیچ درخواستی برای تغییر به GitHub ارسال نشده است\./, 'تغییر GitHub پس از تأیید شما ارسال شد.')
+        .replace(/\[ATRIA_PENDING_GITHUB:[A-Za-z0-9_-]+\]/, '');
+      const applied = /\[ATRIA_GITHUB_APPLIED:[A-Za-z0-9_-]+\]/.exec(String(result || ''));
+      if (applied) next += String.fromCharCode(10) + applied[0];
+      persistToolOutput(card, next);
+    } catch (e) {
+      const message = String(e && e.message || e);
+      if (message.includes('توکن GitHub در تنظیمات ذخیره نشده')) {
+        status.textContent = 'هنوز چیزی ارسال نشده؛ ابتدا توکن را در تنظیمات وصل کن، سپس دوباره تأیید کن.';
+        approve.disabled = false; reject.disabled = false;
+      } else {
+        try { await window.__atria.github_reject_action({ id: pending[1] }); } catch {}
+        card.classList.remove('needs-approval');
+        card.querySelector('.tool-state').textContent = '⚠ نتیجه نامشخص';
+        status.textContent = 'اقدام ناموفق یا نامشخص بود؛ پیش‌نویس برای جلوگیری از ارسال تکراری مصرف شد. وضعیت مخزن را بررسی کن و در صورت نیاز پیش‌نویس تازه بساز. ' + message;
+        const next = String(card._item && card._item.out || rawOutput)
+          .replace(/\[ATRIA_PENDING_GITHUB:[A-Za-z0-9_-]+\]/, '')
+          .replace(/تغییر فقط پیش‌نویس شده و هنوز هیچ درخواستی برای تغییر به GitHub ارسال نشده است\./, 'اقدام پس از کلیک تأیید مصرف شد؛ نتیجه را در مخزن بررسی کن.');
+        persistToolOutput(card, next);
+        approve.disabled = true; reject.disabled = true;
+      }
+    }
+  };
+  reject.onclick = async () => {
+    approve.disabled = true; reject.disabled = true; status.textContent = 'در حال لغو پیش‌نویس…';
+    try {
+      await window.__atria.github_reject_action({ id: pending[1] });
+      card.classList.remove('needs-approval');
+      card.querySelector('.tool-state').textContent = '✕ رد شد';
+      status.textContent = 'تغییر رد شد؛ هیچ درخواستی به GitHub ارسال نشد.';
+      const next = String(card._item && card._item.out || rawOutput)
+        .replace(/تغییر فقط پیش‌نویس شده و هنوز هیچ درخواستی برای تغییر به GitHub ارسال نشده است\./, 'پیش‌نویس توسط کاربر رد شد؛ هیچ تغییری اعمال نشد.')
+        .replace(/\[ATRIA_PENDING_GITHUB:[A-Za-z0-9_-]+\]/, '');
+      persistToolOutput(card, next);
+    } catch (e) {
+      status.textContent = 'لغو پیش‌نویس ناموفق بود: ' + String(e && e.message || e);
+      approve.disabled = false; reject.disabled = false;
+    }
+  };
+  actions.appendChild(approve); actions.appendChild(reject); actions.appendChild(status);
+}
+
+function openUrlActions(card, rawOutput) {
+  const pending = /^\[ATRIA_PENDING_URL:([A-Za-z0-9_-]+)\]/.exec(String(rawOutput || ''));
+  if (!pending || !card) return;
+  const io = card.querySelector('.tool-io');
+  if (!io) return;
+  card.classList.add('needs-approval');
+  let actions = card.querySelector('.browser-open-actions');
+  if (!actions) { actions = document.createElement('div'); actions.className = 'file-edit-actions browser-open-actions'; io.appendChild(actions); }
+  actions.innerHTML = '';
+  const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'btn tiny primary'; approve.textContent = '✓ بازکردن در مرورگر';
+  const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'btn tiny danger'; reject.textContent = 'لغو';
+  const status = document.createElement('span'); status.className = 'file-edit-status'; status.textContent = 'مرورگر هنوز باز نشده است.';
+  approve.onclick = async () => {
+    approve.disabled = true; reject.disabled = true; status.textContent = 'در حال بازکردن…';
+    try {
+      const result = await window.__atria.open_pending_url({ id: pending[1] });
+      card.classList.remove('needs-approval');
+      card.querySelector('.tool-state').textContent = '✓ باز شد';
+      status.textContent = '✓ ' + String(result || 'مرورگر باز شد');
+      const next = String(card._item && card._item.out || rawOutput)
+        .replace(/پیوند فقط پیش‌نمایش شده و هنوز مرورگری باز نشده است\./, 'پیوند پس از تأیید در مرورگر باز شد.')
+        .replace(/\[ATRIA_PENDING_URL:[A-Za-z0-9_-]+\]/, '');
+      persistToolOutput(card, next);
+    } catch (e) {
+      card.classList.remove('needs-approval');
+      card.querySelector('.tool-state').textContent = '✕ باز نشد';
+      status.textContent = 'بازکردن ناموفق؛ برای جلوگیری از اجرای تکراری این پیش‌نمایش مصرف شد. در صورت نیاز، پیوند را دوباره درخواست کن. ' + String(e && e.message || e);
+      const next = String(card._item && card._item.out || rawOutput)
+        .replace(/\[ATRIA_PENDING_URL:[A-Za-z0-9_-]+\]/, '')
+        .replace(/پیوند فقط پیش‌نمایش شده و هنوز مرورگری باز نشده است\./, 'بازکردن پیوند انجام نشد یا نتیجه نامشخص است.');
+      persistToolOutput(card, next);
+      approve.disabled = true; reject.disabled = true;
+    }
+  };
+  reject.onclick = async () => {
+    approve.disabled = true; reject.disabled = true;
+    try {
+      await window.__atria.reject_pending_url({ id: pending[1] });
+      card.classList.remove('needs-approval');
+      card.querySelector('.tool-state').textContent = '✕ لغو شد';
+      status.textContent = 'پیوند لغو شد؛ مرورگری باز نشد.';
+      const next = String(card._item && card._item.out || rawOutput)
+        .replace(/پیوند فقط پیش‌نمایش شده و هنوز مرورگری باز نشده است\./, 'بازکردن پیوند توسط کاربر لغو شد.')
+        .replace(/\[ATRIA_PENDING_URL:[A-Za-z0-9_-]+\]/, '');
+      persistToolOutput(card, next);
+    } catch (e) { status.textContent = 'لغو ناموفق بود: ' + String(e && e.message || e); approve.disabled = false; reject.disabled = false; }
+  };
+  actions.appendChild(approve); actions.appendChild(reject); actions.appendChild(status);
+}
+
 function historyPanelEl(flow) {
   const box = document.createElement('div');
   box.className = 'think-box run-panel';
@@ -1342,15 +1553,19 @@ function historyPanelEl(flow) {
       card._item = it;
       card.classList.remove('pending');
       card.classList.add(it.ok ? 'done' : 'failed');
-      card.querySelector('.tool-state').textContent =
-        it.ok ? '✓ انجام شد' : (it.ok === false ? '✕ خطا' : '');
+      const needsApproval = hasPendingApproval(it.name, it.out);
+      card.querySelector('.tool-state').textContent = needsApproval ? '⏳ نیازمند بازبینی' :
+        (it.ok ? '✓ انجام شد' : (it.ok === false ? '✕ خطا' : ''));
+      if (needsApproval) card.classList.add('needs-approval');
       const inEl = card.querySelector('.tool-in');
       if (it.in) { inEl.classList.remove('hidden'); inEl.textContent = it.in; }
       if (it.out) {
         const out = card.querySelector('.tool-out');
         out.classList.remove('hidden');
         out.textContent = clearMarkerOutput(it.out);
-        fileEditActions(card, it.out);
+        if (it.name === 'write_file') fileEditActions(card, it.out);
+        if (it.name === 'github_propose_change') githubActionActions(card, it.out);
+        if (it.name === 'open_url') openUrlActions(card, it.out);
       }
       flowEl.appendChild(card);
     } else {
@@ -1654,6 +1869,9 @@ function startTurn() {
       stream: st.settings.stream !== false,
       kind: conn ? conn.kind : 'anthropic',
       file_tools: !!st.settings.file_tools,
+      web_tools: st.settings.web_tools !== false,
+      github_tools: st.settings.github_tools !== false,
+      autonomous_mode: st.settings.autonomous_mode === true,
       workspace: st.settings.workspace || '',
       thinking: !!st.settings.thinking,
       web_search: !!st.settings.ds_search,
@@ -1686,14 +1904,20 @@ const FA_TOOL = {
   calculator: 'ماشین‌حساب', current_time: 'ساعت و تاریخ', remember: 'ذخیره در حافظه',
   recall: 'جست‌وجوی حافظه', list_files: 'فهرست فایل‌ها', read_file: 'خواندن فایل',
   write_file: 'نوشتن فایل', edit_file: 'ویرایش فایل', bash: 'اجرای دستور',
+  web_search: 'جست‌وجوی وب', open_web_page: 'خواندن صفحهٔ وب', open_url: 'بازکردن در مرورگر',
+  github_search: 'جست‌وجوی GitHub', github_get_repository: 'اطلاعات مخزن GitHub',
+  github_list_issues: 'فهرست issueهای GitHub', github_list_pull_requests: 'فهرست pull requestها',
+  github_read_file: 'خواندن فایل GitHub', github_propose_change: 'پیش‌نویس تغییر GitHub',
 };
 function faTool(name) { return FA_TOOL[name] || 'اجرای ابزار'; }
 function fmtN(n) { return n > 999 ? (n / 1000).toFixed(1) + 'k' : String(n); }
 
-function fmtInput(input) {
+function fmtInput(input, name) {
   let s;
   try { s = JSON.stringify(input ?? {}, null, 2); } catch { s = String(input); }
-  if (s.length > 1200) s = s.slice(0, 1200) + '\n… (' + fmtN(s.length) + ' کاراکتر)';
+  // GitHub writes require a complete visible preview before the approval button.
+  const limit = name === 'github_propose_change' ? 36_000 : 1200;
+  if (s.length > limit) s = s.slice(0, limit) + '\n… (' + fmtN(s.length) + ' کاراکتر؛ پیش‌نمایش ناقص است)';
   return s;
 }
 
@@ -1832,7 +2056,7 @@ function toolCardEl(label, name, input, pending) {
   card.querySelector('.tool-state').textContent = pending ? 'در حال آماده‌سازی…' : 'در حال اجرا…';
   const inEl = card.querySelector('.tool-in');
   if (input == null) inEl.classList.add('hidden');
-  else inEl.textContent = fmtInput(input);
+  else inEl.textContent = fmtInput(input, name);
   return card;
 }
 
@@ -1901,9 +2125,9 @@ function onToolStart(id, name, label, input) {
   card.querySelector('.tool-state').textContent = 'در حال اجرا…';
   const inEl = card.querySelector('.tool-in');
   inEl.classList.remove('hidden');
-  const shown = fmtInput(input);
+  const shown = fmtInput(input, name);
   inEl.textContent = shown;
-  if (card._item) card._item.in = shown.slice(0, 500);
+  if (card._item) card._item.in = shown.slice(0, name === 'github_propose_change' ? 36_000 : 500);
   setNow(label || faTool(name));
   scrollBottom(true);
 }
@@ -1913,17 +2137,21 @@ function onToolEnd(id, ok, output) {
   const card = findCard(id);
   if (!card) return;
   card.classList.remove('pending');
-  const hasPendingEdit = /\[ATRIA_PENDING_EDIT:[A-Za-z0-9_-]+\]/.test(String(output || ''));
+  const toolName = (card._item && card._item.name) || card.querySelector('.tool-chip').textContent;
+  const hasApproval = hasPendingApproval(toolName, output);
+  const outputLimit = toolName === 'github_propose_change' ? 36_000 : 12_000;
   card.classList.add(ok ? 'done' : 'failed');
-  card.querySelector('.tool-state').textContent = hasPendingEdit ? '⏳ نیازمند بازبینی' : (ok ? '✓ انجام شد' : '✕ خطا');
+  card.querySelector('.tool-state').textContent = hasApproval ? '⏳ نیازمند بازبینی' : (ok ? '✓ انجام شد' : '✕ خطا');
   const out = card.querySelector('.tool-out');
   out.classList.remove('hidden');
-  out.textContent = clearMarkerOutput(String(output || '').slice(0, 12000));
-  if (hasPendingEdit) card.classList.add('needs-approval');
-  fileEditActions(card, output);
+  out.textContent = clearMarkerOutput(String(output || '').slice(0, outputLimit));
+  if (hasApproval) card.classList.add('needs-approval');
+  if (toolName === 'write_file') fileEditActions(card, output);
+  if (toolName === 'github_propose_change') githubActionActions(card, output);
+  if (toolName === 'open_url') openUrlActions(card, output);
   if (card._item) {
     card._item.ok = ok;
-    card._item.out = (output || '').slice(0, 12000);
+    card._item.out = (output || '').slice(0, outputLimit);
   }
   setNow('بررسی نتیجه');
   scrollBottom(true);

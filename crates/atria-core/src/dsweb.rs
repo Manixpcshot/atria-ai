@@ -290,7 +290,7 @@ pub fn flatten_prompt(cfg: &ClientConfig, messages: &[Message], tools: &[Value])
         head.push_str(cfg.system.trim());
         head.push_str("\n\n");
     }
-    head.push_str(&tool_prompt(tools, cfg.tools || cfg.file_tools));
+    head.push_str(&tool_prompt(tools, cfg.tool_use_enabled));
     if !head.is_empty() {
         out.push_str(head.trim_end());
         out.push_str("\n\n");

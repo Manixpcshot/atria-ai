@@ -102,7 +102,7 @@ impl OpenAiClient {
             "temperature": cfg.temperature,
             "max_tokens": cfg.max_tokens,
         });
-        if cfg.tools && !tools.is_empty() {
+        if cfg.tool_use_enabled && !tools.is_empty() {
             body["tools"] = Value::Array(tools.iter().map(to_openai_tool).collect());
             body["tool_choice"] = json!("auto");
         }
