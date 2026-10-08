@@ -560,8 +560,10 @@ pub async fn pinterest_tag_images(
 
     let max = max.clamp(1, MAX_BATCH as u64) as usize;
     let wanted = urls.into_iter().take(max).collect::<Vec<_>>();
+    let wanted_count = wanted.len();
     let fresh: Vec<String> = wanted.into_iter().filter(|url| seen_note(url)).collect();
-    if fresh.is_empty() {
+    let fresh_count = fresh.len();
+    if fresh_count == 0 {
         return Ok(format!(
             "همهٔ این تصاویرِ صفحهٔ تگ «{}» قبلاً در این جلسه دانلود شده‌اند.\nپوشه: {}\nبرای دریافت دفعات بعدی دوباره درخواست کن تا دسته‌های تازهٔ صفحه بیاید.",
             slug,
@@ -589,7 +591,7 @@ pub async fn pinterest_tag_images(
     if ok_files.is_empty() {
         return Err("هیچ تصویری دانلود نشد؛ ممکن است پینترست دسترسی را محدود کرده باشد".into());
     }
-    let skipped = wanted.len() - fresh.len();
+    let skipped = wanted_count - fresh_count;
     let mut out = String::new();
     out.push_str(&format!(
         "تگ پینترست «{}»: {} تصویر در {} ذخیره شد.\n",
