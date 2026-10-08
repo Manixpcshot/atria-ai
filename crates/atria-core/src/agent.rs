@@ -2,7 +2,11 @@
 
 use crate::client::{send, strip_thinking, is_output_limit_stop_reason, ClientConfig, CoreError, StreamEvent};
 use crate::memory::MemoryStore;
-use crate::tools::{auto_file_write, execute_async_tool, execute_with_data_root, file_tool_catalog, github_tool_catalog, tool_catalog, tool_label, web_tool_catalog};
+use crate::tools::{
+    auto_file_write, auto_file_write_full_access, execute_async_tool, execute_with_data_root,
+    file_tool_catalog_for_access, github_tool_catalog_for_access, tool_catalog, tool_label,
+    web_tool_catalog_for_access,
+};
 use crate::types::{Block, Message, Role};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -107,13 +111,17 @@ pub async fn run_agent(
 
         let mut tools = if cfg.tools { tool_catalog() } else { Vec::new() };
         if cfg.file_tools {
-            tools.extend(file_tool_catalog());
+            tools.extend(file_tool_catalog_for_access(
+                cfg.autonomous_mode,
+                cfg.full_access_mode,
+                cfg.full_access_profile,
+            ));
         }
         if cfg.web_tools {
-            tools.extend(web_tool_catalog());
+            tools.extend(web_tool_catalog_for_access(cfg.autonomous_mode, cfg.full_access_mode));
         }
         if cfg.github_tools {
-            tools.extend(github_tool_catalog());
+            tools.extend(github_tool_catalog_for_access(cfg.full_access_mode));
         }
         let mut request_cfg = cfg.clone();
         request_cfg.tool_use_enabled = !tools.is_empty();
@@ -214,12 +222,15 @@ pub async fn run_agent(
             }
         }
 
-        // Execute tools locally; file writes remain staged until explicit user approval.
+        // Execute the enabled tools locally; file/network write policy follows the selected trust mode.
         let root = Path::new(&cfg.workspace);
         let data_root = Path::new(&cfg.app_data);
         let mut results = Vec::new();
         if turn.stop_reason == "tool_use" {
             for block in &turn.message.content {
+                if stop.load(Ordering::Relaxed) {
+                    return Err(CoreError::Stopped);
+                }
                 if let Block::ToolUse { id, name, input } = block {
                     emit(AgentEvent::ToolStart {
                         id: id.clone(),
@@ -233,6 +244,8 @@ pub async fn run_agent(
                             output: format!("tool {name:?} is disabled in the current settings"),
                             is_error: true,
                         }
+                    } else if name == "write_file" && cfg.full_access_mode {
+                        auto_file_write_full_access(input, root, cfg.full_access_profile, data_root)
                     } else if name == "write_file" && cfg.autonomous_mode {
                         auto_file_write(input, root, data_root)
                     } else if let Some(res) = execute_async_tool(
@@ -240,6 +253,7 @@ pub async fn run_agent(
                         input,
                         &cfg.github_token,
                         cfg.autonomous_mode,
+                        cfg.full_access_mode,
                         data_root,
                     ).await {
                         res

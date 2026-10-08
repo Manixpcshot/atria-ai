@@ -29,7 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
-        <span class="app-ver" id="appVer">v0.9.0</span>
+        <span class="app-ver" id="appVer">v0.10.0</span>
         <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
@@ -102,6 +102,7 @@
               <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
               <button class="mode-chip" id="btnAttach" title="پیوست تصویر (برای مدل‌های ویژن‌دار)">📎 تصویر</button>
               <button class="mode-chip" id="chipAgent">⚡ ایجنت</button>
+              <button class="mode-chip full-access-mode hidden" id="fullAccessIndicator" type="button" title="Full Access فعال است؛ برای خاموش‌کردن تنظیمات را باز کن">⚠ Full Access</button>
               <button class="mode-chip" id="chipThink">🧠 تفکر</button>
               <button class="mode-chip" id="chipFiles">📂 فایل‌ها</button>
             </div>
@@ -295,7 +296,22 @@
               <option value="ask">پرسش پیش از اقدام — پیش‌فرض</option>
               <option value="autonomous">خودکارِ محدود — فقط وب عمومی و ورک‌اسپیس</option>
             </select>
-            <span class="fhint">حالت خودکار فقط می‌تواند پیوند عمومی را در مرورگر پیش‌فرض باز کند و فایل نسبیِ داخل ورک‌اسپیس را با پشتیبان تغییر دهد. GitHub همچنان برای هر تغییر تأیید می‌خواهد؛ شِل، دسترسی مدیر، حذف، و کنترل سراسری ماوس/صفحه‌کلید در این نسخه فعال نیست.</span>
+            <span class="fhint">حالت خودکارِ محدود فقط پیوند عمومی را باز می‌کند و فایل داخل ورک‌اسپیس را با پشتیبان تغییر می‌دهد. برای حذف تأییدهای تک‌به‌تکِ GitHub و گسترش نوشتن فایل، گزینهٔ دسترسی خودکار گستردهٔ پایین را جداگانه روشن کن.</span>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">Full Access — دسترسی خودکار گسترده</div>
+              <div class="set-desc">برای ابزارهای فعالِ فایل، وب و عملیات پشتیبانی‌شدهٔ GitHub تأیید جداگانه نمی‌گیرد؛ از درخواست بعدی اعمال می‌شود و نتیجهٔ هر ابزار ثبت می‌شود. خاموش‌کردن حین اجرا، توقف پاسخ جاری را درخواست می‌کند؛ اقدامی که شروع شده ممکن است کامل شود.</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="fullAccessVal"><span class="switch"></span></label>
+          </div>
+          <div class="field">
+            <label class="flabel" for="fullAccessProfileVal">محدودهٔ نوشتن خودکار فایل</label>
+            <select id="fullAccessProfileVal">
+              <option value="profile">پروفایل کاربر ویندوز — گسترده</option>
+              <option value="workspace">فقط ورک‌اسپیس</option>
+            </select>
+            <span class="fhint">پروفایل یعنی مسیرهای نسبی داخل پوشهٔ کاربر؛ AppData، داده‌های خصوصی آتریا، پوشه‌های حساس کلید/اعتبارنامه/پیکربندی (مثل .ssh و .config)، فایل‌های .env و مسیرهای symlink مسدودند. نوشتن پشتیبان قابل‌بازگردانی می‌سازد. مجوز توکن GitHub گسترش نمی‌یابد؛ شِل، دسترسی مدیر، حذف مستقیم، merge، secrets یا تنظیمات GitHub فعال نمی‌شوند (نوشتن محلی و به‌روزرسانی GitHub می‌توانند محتوای فایل را جایگزین کنند). محتوای فایل‌های خوانده‌شده ممکن است برای تحلیل به مدل فعال فرستاده شود.</span>
           </div>
           <div class="set-sec-title">GitHub — دسترسی امن</div>
           <div class="field">

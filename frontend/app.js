@@ -67,6 +67,8 @@ const DEFAULTS = {
   web_tools: true,
   github_tools: true,
   autonomous_mode: false,
+  full_access_mode: false,
+  full_access_profile: true,
   workspace: '',
   ds_search: false,
 };
@@ -111,6 +113,8 @@ function loadSettings() {
   s.web_tools = s.web_tools !== false;
   s.github_tools = s.github_tools !== false;
   s.autonomous_mode = s.autonomous_mode === true;
+  s.full_access_mode = s.full_access_mode === true;
+  s.full_access_profile = s.full_access_profile !== false;
   return s;
 }
 function saveSettings() {
@@ -1016,7 +1020,7 @@ function cacheEls() {
     btnScroll: $('#btnScroll'),
     modelChip: $('#modelChip'), projectChip: $('#projectChip'), ctxMeter: $('#ctxMeter'),
     modelPick: $('#modelPick'), mpName: $('#mpName'), modelMenu: $('#modelMenu'),
-    chipAgent: $('#chipAgent'), chipThink: $('#chipThink'), chipFiles: $('#chipFiles'),
+    chipAgent: $('#chipAgent'), chipThink: $('#chipThink'), chipFiles: $('#chipFiles'), fullAccessIndicator: $('#fullAccessIndicator'),
     settingsModal: $('#settingsModal'), settingsX: $('#settingsX'),
     settingsTitle: $('#settingsTitle'), settingsSubtitle: $('#settingsSubtitle'),
     memoryModal: $('#memoryModal'), memoryX: $('#memoryX'), memoryClose: $('#memoryClose'),
@@ -1028,6 +1032,7 @@ function cacheEls() {
     sysVal: $('#sysVal'), maxTokVal: $('#maxTokVal'),
     toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'),
     webToolsVal: $('#webToolsVal'), githubToolsVal: $('#githubToolsVal'), autoModeVal: $('#autoModeVal'),
+    fullAccessVal: $('#fullAccessVal'), fullAccessProfileVal: $('#fullAccessProfileVal'),
     githubTokenInput: $('#githubTokenInput'), githubConnect: $('#githubConnect'), githubDisconnect: $('#githubDisconnect'), githubStatus: $('#githubStatus'),
     dsSearchRow: $('#dsSearchRow'), dsSearchVal: $('#dsSearchVal'),
     tokenGuide: $('#tokenGuide'), tokenGuideX: $('#tokenGuideX'), tokenGuideClose: $('#tokenGuideClose'),
@@ -1204,7 +1209,48 @@ function bindSettings() {
     els.autoModeVal.onchange = () => {
       st.settings.autonomous_mode = els.autoModeVal.value === 'autonomous';
       saveSettings();
-      toast(st.settings.autonomous_mode ? 'حالت خودکار محدود فعال شد؛ GitHub همچنان تأیید می‌خواهد.' : 'حالت پرسش پیش از اقدام فعال شد.', 'ok');
+      toast(st.settings.autonomous_mode ? 'حالت خودکار محدود فعال شد؛ برای بی‌تأییدشدن GitHub، دسترسی خودکار گسترده را جداگانه روشن کن.' : 'حالت پرسش پیش از اقدام فعال شد.', 'ok');
+    };
+  }
+  if (els.fullAccessProfileVal) {
+    els.fullAccessProfileVal.value = st.settings.full_access_profile ? 'profile' : 'workspace';
+    els.fullAccessProfileVal.onchange = () => {
+      st.settings.full_access_profile = els.fullAccessProfileVal.value === 'profile';
+      saveSettings();
+    };
+  }
+  if (els.fullAccessVal) {
+    els.fullAccessVal.checked = st.settings.full_access_mode === true;
+    els.fullAccessVal.onchange = () => {
+      const enabling = els.fullAccessVal.checked;
+      const scopeLabel = els.fullAccessProfileVal && els.fullAccessProfileVal.value === 'profile'
+        ? 'پروفایل کاربر ویندوز (به‌جز مسیرهای محافظت‌شده)'
+        : 'فقط ورک‌اسپیس';
+      if (enabling && window.confirm && !window.confirm(`دسترسی خودکار گسترده پرخطر است: عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی و نوشتن فایل در ${scopeLabel} بدون تأیید جداگانه اجرا می‌شوند. محتوای فایل‌های خوانده‌شده ممکن است به مدل فعال ارسال شود. توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ شِل/مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`)) {
+        els.fullAccessVal.checked = false;
+        return;
+      }
+      st.settings.full_access_mode = enabling;
+      saveSettings();
+      syncChips();
+      let stopRequested = false;
+      if (!enabling && st.sending && window.__atria && window.__atria.chat_stop) {
+        stopRequested = true;
+        window.__atria.chat_stop().catch(() => {});
+      }
+      const limitedModeNote = st.settings.autonomous_mode
+        ? 'حالت خودکار محدودِ انتخاب‌شده برای وب عمومی و ورک‌اسپیس می‌ماند؛ GitHub دوباره تأیید می‌خواهد.'
+        : 'حالت پرسش پیش از اقدام بازگشت.';
+      toast(enabling
+        ? 'دسترسی خودکار گسترده روشن شد و از درخواست بعدی اعمال می‌شود؛ هر زمان خواستی خاموشش کن.'
+        : `دسترسی خودکار گسترده خاموش شد؛ ${limitedModeNote}${stopRequested ? ' توقف پاسخ جاری هم درخواست شد؛ اقدامی که شروع شده ممکن است تکمیل شده باشد.' : ''}`,
+      enabling ? 'warn' : 'ok');
+    };
+  }
+  if (els.fullAccessIndicator && els.btnSettings) {
+    els.fullAccessIndicator.onclick = () => {
+      els.btnSettings.click();
+      stabGo('sys');
     };
   }
   if (els.githubConnect) els.githubConnect.onclick = connectGithub;
@@ -1872,6 +1918,8 @@ function startTurn() {
       web_tools: st.settings.web_tools !== false,
       github_tools: st.settings.github_tools !== false,
       autonomous_mode: st.settings.autonomous_mode === true,
+      full_access_mode: st.settings.full_access_mode === true,
+      full_access_profile: st.settings.full_access_profile !== false,
       workspace: st.settings.workspace || '',
       thinking: !!st.settings.thinking,
       web_search: !!st.settings.ds_search,
@@ -2789,6 +2837,11 @@ function syncChips() {
   els.chipAgent.classList.toggle('on', !!st.settings.tools_enabled);
   els.chipThink.classList.toggle('on', !!st.settings.thinking);
   els.chipFiles.classList.toggle('on', !!st.settings.file_tools);
+  if (els.fullAccessIndicator) {
+    const active = st.settings.full_access_mode === true;
+    els.fullAccessIndicator.classList.toggle('hidden', !active);
+    els.fullAccessIndicator.setAttribute('aria-pressed', String(active));
+  }
 }
 
 async function boot() {

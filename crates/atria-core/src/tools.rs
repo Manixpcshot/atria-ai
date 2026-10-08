@@ -57,8 +57,30 @@ pub fn tool_catalog() -> Vec<Value> {
     ]
 }
 
-/// File-access tools (advertised when a workspace root is configured).
+/// File-access tools (advertised when enabled).
 pub fn file_tool_catalog() -> Vec<Value> {
+    file_tool_catalog_for_access(false, false, false)
+}
+
+/// The tool description matches the trust mode for this request; enforcement is
+/// independently performed in Rust when the tool is executed.
+pub fn file_tool_catalog_for_access(
+    autonomous_mode: bool,
+    full_access_mode: bool,
+    full_access_profile: bool,
+) -> Vec<Value> {
+    let write_description = if full_access_mode {
+        let scope = if full_access_profile {
+            "a relative path under the Windows user profile, excluding AppData, Atria private data, sensitive config/credential paths such as .ssh, .config, and .env, and symlinks"
+        } else {
+            "a relative path inside the configured workspace"
+        };
+        format!("Write a UTF-8 text file automatically, without a separate approval, only within {scope}. A restorable backup is created and the tool result is the source of truth. Absolute/traversal paths and protected locations are blocked.")
+    } else if autonomous_mode {
+        "Prepare a UTF-8 text file change. In autonomous mode, only a relative path inside the configured workspace may be applied automatically, and a restorable backup is created. In ask-first mode, show the diff and wait for explicit approval. Never write outside the workspace in autonomous mode.".to_string()
+    } else {
+        "Prepare a UTF-8 text file change and show a diff. Wait for the user's separate approval in Atria before applying it. Treat the tool result as the source of truth.".to_string()
+    };
     vec![
         serde_json::json!({
             "name": "list_files",
@@ -83,7 +105,7 @@ pub fn file_tool_catalog() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "write_file",
-            "description": "Prepare a UTF-8 text file change and show a diff. In ask-first mode, wait for the user's approval in Atria. In autonomous mode, only a relative path inside the configured workspace may be applied automatically, and a restorable backup is created. Treat the tool result as the source of truth. Never write outside the workspace in autonomous mode.",
+            "description": write_description,
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -98,6 +120,17 @@ pub fn file_tool_catalog() -> Vec<Value> {
 
 /// Public web tools shared by every provider, independent of provider-native search.
 pub fn web_tool_catalog() -> Vec<Value> {
+    web_tool_catalog_for_access(false, false)
+}
+
+pub fn web_tool_catalog_for_access(autonomous_mode: bool, full_access_mode: bool) -> Vec<Value> {
+    let open_url_description = if full_access_mode {
+        "Open a public HTTP(S) URL in the user's default browser automatically in Full Access mode, without a separate approval. Local/private-network URLs and non-web schemes remain blocked. This does not control mouse/keyboard or run commands."
+    } else if autonomous_mode {
+        "Open a public HTTP(S) URL in the user's default browser automatically in bounded autonomous mode. Local/private-network URLs and non-web schemes are blocked. This does not control mouse/keyboard or run commands."
+    } else {
+        "Open a public HTTP(S) URL in the user's default browser. In ask-first mode, Atria stages the URL and waits for the user to approve it. Local/private-network URLs and non-web schemes are blocked. This does not control mouse/keyboard or run commands."
+    };
     vec![
         serde_json::json!({
             "name": "web_search",
@@ -116,7 +149,7 @@ pub fn web_tool_catalog() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "open_url",
-            "description": "Open a public HTTP(S) URL in the user's default browser. In ask-first mode, Atria will stage the URL and wait for the user to click Approve. In autonomous mode, it opens automatically. Local/private-network URLs and non-web schemes are blocked. This does not control mouse/keyboard or run commands.",
+            "description": open_url_description,
             "input_schema": { "type": "object", "properties": {
                 "url": { "type": "string", "description": "Public HTTP(S) URL" }
             }, "required": ["url"] }
@@ -124,8 +157,17 @@ pub fn web_tool_catalog() -> Vec<Value> {
     ]
 }
 
-/// Read and staged-write GitHub tools. Mutations always require an explicit UI approval.
+/// Read and staged-write GitHub tools; the explicit Full Access opt-in may remove per-action approvals.
 pub fn github_tool_catalog() -> Vec<Value> {
+    github_tool_catalog_for_access(false)
+}
+
+pub fn github_tool_catalog_for_access(full_access_mode: bool) -> Vec<Value> {
+    let mutation_description = if full_access_mode {
+        "In Full Access mode, submit the allowlisted mutation automatically without a separate approval. Supported operations only: create_issue, create_comment, create_pull_request, create_file, update_file. The GitHub token's own permissions still apply. Delete/destructive operations, merge, secrets, settings, and admin operations are not supported. File updates require expected_sha from github_read_file and are cancelled if the remote file changed."
+    } else {
+        "Prepare a GitHub mutation for user review. Supported operations: create_issue, create_comment, create_pull_request, create_file, update_file. This tool NEVER submits the change. A separate explicit approval click in Atria is required for every action, including in bounded autonomous mode. Destructive/delete operations are not supported; file updates require the expected_sha from github_read_file and are cancelled if the remote file changed after preview."
+    };
     vec![
         serde_json::json!({
             "name": "github_search",
@@ -171,7 +213,7 @@ pub fn github_tool_catalog() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "github_propose_change",
-            "description": "Prepare a GitHub mutation for user review. Supported operations: create_issue, create_comment, create_pull_request, create_file, update_file. This tool NEVER submits the change. A separate explicit approval click in Atria is required for every action, even in autonomous mode. Destructive/delete operations are not supported; file updates require the expected_sha from github_read_file and are cancelled if the remote file changed after preview.",
+            "description": mutation_description,
             "input_schema": { "type": "object", "properties": {
                 "operation": { "type": "string", "enum": ["create_issue", "create_comment", "create_pull_request", "create_file", "update_file"] },
                 "owner": { "type": "string" }, "repo": { "type": "string" },
@@ -295,6 +337,7 @@ pub async fn execute_async_tool(
     input: &Value,
     github_token: &str,
     autonomous_mode: bool,
+    full_access_mode: bool,
     data_root: &Path,
 ) -> Option<ToolOutcome> {
     let result = match name {
@@ -309,7 +352,7 @@ pub async fn execute_async_tool(
         }
         "open_url" => {
             let url = input.get("url").and_then(Value::as_str).unwrap_or("");
-            Some(if autonomous_mode {
+            Some(if autonomous_mode || full_access_mode {
                 crate::web::open_external_url(url)
             } else {
                 crate::web::stage_open_url(url, data_root)
@@ -350,9 +393,19 @@ pub async fn execute_async_tool(
             input.get("branch").and_then(Value::as_str).unwrap_or(""),
             github_token,
         ).await),
-        "github_propose_change" => Some(crate::github::stage_action(input, data_root).map(|(id, preview)| {
-            format!("[ATRIA_PENDING_GITHUB:{id}]\n{preview}")
-        })),
+        "github_propose_change" => Some(match crate::github::stage_action(input, data_root) {
+            Ok((id, _preview)) if full_access_mode => {
+                match crate::github::apply_pending_action(&id, github_token, data_root).await {
+                    Ok(applied) => Ok(format!("دسترسی خودکار گسترده: عملیات پشتیبانی‌شده بدون تأیید موردی اجرا شد.\n{applied}")),
+                    Err(error) => {
+                        let _ = crate::github::reject_pending_action(&id, data_root);
+                        Err(format!("اجرای خودکار GitHub ناموفق بود: {error}"))
+                    }
+                }
+            }
+            Ok((id, preview)) => Ok(format!("[ATRIA_PENDING_GITHUB:{id}]\n{preview}")),
+            Err(error) => Err(error),
+        }),
         _ => None,
     }?;
     Some(match result {
@@ -550,14 +603,67 @@ fn file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutcome {
     }
 }
 
-/// Automatically apply a file edit only when the explicit autonomous mode is
-/// enabled and the target remains inside the selected workspace. A backup is
-/// still created, and symlinks/absolute/traversal paths are rejected.
+/// Apply automatically in bounded autonomous mode: workspace only, with backup.
 pub fn auto_file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutcome {
     let raw = input.get("path").and_then(Value::as_str).unwrap_or("").trim();
-    if let Err(e) = validate_workspace_relative_path(root, raw) {
-        return ToolOutcome { output: e, is_error: true };
-    }
+    let canonical_root = match validate_auto_write_path(root, raw, false, data_root) {
+        Ok(path) => path,
+        Err(error) => return ToolOutcome { output: error, is_error: true },
+    };
+    apply_auto_file_write(input, &canonical_root, data_root, "داخل ورک‌اسپیس", false)
+}
+
+/// Apply automatically in explicit Full Access mode. The selected base is either
+/// the configured workspace or the current user's profile; writes stay relative
+/// to that base and retain the same backup/undo flow.
+pub fn auto_file_write_full_access(
+    input: &Value,
+    workspace_root: &Path,
+    profile_scope: bool,
+    data_root: &Path,
+) -> ToolOutcome {
+    let root = if profile_scope {
+        match user_profile_root() {
+            Some(path) => path,
+            None => return ToolOutcome {
+                output: "مسیر پروفایل کاربر پیدا نشد؛ نوشتن خودکار انجام نشد".into(),
+                is_error: true,
+            },
+        }
+    } else {
+        workspace_root.to_path_buf()
+    };
+    auto_file_write_at_root(input, &root, profile_scope, data_root)
+}
+
+fn auto_file_write_at_root(input: &Value, root: &Path, profile_scope: bool, data_root: &Path) -> ToolOutcome {
+    let raw = input.get("path").and_then(Value::as_str).unwrap_or("").trim();
+    let canonical_root = match validate_auto_write_path(root, raw, profile_scope, data_root) {
+        Ok(path) => path,
+        Err(error) => return ToolOutcome { output: error, is_error: true },
+    };
+    apply_auto_file_write(
+        input,
+        &canonical_root,
+        data_root,
+        if profile_scope { "داخل پروفایل کاربر" } else { "داخل ورک‌اسپیس" },
+        true,
+    )
+}
+
+fn user_profile_root() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+}
+
+fn apply_auto_file_write(
+    input: &Value,
+    root: &Path,
+    data_root: &Path,
+    scope_label: &str,
+    discard_failed_preview: bool,
+) -> ToolOutcome {
     let staged = file_write(input, root, data_root);
     if staged.is_error { return staged; }
     let Some(id) = staged.output.split("[ATRIA_PENDING_EDIT:").nth(1).and_then(|s| s.split(']').next()) else {
@@ -565,51 +671,136 @@ pub fn auto_file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutc
     };
     match apply_pending_edit(id, data_root) {
         Ok(applied) => {
+            let applied_note = format!("تغییر به‌صورت خودکار {scope_label} اعمال شد؛ نسخهٔ پشتیبان قابل‌بازگردانی ساخته شده است.");
             let clean_diff = staged.output
                 .replace(&format!("[ATRIA_PENDING_EDIT:{id}]"), "")
-                .replace("This edit is staged only and has NOT been applied. Review the diff in Atria and wait for the user to approve or reject it.", "تغییر به‌صورت خودکار فقط داخل ورک‌اسپیس اعمال شد؛ نسخهٔ پشتیبان قابل‌بازگردانی ساخته شده است.");
+                .replace("This edit is staged only and has NOT been applied. Review the diff in Atria and wait for the user to approve or reject it.", &applied_note);
             ToolOutcome { output: format!("{clean_diff}\n{applied}"), is_error: false }
         }
-        Err(e) => ToolOutcome { output: format!("تغییر به‌صورت خودکار اعمال نشد؛ پیش‌نویس برای بازبینی باقی ماند. {e}\n{}", staged.output), is_error: true },
+        Err(error) if discard_failed_preview => {
+            if let Some(id) = staged.output.split("[ATRIA_PENDING_EDIT:").nth(1).and_then(|s| s.split(']').next()) {
+                let _ = reject_pending_edit(id, data_root);
+            }
+            let marker_removed = staged.output
+                .replace("This edit is staged only and has NOT been applied. Review the diff in Atria and wait for the user to approve or reject it.", "")
+                .split("[ATRIA_PENDING_EDIT:").next().unwrap_or(&staged.output).to_string();
+            ToolOutcome {
+                output: format!("تغییر خودکار اعمال نشد و هیچ پیش‌نویسِ نیازمند تأییدی باقی نماند. {error}\n{marker_removed}"),
+                is_error: true,
+            }
+        }
+        Err(error) => ToolOutcome {
+            output: format!("تغییر خودکار اعمال نشد؛ پیش‌نویس برای بازبینی باقی ماند. {error}\n{}", staged.output),
+            is_error: true,
+        },
     }
 }
 
-fn validate_workspace_relative_path(root: &Path, raw: &str) -> Result<PathBuf, String> {
-    if root.as_os_str().is_empty() { return Err("حالت خودکار به پوشهٔ کاری تنظیم‌شده نیاز دارد".into()); }
-    let normalized = raw.replace('\\', "/");
-    let bytes = normalized.as_bytes();
-    let windows_absolute = bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && bytes[2] == b'/';
-    if normalized.starts_with('/') || windows_absolute {
-        return Err("در حالت خودکار فقط مسیر نسبی داخل ورک‌اسپیس مجاز است".into());
+fn validate_auto_write_path(
+    root: &Path,
+    raw: &str,
+    profile_scope: bool,
+    data_root: &Path,
+) -> Result<PathBuf, String> {
+    if root.as_os_str().is_empty() {
+        return Err("نوشتن خودکار به یک محدودهٔ فایل تنظیم‌شده نیاز دارد".into());
     }
-    let mut candidate = root.to_path_buf();
-    let mut parts = 0usize;
+    let normalized = raw.trim().replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    let drive_prefixed = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    if normalized.starts_with('/') || drive_prefixed {
+        return Err("در نوشتن خودکار فقط مسیر نسبی داخل محدودهٔ انتخاب‌شده مجاز است".into());
+    }
+    let mut components = Vec::new();
     for component in normalized.split('/') {
         match component {
             "" | "." => continue,
-            ".." => return Err("مسیر دارای .. در حالت خودکار مسدود است".into()),
+            ".." => return Err("مسیر دارای .. در نوشتن خودکار مسدود است".into()),
             value if value.chars().any(char::is_control) => return Err("مسیر دارای نویسهٔ کنترلی است".into()),
-            value => { candidate.push(value); parts += 1; }
+            value if value.contains(':') => return Err("مسیر دارای دونقطه یا stream جایگزین ویندوز است".into()),
+            value if value.ends_with('.') || value.ends_with(' ') => return Err("نام مسیر با نقطه یا فاصله پایان می‌یابد و در ویندوز مبهم است".into()),
+            value => {
+                let device = value.split('.').next().unwrap_or("").to_ascii_uppercase();
+                if matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" | "CLOCK$" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9") {
+                    return Err("نام دستگاه رزروشدهٔ ویندوز در مسیر مجاز نیست".into());
+                }
+                if profile_scope && is_protected_profile_component(value) {
+                    return Err(format!("نوشتن خودکار در مسیر محافظت‌شدهٔ پروفایل ({value}) مسدود است"));
+                }
+                components.push(value);
+            }
         }
     }
-    if parts == 0 { return Err("مسیر فایل باید نسبی و غیرخالی باشد".into()); }
-    std::fs::create_dir_all(root).map_err(|e| format!("ساخت ورک‌اسپیس ناموفق بود: {e}"))?;
-    let canonical_root = std::fs::canonicalize(root).map_err(|e| format!("خواندن مسیر ورک‌اسپیس ناموفق بود: {e}"))?;
-    if let Ok(metadata) = std::fs::symlink_metadata(&candidate) {
-        if metadata.file_type().is_symlink() { return Err("نوشتن خودکار روی symlink مجاز نیست".into()); }
+    if components.is_empty() { return Err("مسیر فایل باید نسبی و غیرخالی باشد".into()); }
+
+    if profile_scope && !root.is_absolute() {
+        return Err("مسیر پروفایل کاربر باید مطلق باشد".into());
     }
-    let mut ancestor = candidate.as_path();
-    while !ancestor.exists() {
-        ancestor = ancestor.parent().ok_or_else(|| "مسیر فایل خارج از ورک‌اسپیس است".to_string())?;
+    if profile_scope && !root.is_dir() {
+        return Err("پوشهٔ پروفایل کاربر پیدا نشد یا پوشه نیست".into());
     }
-    let canonical_ancestor = std::fs::canonicalize(ancestor).map_err(|e| format!("اعتبارسنجی مسیر فایل ناموفق بود: {e}"))?;
-    if !canonical_ancestor.starts_with(&canonical_root) {
-        return Err("مسیر فایل از طریق symlink از ورک‌اسپیس خارج می‌شود؛ تغییر خودکار مسدود شد".into());
+    if !profile_scope {
+        std::fs::create_dir_all(root).map_err(|error| format!("ساخت ورک‌اسپیس ناموفق بود: {error}"))?;
     }
-    Ok(candidate)
+    let canonical_root = std::fs::canonicalize(root).map_err(|error| format!("خواندن مسیر محدوده ناموفق بود: {error}"))?;
+    let mut candidate = canonical_root.clone();
+    for component in &components {
+        candidate.push(component);
+        match std::fs::symlink_metadata(&candidate) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err("مسیرهای symlink در نوشتن خودکار مسدودند".into());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("اعتبارسنجی مسیر فایل ناموفق بود: {error}")),
+        }
+        // Resolve existing components as well, so Windows short-name aliases or
+        // junctions cannot sidestep the protected-profile directory list.
+        if let Ok(resolved) = std::fs::canonicalize(&candidate) {
+            if !resolved.starts_with(&canonical_root) {
+                return Err("مسیر با resolve از محدودهٔ مجاز خارج می‌شود".into());
+            }
+            if profile_scope {
+                if let Ok(relative) = resolved.strip_prefix(&canonical_root) {
+                    for component in relative.components() {
+                        if let std::path::Component::Normal(name) = component {
+                            if is_protected_profile_component(&name.to_string_lossy()) {
+                                return Err("نام resolveشده به مسیر محافظت‌شدهٔ پروفایل اشاره می‌کند".into());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !candidate.starts_with(&canonical_root) {
+        return Err("مسیر از محدودهٔ مجاز خارج می‌شود".into());
+    }
+
+    // Profile-wide access must never overlap Atria's private state, even when a
+    // non-default workspace/data location happens to be inside the profile.
+    if profile_scope {
+        if let Ok(private_root) = std::fs::canonicalize(data_root) {
+            if candidate.starts_with(&private_root) {
+                return Err("نوشتن در داده‌های خصوصی Atria مسدود است".into());
+            }
+        }
+    }
+    Ok(canonical_root)
+}
+
+fn is_protected_profile_component(component: &str) -> bool {
+    let lower = component.to_lowercase();
+    matches!(lower.as_str(),
+        "appdata" | ".atria" | ".ssh" | ".gnupg" | ".gpg" | ".aws" | ".azure" |
+        ".kube" | ".docker" | ".config" | ".terraform.d" | ".vault-token" |
+        "credentials" | "secrets" | "secret")
+        || matches!(lower.as_str(),
+            "ntuser.dat" | "ntuser.dat.log1" | "ntuser.dat.log2" | "ntuser.ini" |
+            "id_rsa" | "id_dsa" | "id_ecdsa" | "id_ed25519" | "authorized_keys" |
+            "known_hosts" | ".netrc" | ".npmrc" | ".pypirc" | ".git-credentials" |
+            "credentials.json" | "credentials.xml" | "secrets.json")
+        || lower == ".env" || lower.starts_with(".env.")
 }
 
 /// Apply a previously staged text edit, creating a restorable backup first.
@@ -978,14 +1169,93 @@ mod tests {
     }
 
     #[test]
-    fn web_and_github_tool_catalogs_are_provider_independent_and_writes_are_explicitly_staged() {
-        let web = web_tool_catalog();
+    fn full_access_file_writes_are_scoped_backed_up_and_protect_sensitive_profile_paths() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let temp = std::env::temp_dir().join(format!("atria-full-access-{}-{nonce}", std::process::id()));
+        let profile = temp.join("profile");
+        let data = temp.join("atria-data");
+        let target = profile.join("Documents/note.txt");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "before").unwrap();
+
+        let applied = auto_file_write_at_root(
+            &serde_json::json!({"path":"Documents/note.txt","content":"after"}),
+            &profile,
+            true,
+            &data,
+        );
+        assert!(!applied.is_error, "{}", applied.output);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "after");
+        assert!(applied.output.contains("[ATRIA_BACKUP:"));
+        let backup = applied.output.split("[ATRIA_BACKUP:").nth(1).unwrap().split(']').next().unwrap();
+        restore_file_backup(backup, &data).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "before");
+
+        for path in [
+            "AppData/Roaming/secret.txt",
+            ".ssh/id_ed25519",
+            "Documents/.env",
+            "credentials.json",
+            "../outside.txt",
+            "C:/Windows/test.txt",
+            "Documents/file.txt:stream",
+        ] {
+            let result = auto_file_write_at_root(
+                &serde_json::json!({"path":path,"content":"blocked"}),
+                &profile,
+                true,
+                &data,
+            );
+            assert!(result.is_error, "profile write should be blocked: {path}");
+        }
+        assert!(!temp.join("outside.txt").exists());
+
+        // A custom Atria data root inside the selected profile is protected too.
+        let private = profile.join("private-store");
+        std::fs::create_dir_all(&private).unwrap();
+        let result = auto_file_write_at_root(
+            &serde_json::json!({"path":"private-store/secret.json","content":"blocked"}),
+            &profile,
+            true,
+            &private,
+        );
+        assert!(result.is_error);
+        assert!(!private.join("secret.json").exists());
+
+        #[cfg(unix)] {
+            use std::os::unix::fs::symlink;
+            let external = temp.join("external");
+            std::fs::create_dir_all(&external).unwrap();
+            symlink(&external, profile.join("linked")).unwrap();
+            let result = auto_file_write_at_root(
+                &serde_json::json!({"path":"linked/escape.txt","content":"blocked"}),
+                &profile,
+                true,
+                &data,
+            );
+            assert!(result.is_error);
+            assert!(!external.join("escape.txt").exists());
+        }
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn tool_catalog_describes_per_action_approval_policy_for_each_mode() {
+        let web = web_tool_catalog_for_access(false, true);
         assert!(web.iter().any(|tool| tool["name"] == "web_search"));
-        assert!(web.iter().any(|tool| tool["name"] == "open_web_page"));
+        let open_url = web.iter().find(|tool| tool["name"] == "open_url").unwrap();
+        assert!(open_url["description"].as_str().unwrap().contains("automatically"));
         let github = github_tool_catalog();
         assert!(github.iter().any(|tool| tool["name"] == "github_read_file"));
         let write = github.iter().find(|tool| tool["name"] == "github_propose_change").unwrap();
         assert!(write["description"].as_str().unwrap().contains("NEVER submits"));
         assert!(write["description"].as_str().unwrap().contains("explicit approval"));
+        let full_access = github_tool_catalog_for_access(true);
+        let full_access_write = full_access.iter().find(|tool| tool["name"] == "github_propose_change").unwrap();
+        assert!(full_access_write["description"].as_str().unwrap().contains("automatically"));
+        assert!(!full_access_write["description"].as_str().unwrap().contains("separate explicit approval"));
+        let file = file_tool_catalog_for_access(false, true, true);
+        let file_write = file.iter().find(|tool| tool["name"] == "write_file").unwrap();
+        assert!(file_write["description"].as_str().unwrap().contains("user profile"));
     }
 }

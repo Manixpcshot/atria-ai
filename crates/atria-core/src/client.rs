@@ -49,7 +49,7 @@ pub struct ClientConfig {
     pub tool_use_enabled: bool,
     /// Which API dialect to use.
     pub kind: ApiKind,
-    /// Local file-access tools (`list_files` / `read_file` / staged `write_file`).
+    /// Local file-access tools (`list_files` / `read_file` / staged-or-automatic `write_file`).
     pub file_tools: bool,
     /// Default workspace for relative file-tool paths.
     pub workspace: String,
@@ -62,8 +62,13 @@ pub struct ClientConfig {
     /// GitHub token loaded natively from Windows Credential Manager (never sent to a model).
     pub github_token: String,
     /// Enables bounded autonomous actions: public browser launch and backed-up
-    /// file writes only inside the configured workspace. GitHub writes remain approval-gated.
+    /// file writes only inside the configured workspace. GitHub writes remain approval-gated
+    /// unless the separately opted-in full_access_mode is enabled.
     pub autonomous_mode: bool,
+    /// Explicit high-risk trust mode: no per-action approval for currently supported tools.
+    pub full_access_mode: bool,
+    /// Allow automatic file writes relative to the Windows user profile instead of only workspace.
+    pub full_access_profile: bool,
     /// DeepSeek-web: the site's DeepThink toggle.
     pub web_thinking: bool,
     /// DeepSeek-web: the site's web-search toggle.
@@ -94,6 +99,8 @@ impl std::fmt::Debug for ClientConfig {
             .field("github_tools", &self.github_tools)
             .field("github_token", &"<redacted>")
             .field("autonomous_mode", &self.autonomous_mode)
+            .field("full_access_mode", &self.full_access_mode)
+            .field("full_access_profile", &self.full_access_profile)
             .field("web_thinking", &self.web_thinking)
             .field("web_search", &self.web_search)
             .field("web_session", &"<omitted>")
@@ -121,6 +128,8 @@ impl Default for ClientConfig {
             github_tools: false,
             github_token: String::new(),
             autonomous_mode: false,
+            full_access_mode: false,
+            full_access_profile: true,
             web_thinking: true,
             web_search: false,
             web_session: String::new(),

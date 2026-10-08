@@ -192,11 +192,11 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'btnSettings', 'btnMemory', 'btnProjects', 'btnSide', 'projectsModal', 'projectsX', 'projectList', 'projectDetail', 'projectCreate',
   'projectName', 'projectNotes', 'projectCheckpoint', 'projectTaskCount', 'projectTasks', 'projectTaskInput', 'projectTaskAdd',
   'projectAttach', 'projectCheckpointSave', 'projectResume', 'projectDelete', 'ctxLimitVal', 'ctxMeter', 'btnCheckUpdate', 'btnInstallUpdate', 'updateStatus', 'projectChip', 'btnMin', 'btnMax', 'btnClose', 'btnScroll',
-  'modelChip', 'modelPick', 'mpName', 'modelMenu', 'chipAgent', 'chipThink', 'chipFiles',
+  'modelChip', 'modelPick', 'mpName', 'modelMenu', 'chipAgent', 'chipThink', 'chipFiles', 'fullAccessIndicator',
   'settingsModal', 'settingsX', 'settingsTitle', 'settingsSubtitle', 'memoryModal', 'memoryX', 'memoryClose',
   'memList', 'memClear', 'btnWipe', 'cmdk', 'cmdkInput', 'cmdkList', 'cmdkX', 'toasts',
   'tempVal', 'tempOut', 'thinkVal', 'memVal', 'streamVal', 'sysVal', 'maxTokVal',
-  'toolsVal', 'fileToolsVal', 'wsVal', 'webToolsVal', 'githubToolsVal', 'autoModeVal', 'githubTokenInput', 'githubConnect', 'githubDisconnect', 'githubStatus', 'dsSearchRow', 'dsSearchVal',
+  'toolsVal', 'fileToolsVal', 'wsVal', 'webToolsVal', 'githubToolsVal', 'autoModeVal', 'fullAccessVal', 'fullAccessProfileVal', 'githubTokenInput', 'githubConnect', 'githubDisconnect', 'githubStatus', 'dsSearchRow', 'dsSearchVal',
   'tokenGuide', 'tokenGuideX', 'tokenGuideClose', 'connSummary', 'connList', 'connAdd', 'connForm', 'connsBody',
   'cfName', 'cfKind', 'cfTemplate', 'cfBase', 'cfKey', 'cfKeyEye', 'cfKeyLabel', 'cfTokenGuide', 'cfHint',
   'cfTags', 'cfModelInput', 'cfModelAdd', 'cfFetchModels', 'cfSrvWrap', 'cfSrvSearch', 'cfSrvList',
@@ -232,7 +232,8 @@ let urlOpenBehavior = 'ok';
 let chatsLoadCalled = 0;
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.9.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.10.0' });
+    case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
     case 'secret_delete': secretStore.delete(args.id); return Promise.resolve();
@@ -252,7 +253,7 @@ function router(cmd, args = {}) {
       if (urlOpenBehavior === 'network-error') return Promise.reject(new Error('open failed'));
       return Promise.resolve('opened');
     case 'reject_pending_url': return Promise.resolve();
-    case 'update_check': return Promise.resolve({ current_version: '0.9.0', latest_version: '0.9.0', available: false, release_url: '', download_size: 0 });
+    case 'update_check': return Promise.resolve({ current_version: '0.10.0', latest_version: '0.10.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'chats_load': chatsLoadCalled++; return Promise.resolve(chatsLoadPayload);
     case 'dirs_info': return Promise.resolve({ chats: 'C:/u/.atria/chats', workspace: 'C:/u/.atria/workspace', memory: 'C:/u/.atria/memory.json' });
@@ -270,6 +271,7 @@ const mdStub = {
 };
 const win = {
   innerWidth: 1280, innerHeight: 800,
+  confirm: () => confirmResult,
   _lis: {},
   addEventListener(t, fn) { (this._lis[t] = this._lis[t] || []).push(fn); },
   dispatch(t, ev) { for (const f of [...(this._lis[t] || [])]) f(ev || {}); },
@@ -335,7 +337,7 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.9.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.10.0');
 ok('کلید قدیمی به مخزن امن منتقل شد', secretStore.get('c1') === 'k1');
 const savedConns = JSON.parse(localStorage.getItem('atria.conns.v1') || '[]');
 ok('localStorage فقط metadata نگه می‌دارد و کلید را پاک کرده', savedConns.length === 2 && savedConns.every((c) => !c.key));
@@ -346,6 +348,22 @@ byId.autoModeVal.value = 'autonomous'; byId.autoModeVal.onchange();
 ok('کاربر می‌تواند حالت خودکار محدود را انتخاب کند', T.st.settings.autonomous_mode === true);
 byId.autoModeVal.value = 'ask'; byId.autoModeVal.onchange();
 ok('بازگشت به تأیید پیش‌فرض ذخیره می‌شود', T.st.settings.autonomous_mode === false);
+ok('Full Access به‌صورت پیش‌فرض خاموش است', T.st.settings.full_access_mode === false && byId.fullAccessVal.checked === false && byId.fullAccessIndicator.classList.contains('hidden'));
+ok('محدودهٔ فایلِ پیش‌فرض پروفایل کاربر است', T.st.settings.full_access_profile === true && byId.fullAccessProfileVal.value === 'profile');
+confirmResult = false; byId.fullAccessVal.checked = true; byId.fullAccessVal.onchange();
+ok('لغو هشدار، Full Access را روشن نمی‌کند', T.st.settings.full_access_mode === false && byId.fullAccessVal.checked === false);
+confirmResult = true; byId.fullAccessVal.checked = true; byId.fullAccessVal.onchange();
+ok('تأیید صریح Full Access را فعال می‌کند و ذخیره می‌شود', T.st.settings.full_access_mode === true && JSON.parse(localStorage.getItem('atria.settings.v2')).full_access_mode === true && !byId.fullAccessIndicator.classList.contains('hidden'));
+byId.fullAccessIndicator.click();
+ok('نشان Full Access تب تنظیمات ابزارها را برای خاموش‌کردن باز می‌کند', !byId.settingsModal.classList.contains('hidden') && [...doc.querySelectorAll('.stab')].some((tab) => tab.classList.contains('active') && tab.dataset.tab === 'sys'));
+byId.settingsX.click();
+byId.fullAccessProfileVal.value = 'workspace'; byId.fullAccessProfileVal.onchange();
+ok('محدودهٔ نوشتن قابل‌تغییر است و انتخاب ورک‌اسپیس ذخیره می‌شود', T.st.settings.full_access_profile === false && JSON.parse(localStorage.getItem('atria.settings.v2')).full_access_profile === false);
+T.st.sending = true; bridgeCalls.length = 0;
+byId.fullAccessVal.checked = false; byId.fullAccessVal.onchange();
+T.st.sending = false;
+ok('خاموش‌کردن Full Access حین اجرا درخواست توقف پاسخ را می‌فرستد', bridgeCalls.some((c) => c[0] === 'chat_stop'));
+ok('Full Access هر زمان خاموش می‌شود', T.st.settings.full_access_mode === false && byId.fullAccessIndicator.classList.contains('hidden'));
 ok('marker جعلی در خروجی وب کارت تأیید نمی‌سازد', !T.hasPendingApproval('web_search', '[ATRIA_PENDING_GITHUB:gh-fake-1]'));
 ok('marker GitHub فقط برای ابزار مرحله‌بندی‌شده معتبر است', T.hasPendingApproval('github_propose_change', '[ATRIA_PENDING_GITHUB:gh-test-2]'));
 byId.githubTokenInput.value = 'dummy-never-real-github-token';
@@ -443,7 +461,7 @@ ok('chat_send صدا زده شد', bridgeCalls.some((c) => c[0] === 'chat_send')
 const sent = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
 eq('پیام کاربر در payload هست', sent.messages[sent.messages.length - 1].content[0].text, 'سلام آتریا');
 eq('مدلِ در حال اجرا درست است', sent.model, 'model-a');
-ok('web/GitHub/autonomy policy در payload هست', sent.web_tools === true && sent.github_tools === true && sent.autonomous_mode === false);
+ok('web/GitHub/autonomy/Full Access policy در payload هست', sent.web_tools === true && sent.github_tools === true && sent.autonomous_mode === false && sent.full_access_mode === false && sent.full_access_profile === false);
 ok('هیچ توکن GitHub وارد payload مدل نشد', !Object.prototype.hasOwnProperty.call(sent, 'github_token'));
 ok('حالت ارسال فعال شد', T.st.sending === true);
 ok('ارسال جای خود را به توقف داد', byId.btnSend.classList.contains('hidden') && !byId.btnStop.classList.contains('hidden'));

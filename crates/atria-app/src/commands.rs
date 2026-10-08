@@ -32,18 +32,24 @@ pub struct ChatPayload {
     /// "anthropic" (Messages API) or "openai" (Chat Completions).
     #[serde(default)]
     pub kind: String,
-    /// Enable local file tools; writes are staged unless the bounded autonomous mode is selected.
+    /// Enable local file tools; writes are staged unless an automatic mode is explicitly selected.
     #[serde(default)]
     pub file_tools: bool,
     /// Provider-independent public web tools.
     #[serde(default = "default_true")]
     pub web_tools: bool,
-    /// GitHub read and staged-write tools.
+    /// GitHub read and mutation tools (staged for approval unless Full Access is enabled).
     #[serde(default = "default_true")]
     pub github_tools: bool,
-    /// Bounded autonomy: automatic public URL launches and backed-up workspace-only file writes.
+    /// Bounded autonomy: automatic public URL launches and backed-up workspace-only file writes; GitHub stays staged.
     #[serde(default)]
     pub autonomous_mode: bool,
+    /// Explicit opt-in: no per-action approvals for currently supported tools.
+    #[serde(default)]
+    pub full_access_mode: bool,
+    /// When Full Access is on, allow backed-up writes under the Windows user profile (excluding protected paths).
+    #[serde(default = "default_true")]
+    pub full_access_profile: bool,
     /// Workspace root for the file tools.
     #[serde(default)]
     pub workspace: String,
@@ -105,6 +111,8 @@ pub async fn test_connection(base: String, key: String, model: String, kind: Str
         github_tools: false,
         github_token: String::new(),
         autonomous_mode: false,
+        full_access_mode: false,
+        full_access_profile: true,
         web_thinking: false,
         web_search: false,
         web_session: String::new(),
@@ -401,6 +409,8 @@ pub async fn chat_send(
             github_tools: payload.github_tools,
             github_token,
             autonomous_mode: payload.autonomous_mode,
+            full_access_mode: payload.full_access_mode,
+            full_access_profile: payload.full_access_profile,
             web_thinking: payload.thinking,
             web_search: payload.web_search,
             web_session: payload.session_id,

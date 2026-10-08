@@ -747,6 +747,13 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   background: var(--grad-soft);
   box-shadow: 0 2px 12px rgba(124, 108, 255, 0.18);
 }
+.mode-chip.full-access-mode {
+  color: #ff9aaa !important;
+  border-color: rgba(255, 111, 139, 0.55) !important;
+  background: rgba(255, 72, 105, 0.12) !important;
+  font-weight: 700;
+}
+.mode-chip.full-access-mode:hover { background: rgba(255, 72, 105, 0.2) !important; }
 
 /* fancy thinking orb: spinning conic ring + glowing core */
 .think-box.has .think-orb { animation: none; box-shadow: none; background: none; }

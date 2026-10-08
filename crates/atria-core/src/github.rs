@@ -304,7 +304,7 @@ fn optional_text(input: &Value, key: &str, max: usize) -> Result<Option<String>,
     Ok((!value.is_empty()).then(|| value.to_string()))
 }
 
-/// Store an allowlisted GitHub mutation for per-action preview/approval.
+/// Store an allowlisted GitHub mutation for approval in ask-first mode or immediate application in Full Access.
 pub fn stage_action(input: &Value, data_root: &Path) -> Result<(String, String), String> {
     let operation = required_text(input, "operation", "operation", 32)?;
     if !matches!(operation.as_str(), "create_issue" | "create_comment" | "create_pull_request" | "create_file" | "update_file") {
@@ -421,8 +421,9 @@ fn pending_path(id: &str, data_root: &Path) -> Result<PathBuf, String> {
     Ok(data_root.join("pending-github-actions").join(format!("{id}.json")))
 }
 
-/// Apply a staged write. Called only by a native command after an explicit click
-/// in the approval card; the token is fetched inside Rust from Credential Manager.
+/// Apply a staged allowlisted write. In ask-first mode the native command is
+/// called after an explicit approval click; Full Access may call this from the
+/// agent loop. The token is never sent to the frontend or model.
 pub async fn apply_pending_action(id: &str, token: &str, data_root: &Path) -> Result<String, String> {
     if token.trim().is_empty() { return Err("توکن GitHub در Credential Manager تنظیم نشده است".into()); }
     let file = pending_path(id, data_root)?;
