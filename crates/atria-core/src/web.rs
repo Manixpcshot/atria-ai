@@ -314,8 +314,12 @@ fn parse_results(html: &str, count: usize) -> Vec<SearchResult> {
             cursor = close + 4;
             continue;
         }
-        let tail_end = (close + 4 + 2_500).min(html.len());
-        let tail = &html[close + 4..tail_end];
+        let tail_start = close + 4;
+        let mut tail_end = tail_start.saturating_add(2_500).min(html.len());
+        while tail_end > tail_start && !html.is_char_boundary(tail_end) {
+            tail_end -= 1;
+        }
+        let tail = &html[tail_start..tail_end];
         let snippet = tail
             .find("result__snippet")
             .and_then(|at| {
@@ -485,6 +489,20 @@ mod tests {
         assert_eq!(got[0].title, "A & B");
         assert_eq!(got[0].url, "https://example.com/?a=1&b=2");
         assert_eq!(got[0].snippet, "A useful snippet");
+    }
+
+    #[test]
+    fn search_result_tail_truncation_never_splits_utf8() {
+        let mut html = String::from(
+            r#"<a class="result__a" href="https://example.com">title</a>"#,
+        );
+        html.push_str(&"a".repeat(2_499));
+        html.push('é');
+        html.push('x');
+
+        let results = parse_results(&html, 1);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "title");
     }
 
     #[test]

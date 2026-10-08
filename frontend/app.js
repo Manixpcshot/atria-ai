@@ -1221,37 +1221,10 @@ function bindSettings() {
   }
   if (els.fullAccessVal) {
     els.fullAccessVal.checked = st.settings.full_access_mode === true;
-    els.fullAccessVal.onchange = () => {
-      const enabling = els.fullAccessVal.checked;
-      const scopeLabel = els.fullAccessProfileVal && els.fullAccessProfileVal.value === 'profile'
-        ? 'پروفایل کاربر ویندوز (به‌جز مسیرهای محافظت‌شده)'
-        : 'فقط ورک‌اسپیس';
-      if (enabling && window.confirm && !window.confirm(`دسترسی خودکار گسترده پرخطر است: عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی و نوشتن فایل در ${scopeLabel} بدون تأیید جداگانه اجرا می‌شوند. محتوای فایل‌های خوانده‌شده ممکن است به مدل فعال ارسال شود. توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ شِل/مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`)) {
-        els.fullAccessVal.checked = false;
-        return;
-      }
-      st.settings.full_access_mode = enabling;
-      saveSettings();
-      syncChips();
-      let stopRequested = false;
-      if (!enabling && st.sending && window.__atria && window.__atria.chat_stop) {
-        stopRequested = true;
-        window.__atria.chat_stop().catch(() => {});
-      }
-      const limitedModeNote = st.settings.autonomous_mode
-        ? 'حالت خودکار محدودِ انتخاب‌شده برای وب عمومی و ورک‌اسپیس می‌ماند؛ GitHub دوباره تأیید می‌خواهد.'
-        : 'حالت پرسش پیش از اقدام بازگشت.';
-      toast(enabling
-        ? 'دسترسی خودکار گسترده روشن شد و از درخواست بعدی اعمال می‌شود؛ هر زمان خواستی خاموشش کن.'
-        : `دسترسی خودکار گسترده خاموش شد؛ ${limitedModeNote}${stopRequested ? ' توقف پاسخ جاری هم درخواست شد؛ اقدامی که شروع شده ممکن است تکمیل شده باشد.' : ''}`,
-      enabling ? 'warn' : 'ok');
-    };
+    els.fullAccessVal.onchange = () => setFullAccessMode(els.fullAccessVal.checked);
   }
-  if (els.fullAccessIndicator && els.btnSettings) {
-    els.fullAccessIndicator.onclick = () => {
-      els.btnSettings.click();
-      stabGo('sys');
-    };
+  if (els.fullAccessIndicator) {
+    els.fullAccessIndicator.onclick = () => setFullAccessMode(st.settings.full_access_mode !== true);
   }
   if (els.githubConnect) els.githubConnect.onclick = connectGithub;
   if (els.githubDisconnect) els.githubDisconnect.onclick = disconnectGithub;
@@ -1268,6 +1241,43 @@ function bindSettings() {
   if (els.btnRevealAtria) els.btnRevealAtria.onclick = () => {
     if (window.__atria && window.__atria.reveal_dir) window.__atria.reveal_dir().catch(() => {});
   };
+}
+
+function setFullAccessMode(enabled) {
+  const next = enabled === true;
+  if (next === (st.settings.full_access_mode === true)) {
+    if (els.fullAccessVal) els.fullAccessVal.checked = next;
+    syncChips();
+    return false;
+  }
+  if (next) {
+    const scopeLabel = els.fullAccessProfileVal && els.fullAccessProfileVal.value === 'profile'
+      ? 'پروفایل کاربر ویندوز (به‌جز مسیرهای محافظت‌شده)'
+      : 'فقط ورک‌اسپیس';
+    const accepted = !window.confirm || window.confirm(`دسترسی خودکار گسترده پرخطر است: عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی و نوشتن فایل در ${scopeLabel} بدون تأیید جداگانه اجرا می‌شوند. محتوای فایل‌های خوانده‌شده ممکن است به مدل فعال ارسال شود. توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ شِل/مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`);
+    if (!accepted) {
+      if (els.fullAccessVal) els.fullAccessVal.checked = false;
+      syncChips();
+      return false;
+    }
+  }
+  st.settings.full_access_mode = next;
+  if (els.fullAccessVal) els.fullAccessVal.checked = next;
+  saveSettings();
+  syncChips();
+  let stopRequested = false;
+  if (!next && st.sending && window.__atria && window.__atria.chat_stop) {
+    stopRequested = true;
+    window.__atria.chat_stop().catch(() => {});
+  }
+  const limitedModeNote = st.settings.autonomous_mode
+    ? 'حالت خودکار محدودِ انتخاب‌شده برای وب عمومی و ورک‌اسپیس می‌ماند؛ GitHub دوباره تأیید می‌خواهد.'
+    : 'حالت پرسش پیش از اقدام بازگشت.';
+  toast(next
+    ? 'Full Access روشن شد و از درخواست بعدی اعمال می‌شود؛ هر زمان خواستی خاموشش کن.'
+    : `Full Access خاموش شد؛ ${limitedModeNote}${stopRequested ? ' توقف پاسخ جاری هم درخواست شد؛ اقدامی که شروع شده ممکن است کامل شود.' : ''}`,
+  next ? 'warn' : 'ok');
+  return true;
 }
 
 function openModal(m) { m.classList.remove('hidden'); }
@@ -2839,7 +2849,11 @@ function syncChips() {
   els.chipFiles.classList.toggle('on', !!st.settings.file_tools);
   if (els.fullAccessIndicator) {
     const active = st.settings.full_access_mode === true;
-    els.fullAccessIndicator.classList.toggle('hidden', !active);
+    els.fullAccessIndicator.classList.toggle('on', active);
+    els.fullAccessIndicator.textContent = active ? '⚠ Full Access: روشن' : 'Full Access: خاموش';
+    els.fullAccessIndicator.title = active
+      ? 'Full Access فعال است؛ کلیک کن تا خاموش شود.'
+      : 'Full Access خاموش است؛ کلیک کن تا ابزارهای مجاز بدون تأیید موردی اجرا شوند.';
     els.fullAccessIndicator.setAttribute('aria-pressed', String(active));
   }
 }

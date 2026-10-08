@@ -735,7 +735,7 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   position: relative; display: flex; align-items: center; gap: 8px; padding: 10px 6px 0;
 }
 
-.mode-chips { display: flex; gap: 6px; margin-inline-start: auto; }
+.mode-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
 .mode-chip {
   padding: 6px 11px; border-radius: 99px; cursor: pointer;
   background: transparent; border: 1px solid var(--brd); color: var(--muted);
@@ -748,12 +748,31 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   box-shadow: 0 2px 12px rgba(124, 108, 255, 0.18);
 }
 .mode-chip.full-access-mode {
+  color: #e7c79d !important;
+  border-color: rgba(255, 190, 120, 0.30) !important;
+  background: rgba(255, 174, 87, 0.055) !important;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.mode-chip.full-access-mode:hover {
+  color: #ffe0b6 !important;
+  border-color: rgba(255, 190, 120, 0.52) !important;
+  background: rgba(255, 174, 87, 0.12) !important;
+}
+.mode-chip.full-access-mode.on {
   color: #ff9aaa !important;
   border-color: rgba(255, 111, 139, 0.55) !important;
   background: rgba(255, 72, 105, 0.12) !important;
-  font-weight: 700;
 }
-.mode-chip.full-access-mode:hover { background: rgba(255, 72, 105, 0.2) !important; }
+.mode-chip.full-access-mode.on:hover { background: rgba(255, 72, 105, 0.2) !important; }
+.mode-chip.full-access-mode:focus-visible {
+  outline: 2px solid rgba(255, 190, 120, 0.78);
+  outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .mode-chips { gap: 4px; justify-content: flex-start; }
+  .mode-chip { padding: 5px 8px; font-size: 10.5px; }
+}
 
 /* fancy thinking orb: spinning conic ring + glowing core */
 .think-box.has .think-orb { animation: none; box-shadow: none; background: none; }
