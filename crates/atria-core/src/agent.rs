@@ -254,6 +254,7 @@ pub async fn run_agent(
                         &cfg.github_token,
                         cfg.autonomous_mode,
                         cfg.full_access_mode,
+                        &cfg.downloads_root,
                         data_root,
                     ).await {
                         res

@@ -69,6 +69,9 @@ pub struct ClientConfig {
     pub full_access_mode: bool,
     /// Allow automatic file writes relative to the Windows user profile instead of only workspace.
     pub full_access_profile: bool,
+    /// Download root for the Full Access web-download tools; empty means the
+    /// user's Desktop. The model may only address relative subfolders inside it.
+    pub downloads_root: String,
     /// DeepSeek-web: the site's DeepThink toggle.
     pub web_thinking: bool,
     /// DeepSeek-web: the site's web-search toggle.
@@ -101,6 +104,7 @@ impl std::fmt::Debug for ClientConfig {
             .field("autonomous_mode", &self.autonomous_mode)
             .field("full_access_mode", &self.full_access_mode)
             .field("full_access_profile", &self.full_access_profile)
+            .field("downloads_root", &self.downloads_root)
             .field("web_thinking", &self.web_thinking)
             .field("web_search", &self.web_search)
             .field("web_session", &"<omitted>")
@@ -130,6 +134,7 @@ impl Default for ClientConfig {
             autonomous_mode: false,
             full_access_mode: false,
             full_access_profile: true,
+            downloads_root: String::new(),
             web_thinking: true,
             web_search: false,
             web_session: String::new(),

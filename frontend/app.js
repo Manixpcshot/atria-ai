@@ -70,6 +70,7 @@ const DEFAULTS = {
   full_access_mode: false,
   full_access_profile: true,
   workspace: '',
+  downloads_root: '',
   ds_search: false,
 };
 const LS_SETTINGS = 'atria.settings.v2';
@@ -115,6 +116,7 @@ function loadSettings() {
   s.autonomous_mode = s.autonomous_mode === true;
   s.full_access_mode = s.full_access_mode === true;
   s.full_access_profile = s.full_access_profile !== false;
+  s.downloads_root = typeof s.downloads_root === 'string' ? s.downloads_root : '';
   return s;
 }
 function saveSettings() {
@@ -1030,7 +1032,7 @@ function cacheEls() {
     tempVal: $('#tempVal'), tempOut: $('#tempOut'),
     thinkVal: $('#thinkVal'), memVal: $('#memVal'), streamVal: $('#streamVal'),
     sysVal: $('#sysVal'), maxTokVal: $('#maxTokVal'),
-    toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'),
+    toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'), dlRootVal: $('#dlRootVal'),
     webToolsVal: $('#webToolsVal'), githubToolsVal: $('#githubToolsVal'), autoModeVal: $('#autoModeVal'),
     fullAccessVal: $('#fullAccessVal'), fullAccessProfileVal: $('#fullAccessProfileVal'),
     githubTokenInput: $('#githubTokenInput'), githubConnect: $('#githubConnect'), githubDisconnect: $('#githubDisconnect'), githubStatus: $('#githubStatus'),
@@ -1183,6 +1185,7 @@ function bindSettings() {
   els.toolsVal.checked = !!st.settings.tools_enabled;
   els.fileToolsVal.checked = !!st.settings.file_tools;
   els.wsVal.value = st.settings.workspace || '';
+  if (els.dlRootVal) els.dlRootVal.value = st.settings.downloads_root || '';
   // فیلدهای متنی: ذخیره با تأخیر (تایپ بدون لگ) + نهایی‌سازی در blur
   els.sysVal.oninput = () => { st.settings.system = els.sysVal.value; saveSettingsSoon(); };
   els.sysVal.onblur = saveSettings;
@@ -1238,6 +1241,14 @@ function bindSettings() {
     st.settings.workspace = els.wsVal.value;
     saveSettings();
   };
+  if (els.dlRootVal) {
+    els.dlRootVal.oninput = () => { st.settings.downloads_root = els.dlRootVal.value; saveSettingsSoon(); };
+    els.dlRootVal.onblur = () => {
+      els.dlRootVal.value = els.dlRootVal.value.trim();
+      st.settings.downloads_root = els.dlRootVal.value;
+      saveSettings();
+    };
+  }
   if (els.btnRevealAtria) els.btnRevealAtria.onclick = () => {
     if (window.__atria && window.__atria.reveal_dir) window.__atria.reveal_dir().catch(() => {});
   };
@@ -1931,6 +1942,7 @@ function startTurn() {
       full_access_mode: st.settings.full_access_mode === true,
       full_access_profile: st.settings.full_access_profile !== false,
       workspace: st.settings.workspace || '',
+      downloads_root: (st.settings.downloads_root || '').trim(),
       thinking: !!st.settings.thinking,
       web_search: !!st.settings.ds_search,
       session_id: (chat && chat.dsSession) || '',

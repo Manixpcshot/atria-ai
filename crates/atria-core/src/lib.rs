@@ -13,6 +13,7 @@
 
 pub mod agent;
 pub mod client;
+pub mod downloads;
 pub mod dsweb;
 pub mod github;
 pub mod memory;

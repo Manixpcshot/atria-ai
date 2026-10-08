@@ -29,7 +29,7 @@
           <span class="brand-sub">DAWN</span>
         </div>
         <span class="model-badge" id="modelChip">Atria-Dawn-Preview</span>
-        <span class="app-ver" id="appVer">v0.12.0</span>
+        <span class="app-ver" id="appVer">v0.13.0</span>
         <span class="tok-chip hidden" id="tokChip" title="مصرف توکن آخرین اجرا"></span>
       </div>
       <div class="titlebar-actions">
@@ -279,7 +279,7 @@
           <div class="set-row">
             <div class="set-row-text">
               <div class="set-label">وب و مرورگر</div>
-              <div class="set-desc">جست‌وجو/خواندن برای همهٔ ارائه‌دهنده‌ها؛ بازکردن URL عمومی در مرورگر هم تابع سیاست تأیید بالاست. بدون اجرای اسکریپت یا دریافت فایل باینری.</div>
+              <div class="set-desc">جست‌وجو/خواندن برای همهٔ ارائه‌دهنده‌ها؛ بازکردن URL عمومی در مرورگر تابع سیاست تأیید است. دانلود فایل فقط در Full Access و فقط تصویر/مستند داخل پوشهٔ دسکتاپ؛ بدون اجرای اسکریپت و بدون نشست مرورگر.</div>
             </div>
             <label class="switch-field sm"><input type="checkbox" id="webToolsVal"><span class="switch"></span></label>
           </div>
@@ -301,7 +301,7 @@
           <div class="set-row">
             <div class="set-row-text">
               <div class="set-label">Full Access — دسترسی خودکار گسترده</div>
-              <div class="set-desc">برای ابزارهای فعالِ فایل، وب و عملیات پشتیبانی‌شدهٔ GitHub تأیید جداگانه نمی‌گیرد؛ از درخواست بعدی اعمال می‌شود و نتیجهٔ هر ابزار ثبت می‌شود. خاموش‌کردن حین اجرا، توقف پاسخ جاری را درخواست می‌کند؛ اقدامی که شروع شده ممکن است کامل شود.</div>
+              <div class="set-desc">برای ابزارهای فعالِ فایل، وب (شامل دانلود تصویر/مستند در پوشهٔ دسکتاپ) و عملیات پشتیبانی‌شدهٔ GitHub تأیید جداگانه نمی‌گیرد؛ از درخواست بعدی اعمال می‌شود و نتیجهٔ هر ابزار ثبت می‌شود. خاموش‌کردن حین اجرا، توقف پاسخ جاری را درخواست می‌کند؛ اقدامی که شروع شده ممکن است کامل شود.</div>
             </div>
             <label class="switch-field sm"><input type="checkbox" id="fullAccessVal"><span class="switch"></span></label>
           </div>
@@ -327,6 +327,11 @@
           <div class="field">
             <label class="flabel">پوشهٔ کاری (Workspace)</label>
             <input type="text" id="wsVal" dir="ltr" spellcheck="false" placeholder="پیش‌فرض: .atria/workspace در پوشهٔ کاربر">
+          </div>
+          <div class="field">
+            <label class="flabel">پوشهٔ دانلود فایل‌های وب (Full Access)</label>
+            <input type="text" id="dlRootVal" dir="ltr" spellcheck="false" placeholder="پیش‌فرض: دسکتاپ">
+            <span class="fhint">فقط در Full Access: ایجنت می‌تواند فایل عمومیِ تصویر/مستند (نه برنامه، اسکریپت یا بایگانی) را داخل این پوشه — پیش‌فرض دسکتاپ — ذخیره کند؛ فقط زیرپوشهٔ نسبی، بدون جایگزینی فایل موجود، حداکثر ۲۵ مگابایت برای هر فایل و ۲۵ فایل در هر مرحله. بدون نشست مرورگر، کوکی یا شِل.</span>
           </div>
           <div class="field">
             <label class="flabel">حداکثر طول هر بخش پاسخ (توکن خروجی)</label>

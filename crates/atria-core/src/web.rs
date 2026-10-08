@@ -196,14 +196,14 @@ fn validate_resolved_addresses(addrs: &[SocketAddr]) -> Result<(), String> {
     Ok(())
 }
 
-async fn public_client_for(url: &Url) -> Result<Client, String> {
+async fn public_client_for(url: &Url, user_agent: &str, total_timeout: Duration) -> Result<Client, String> {
     validate_public_url(url.as_str())?;
     let host = url.host_str().ok_or_else(|| "URL میزبان ندارد".to_string())?;
     let port = url.port_or_known_default().ok_or_else(|| "درگاه URL معتبر نیست".to_string())?;
     let mut builder = Client::builder()
-        .user_agent(USER_AGENT)
+        .user_agent(user_agent)
         .connect_timeout(Duration::from_secs(8))
-        .timeout(Duration::from_secs(18))
+        .timeout(total_timeout)
         // Environment proxies may resolve the destination themselves and
         // bypass our checked/pinned DNS addresses.
         .no_proxy()
@@ -232,12 +232,29 @@ async fn public_client_for(url: &Url) -> Result<Client, String> {
 /// Make a GET while pinning each host to DNS addresses that were checked as
 /// globally routable. Redirects are followed manually so every target gets the
 /// same validation and pinning before a connection is opened.
-async fn public_get(mut url: Url, accept: &str) -> Result<reqwest::Response, String> {
+async fn public_get(url: Url, accept: &str) -> Result<reqwest::Response, String> {
+    public_get_with(url, accept, USER_AGENT, &[], Duration::from_secs(18)).await
+}
+
+/// Pinned public GET with a caller-selected user agent, extra headers, and
+/// total timeout. The Full Access download tools use this for browser-like
+/// requests to some public pages and for larger file bodies.
+pub async fn public_get_with(
+    mut url: Url,
+    accept: &str,
+    user_agent: &str,
+    extra_headers: &[(&str, &str)],
+    total_timeout: Duration,
+) -> Result<reqwest::Response, String> {
     for followed in 0..=5 {
-        let client = public_client_for(&url).await?;
-        let response = client.get(url.clone())
-            .header(reqwest::header::ACCEPT, accept)
-            .send().await
+        let client = public_client_for(&url, user_agent, total_timeout).await?;
+        let mut request = client.get(url.clone()).header(reqwest::header::ACCEPT, accept);
+        for (key, value) in extra_headers {
+            request = request.header(key, value);
+        }
+        let response = request
+            .send()
+            .await
             .map_err(|e| format!("request failed: {e}"))?;
         if !response.status().is_redirection() {
             return Ok(response);
@@ -256,7 +273,8 @@ async fn public_get(mut url: Url, accept: &str) -> Result<reqwest::Response, Str
     Err("too many redirects".into())
 }
 
-async fn read_bounded(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>, String> {
+/// Read a response body with a hard byte cap (also used by the download tools).
+pub async fn read_public_body(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>, String> {
     if let Some(length) = response.content_length() {
         if length > limit as u64 {
             return Err("پاسخ وب از سقف اندازهٔ مجاز بزرگ‌تر است".into());
@@ -270,6 +288,36 @@ async fn read_bounded(mut response: reqwest::Response, limit: usize) -> Result<V
         body.extend_from_slice(&chunk);
     }
     Ok(body)
+}
+
+/// GET a public file and return (final URL, content type, capped bytes).
+/// Hosts are pinned to checked public DNS addresses and every redirect hop is
+/// re-validated before a connection is opened.
+pub async fn public_get_bytes(
+    raw_url: &str,
+    accept: &str,
+    user_agent: &str,
+    limit: usize,
+) -> Result<(Url, String, Vec<u8>), String> {
+    let url = validate_public_url(raw_url)?;
+    let response = public_get_with(url, accept, user_agent, &[], Duration::from_secs(60))
+        .await
+        .map_err(|e| format!("دریافت فایل وب ناموفق بود: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("میزبان پاسخ HTTP {} داد", response.status().as_u16()));
+    }
+    let final_url = response.url().clone();
+    if validate_public_url(final_url.as_str()).is_err() {
+        return Err("مسیر تغییرمسیر به میزبان مسدودشده رسید".into());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let body = read_public_body(response, limit).await?;
+    Ok((final_url, content_type, body))
 }
 
 /// Search the public web through DuckDuckGo's HTML endpoint; no provider key is needed.
@@ -287,7 +335,7 @@ pub async fn search(query: &str, count: usize) -> Result<String, String> {
     if !response.status().is_success() {
         return Err(format!("موتور جست‌وجو پاسخ HTTP {} داد", response.status().as_u16()));
     }
-    let body = read_bounded(response, MAX_SEARCH_BODY).await?;
+    let body = read_public_body(response, MAX_SEARCH_BODY).await?;
     let html = String::from_utf8_lossy(&body);
     let results = parse_results(&html, count);
     if results.is_empty() {
@@ -329,7 +377,7 @@ pub async fn open_page(raw_url: &str) -> Result<String, String> {
         return Err("این ابزار فقط متن/HTML/JSON می‌خواند و فایل باینری را دریافت نمی‌کند".into());
     }
     let final_url = response.url().to_string();
-    let body = read_bounded(response, MAX_PAGE_BODY).await?;
+    let body = read_public_body(response, MAX_PAGE_BODY).await?;
     let text = String::from_utf8_lossy(&body);
     let readable = if content_type.contains("text/html") || text.trim_start().starts_with('<') {
         html_to_text(&text)

@@ -50,6 +50,9 @@ pub struct ChatPayload {
     /// When Full Access is on, allow backed-up writes under the Windows user profile (excluding protected paths).
     #[serde(default = "default_true")]
     pub full_access_profile: bool,
+    /// Download root for Full Access web downloads; empty means the user's Desktop.
+    #[serde(default)]
+    pub downloads_root: String,
     /// Workspace root for the file tools.
     #[serde(default)]
     pub workspace: String,
@@ -113,6 +116,7 @@ pub async fn test_connection(base: String, key: String, model: String, kind: Str
         autonomous_mode: false,
         full_access_mode: false,
         full_access_profile: true,
+        downloads_root: String::new(),
         web_thinking: false,
         web_search: false,
         web_session: String::new(),
@@ -411,6 +415,7 @@ pub async fn chat_send(
             autonomous_mode: payload.autonomous_mode,
             full_access_mode: payload.full_access_mode,
             full_access_profile: payload.full_access_profile,
+            downloads_root: payload.downloads_root.trim().to_string(),
             web_thinking: payload.thinking,
             web_search: payload.web_search,
             web_session: payload.session_id,
