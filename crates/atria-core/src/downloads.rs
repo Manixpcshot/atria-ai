@@ -19,7 +19,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
@@ -35,7 +35,7 @@ const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", "svg"];
 const ALLOWED_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", "svg", "pdf", "txt", "md", "csv", "json", "html", "xml"];
 
-static SEEN_URLS: Mutex<HashSet<u64>> = Mutex::new(HashSet::new());
+static SEEN_URLS: LazyLock<Mutex<HashSet<u64>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
 fn url_hash(url: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -83,7 +83,8 @@ pub fn resolve_download_root(configured: &str, data_root: &Path) -> Result<PathB
     }
     for part in canonical.components() {
         if let std::path::Component::Normal(name) = part {
-            if is_protected_file_component(&name.to_string_lossy()) {
+            let name = name.to_string_lossy().to_string();
+            if is_protected_file_component(&name) {
                 return Err(format!("پوشهٔ دانلود به مسیر محافظت‌شدهٔ '{name}' اشاره می‌کند و مسدود است"));
             }
         }
@@ -320,6 +321,19 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Percent-encode a URL path segment (unreserved characters pass through).
+fn percent_encode_segment(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for b in input.as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(*b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 /// Choose a never-colliding file name inside `dir` (existing files survive).
 fn unique_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
     let mut n = 1usize;
@@ -517,11 +531,9 @@ pub async fn pinterest_tag_images(
     };
     let target_dir = create_scoped_dir(&root, &components)?;
 
-    let mut page_url = Url::parse("https://www.pinterest.com/pins/").map_err(|e| format!("URL پینترست نامعتبر است: {e}"))?;
-    page_url
-        .path_segments_mut()
-        .map_err(|e| format!("URL پینترست نامعتبر است: {e}"))?
-        .push(&format!("tag-{slug}"));
+    let page_raw = format!("https://www.pinterest.com/pins/tag-{}/", percent_encode_segment(&slug));
+    let page_url = Url::parse(&page_raw)
+        .map_err(|e| format!("URL پینترست نامعتبر است: {e}"))?;
 
     let response = crate::web::public_get_with(
         page_url,
@@ -551,7 +563,8 @@ pub async fn pinterest_tag_images(
     let fresh: Vec<String> = wanted.into_iter().filter(|url| seen_note(url)).collect();
     if fresh.is_empty() {
         return Ok(format!(
-            "همهٔ این تصاویرِ صفحهٔ تگ «{slug}» قبلاً در این جلسه دانلود شده‌اند.\nپوشه: {}\nبرای دریافت دفعات بعدی دوباره درخواست کن تا دسته‌های تازهٔ صفحه بیاید.",
+            "همهٔ این تصاویرِ صفحهٔ تگ «{}» قبلاً در این جلسه دانلود شده‌اند.\nپوشه: {}\nبرای دریافت دفعات بعدی دوباره درخواست کن تا دسته‌های تازهٔ صفحه بیاید.",
+            slug,
             target_dir.display()
         ));
     }
@@ -579,8 +592,9 @@ pub async fn pinterest_tag_images(
     let skipped = wanted.len() - fresh.len();
     let mut out = String::new();
     out.push_str(&format!(
-        "تگ پینترست «{slug}»: {count} تصویر در {} ذخیره شد.\n",
-        count = ok_files.len(),
+        "تگ پینترست «{}»: {} تصویر در {} ذخیره شد.\n",
+        slug,
+        ok_files.len(),
         target_dir.display()
     ));
     if skipped > 0 {
@@ -589,7 +603,7 @@ pub async fn pinterest_tag_images(
     if failed > 0 {
         out.push_str(&format!("{failed} دانلود با خطا مواجه شد؛ می‌توانی دوباره امتحان کنی.\n"));
     }
-    let listed: Vec<&String> = ok_files.iter().take(30).collect();
+    let listed: Vec<&str> = ok_files.iter().take(30).map(String::as_str).collect();
     out.push_str(&format!("فایل‌ها: {}\n", listed.join(", ")));
     if ok_files.len() > 30 {
         out.push_str(&format!("… و {} فایل دیگر\n", ok_files.len() - 30));

@@ -250,6 +250,7 @@ pub async fn public_get_with(
         let client = public_client_for(&url, user_agent, total_timeout).await?;
         let mut request = client.get(url.clone()).header(reqwest::header::ACCEPT, accept);
         for (key, value) in extra_headers {
+            let (key, value) = (*key, *value);
             request = request.header(key, value);
         }
         let response = request
