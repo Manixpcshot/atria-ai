@@ -69,6 +69,13 @@ pub struct ClientConfig {
     pub full_access_mode: bool,
     /// Allow automatic file writes relative to the Windows user profile instead of only workspace.
     pub full_access_profile: bool,
+    /// Full Access system file scope: file tools also accept absolute local
+    /// paths (e.g. C:/Users/you/...) with the same guards; relative paths stay
+    /// workspace-scoped.
+    pub full_access_system: bool,
+    /// Full Access bounded system tools: read-only system info and fixed
+    /// Windows Settings pages (no shell, no explorer, no app launching).
+    pub computer_tools: bool,
     /// Download root for the Full Access web-download tools; empty means the
     /// user's Desktop. The model may only address relative subfolders inside it.
     pub downloads_root: String,
@@ -104,6 +111,8 @@ impl std::fmt::Debug for ClientConfig {
             .field("autonomous_mode", &self.autonomous_mode)
             .field("full_access_mode", &self.full_access_mode)
             .field("full_access_profile", &self.full_access_profile)
+            .field("full_access_system", &self.full_access_system)
+            .field("computer_tools", &self.computer_tools)
             .field("downloads_root", &self.downloads_root)
             .field("web_thinking", &self.web_thinking)
             .field("web_search", &self.web_search)
@@ -134,6 +143,8 @@ impl Default for ClientConfig {
             autonomous_mode: false,
             full_access_mode: false,
             full_access_profile: true,
+            full_access_system: false,
+            computer_tools: true,
             downloads_root: String::new(),
             web_thinking: true,
             web_search: false,

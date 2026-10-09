@@ -25,19 +25,20 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      - name: Validate frontend integration
-        run: |
-          node --check frontend/app.js
-          node --check tests/ui_harness.mjs
-          node tests/ui_harness.mjs
+      - name: Syntax-check frontend
+        run: node --check frontend/app.js
+      - name: Syntax-check UI harness
+        run: node --check tests/ui_harness.mjs
+      - name: Run UI harness
+        run: node tests/ui_harness.mjs
 
       - name: Build Atria (release)
         run: cargo build --release --locked -p atria-app
 
-      - name: Run engine and app tests
-        run: |
-          cargo test --release --locked -p atria-core
-          cargo test --release --locked -p atria-app
+      - name: Test atria-core
+        run: cargo test --release --locked -p atria-core
+      - name: Test atria-app
+        run: cargo test --release --locked -p atria-app
 
       - name: Package artifacts
         shell: pwsh

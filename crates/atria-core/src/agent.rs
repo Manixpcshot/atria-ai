@@ -4,7 +4,8 @@ use crate::client::{send, strip_thinking, is_output_limit_stop_reason, ClientCon
 use crate::memory::MemoryStore;
 use crate::tools::{
     auto_file_write, auto_file_write_full_access, execute_async_tool, execute_with_data_root,
-    file_tool_catalog_for_access, github_tool_catalog_for_access, tool_catalog, tool_label,
+    computer_tool_catalog, file_tool_catalog_for_access, github_tool_catalog_for_access,
+    tool_catalog, tool_label,
     web_tool_catalog_for_access,
 };
 use crate::types::{Block, Message, Role};
@@ -115,6 +116,7 @@ pub async fn run_agent(
                 cfg.autonomous_mode,
                 cfg.full_access_mode,
                 cfg.full_access_profile,
+                cfg.full_access_system,
             ));
         }
         if cfg.web_tools {
@@ -122,6 +124,9 @@ pub async fn run_agent(
         }
         if cfg.github_tools {
             tools.extend(github_tool_catalog_for_access(cfg.full_access_mode));
+        }
+        if cfg.full_access_mode && cfg.computer_tools {
+            tools.extend(computer_tool_catalog());
         }
         let mut request_cfg = cfg.clone();
         request_cfg.tool_use_enabled = !tools.is_empty();
@@ -245,7 +250,7 @@ pub async fn run_agent(
                             is_error: true,
                         }
                     } else if name == "write_file" && cfg.full_access_mode {
-                        auto_file_write_full_access(input, root, cfg.full_access_profile, data_root)
+                        auto_file_write_full_access(input, root, cfg.full_access_profile, cfg.full_access_system, data_root)
                     } else if name == "write_file" && cfg.autonomous_mode {
                         auto_file_write(input, root, data_root)
                     } else if let Some(res) = execute_async_tool(
@@ -259,7 +264,7 @@ pub async fn run_agent(
                     ).await {
                         res
                     } else {
-                        execute_with_data_root(name, input, mem, root, data_root)
+                        execute_with_data_root(name, input, mem, root, data_root, cfg.full_access_system)
                     };
                     emit(AgentEvent::ToolEnd {
                         id: id.clone(),

@@ -300,8 +300,20 @@ pub async fn public_get_bytes(
     user_agent: &str,
     limit: usize,
 ) -> Result<(Url, String, Vec<u8>), String> {
+    public_get_bytes_with(raw_url, accept, user_agent, &[], limit).await
+}
+
+/// Same as [`public_get_bytes`] with an extra header set — used for
+/// browser-like requests to hosts that reject plain bot user agents.
+pub async fn public_get_bytes_with(
+    raw_url: &str,
+    accept: &str,
+    user_agent: &str,
+    extra_headers: &[(&str, &str)],
+    limit: usize,
+) -> Result<(Url, String, Vec<u8>), String> {
     let url = validate_public_url(raw_url)?;
-    let response = public_get_with(url, accept, user_agent, &[], Duration::from_secs(60))
+    let response = public_get_with(url, accept, user_agent, extra_headers, Duration::from_secs(60))
         .await
         .map_err(|e| format!("دریافت فایل وب ناموفق بود: {e}"))?;
     if !response.status().is_success() {

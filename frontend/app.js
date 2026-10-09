@@ -69,6 +69,8 @@ const DEFAULTS = {
   autonomous_mode: false,
   full_access_mode: false,
   full_access_profile: true,
+  full_access_system: false,
+  computer_tools: true,
   workspace: '',
   downloads_root: '',
   ds_search: false,
@@ -116,6 +118,8 @@ function loadSettings() {
   s.autonomous_mode = s.autonomous_mode === true;
   s.full_access_mode = s.full_access_mode === true;
   s.full_access_profile = s.full_access_profile !== false;
+  s.full_access_system = s.full_access_system === true;
+  s.computer_tools = s.computer_tools !== false;
   s.downloads_root = typeof s.downloads_root === 'string' ? s.downloads_root : '';
   return s;
 }
@@ -1032,9 +1036,9 @@ function cacheEls() {
     tempVal: $('#tempVal'), tempOut: $('#tempOut'),
     thinkVal: $('#thinkVal'), memVal: $('#memVal'), streamVal: $('#streamVal'),
     sysVal: $('#sysVal'), maxTokVal: $('#maxTokVal'),
-    toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'), dlRootVal: $('#dlRootVal'),
+    toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'), dlRootVal: $('#dlRootVal'), dlRootInfo: $('#dlRootInfo'),
     webToolsVal: $('#webToolsVal'), githubToolsVal: $('#githubToolsVal'), autoModeVal: $('#autoModeVal'),
-    fullAccessVal: $('#fullAccessVal'), fullAccessProfileVal: $('#fullAccessProfileVal'),
+    fullAccessVal: $('#fullAccessVal'), fullAccessProfileVal: $('#fullAccessProfileVal'), computerToolsVal: $('#computerToolsVal'),
     githubTokenInput: $('#githubTokenInput'), githubConnect: $('#githubConnect'), githubDisconnect: $('#githubDisconnect'), githubStatus: $('#githubStatus'),
     dsSearchRow: $('#dsSearchRow'), dsSearchVal: $('#dsSearchVal'),
     tokenGuide: $('#tokenGuide'), tokenGuideX: $('#tokenGuideX'), tokenGuideClose: $('#tokenGuideClose'),
@@ -1182,10 +1186,27 @@ function bindSettings() {
       toast('بودجهٔ پنجرهٔ گفتگو ذخیره شد', 'ok');
     };
   }
+function refreshDlRootInfo() {
+  if (!els.dlRootInfo) return;
+  const configured = (st.settings.downloads_root || '').trim();
+  if (!(window.__atria && window.__atria.downloads_root_info)) {
+    els.dlRootInfo.textContent = '';
+    return;
+  }
+  window.__atria.downloads_root_info(configured)
+    .then((r) => {
+      if (r && r.error) els.dlRootInfo.textContent = '⚠ ' + r.error;
+      else if (r && r.resolved) els.dlRootInfo.textContent = 'پوشهٔ مؤثر: ' + r.resolved;
+      else els.dlRootInfo.textContent = '';
+    })
+    .catch(() => { els.dlRootInfo.textContent = ''; });
+}
+
   els.toolsVal.checked = !!st.settings.tools_enabled;
   els.fileToolsVal.checked = !!st.settings.file_tools;
   els.wsVal.value = st.settings.workspace || '';
   if (els.dlRootVal) els.dlRootVal.value = st.settings.downloads_root || '';
+  refreshDlRootInfo();
   // فیلدهای متنی: ذخیره با تأخیر (تایپ بدون لگ) + نهایی‌سازی در blur
   els.sysVal.oninput = () => { st.settings.system = els.sysVal.value; saveSettingsSoon(); };
   els.sysVal.onblur = saveSettings;
@@ -1216,11 +1237,17 @@ function bindSettings() {
     };
   }
   if (els.fullAccessProfileVal) {
-    els.fullAccessProfileVal.value = st.settings.full_access_profile ? 'profile' : 'workspace';
+    els.fullAccessProfileVal.value = st.settings.full_access_system ? 'system' : (st.settings.full_access_profile ? 'profile' : 'workspace');
     els.fullAccessProfileVal.onchange = () => {
-      st.settings.full_access_profile = els.fullAccessProfileVal.value === 'profile';
+      const v = els.fullAccessProfileVal.value;
+      st.settings.full_access_system = v === 'system';
+      st.settings.full_access_profile = v !== 'workspace';
       saveSettings();
     };
+  }
+  if (els.computerToolsVal) {
+    els.computerToolsVal.checked = st.settings.computer_tools !== false;
+    els.computerToolsVal.onchange = () => { st.settings.computer_tools = els.computerToolsVal.checked; saveSettings(); };
   }
   if (els.fullAccessVal) {
     els.fullAccessVal.checked = st.settings.full_access_mode === true;
@@ -1247,6 +1274,7 @@ function bindSettings() {
       els.dlRootVal.value = els.dlRootVal.value.trim();
       st.settings.downloads_root = els.dlRootVal.value;
       saveSettings();
+      refreshDlRootInfo();
     };
   }
   if (els.btnRevealAtria) els.btnRevealAtria.onclick = () => {
@@ -1262,9 +1290,10 @@ function setFullAccessMode(enabled) {
     return false;
   }
   if (next) {
-    const scopeLabel = els.fullAccessProfileVal && els.fullAccessProfileVal.value === 'profile'
-      ? 'پروفایل کاربر ویندوز (به‌جز مسیرهای محافظت‌شده)'
-      : 'فقط ورک‌اسپیس';
+    const scopeVal = els.fullAccessProfileVal ? els.fullAccessProfileVal.value : 'workspace';
+    const scopeLabel = scopeVal === 'system'
+      ? 'کل سیستم (مسیر مطلق، با محافظت)'
+      : scopeVal === 'profile' ? 'پروفایل کاربر ویندوز (به‌جز مسیرهای محافظت‌شده)' : 'فقط ورک‌اسپیس';
     const accepted = !window.confirm || window.confirm(`دسترسی خودکار گسترده پرخطر است: عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی و نوشتن فایل در ${scopeLabel} بدون تأیید جداگانه اجرا می‌شوند. محتوای فایل‌های خوانده‌شده از ورک‌اسپیسِ مجاز ممکن است به مدل فعال ارسال شود. توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ شِل/مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`);
     if (!accepted) {
       if (els.fullAccessVal) els.fullAccessVal.checked = false;
@@ -1941,6 +1970,8 @@ function startTurn() {
       autonomous_mode: st.settings.autonomous_mode === true,
       full_access_mode: st.settings.full_access_mode === true,
       full_access_profile: st.settings.full_access_profile !== false,
+      full_access_system: st.settings.full_access_system === true,
+      computer_tools: st.settings.computer_tools !== false,
       workspace: st.settings.workspace || '',
       downloads_root: (st.settings.downloads_root || '').trim(),
       thinking: !!st.settings.thinking,

@@ -85,6 +85,7 @@ fn main() {
             commands::open_pending_url,
             commands::reject_pending_url,
             commands::dirs_info,
+            commands::downloads_root_info,
             commands::chats_load,
             commands::chats_sync,
             commands::reveal_dir,

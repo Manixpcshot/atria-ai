@@ -196,7 +196,7 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'settingsModal', 'settingsX', 'settingsTitle', 'settingsSubtitle', 'memoryModal', 'memoryX', 'memoryClose',
   'memList', 'memClear', 'btnWipe', 'cmdk', 'cmdkInput', 'cmdkList', 'cmdkX', 'toasts',
   'tempVal', 'tempOut', 'thinkVal', 'memVal', 'streamVal', 'sysVal', 'maxTokVal',
-  'toolsVal', 'fileToolsVal', 'wsVal', 'webToolsVal', 'githubToolsVal', 'autoModeVal', 'fullAccessVal', 'fullAccessProfileVal', 'githubTokenInput', 'githubConnect', 'githubDisconnect', 'githubStatus', 'dsSearchRow', 'dsSearchVal',
+  'toolsVal', 'fileToolsVal', 'wsVal', 'dlRootVal', 'dlRootInfo', 'webToolsVal', 'githubToolsVal', 'autoModeVal', 'fullAccessVal', 'fullAccessProfileVal', 'computerToolsVal', 'githubTokenInput', 'githubConnect', 'githubDisconnect', 'githubStatus', 'dsSearchRow', 'dsSearchVal',
   'tokenGuide', 'tokenGuideX', 'tokenGuideClose', 'connSummary', 'connList', 'connAdd', 'connForm', 'connsBody',
   'cfName', 'cfKind', 'cfTemplate', 'cfBase', 'cfKey', 'cfKeyEye', 'cfKeyLabel', 'cfTokenGuide', 'cfHint',
   'cfTags', 'cfModelInput', 'cfModelAdd', 'cfFetchModels', 'cfSrvWrap', 'cfSrvSearch', 'cfSrvList',
@@ -232,7 +232,7 @@ let urlOpenBehavior = 'ok';
 let chatsLoadCalled = 0;
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.13.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.14.0' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -253,10 +253,13 @@ function router(cmd, args = {}) {
       if (urlOpenBehavior === 'network-error') return Promise.reject(new Error('open failed'));
       return Promise.resolve('opened');
     case 'reject_pending_url': return Promise.resolve();
-    case 'update_check': return Promise.resolve({ current_version: '0.13.0', latest_version: '0.13.0', available: false, release_url: '', download_size: 0 });
+    case 'update_check': return Promise.resolve({ current_version: '0.14.0', latest_version: '0.14.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'chats_load': chatsLoadCalled++; return Promise.resolve(chatsLoadPayload);
     case 'dirs_info': return Promise.resolve({ chats: 'C:/u/.atria/chats', workspace: 'C:/u/.atria/workspace', memory: 'C:/u/.atria/memory.json' });
+    case 'downloads_root_info':
+      if (args.configured && args.configured.trim() === 'bad root') return Promise.resolve({ configured: args.configured, resolved: null, error: 'پوشهٔ دانلود پیدا نشد: bad' });
+      return Promise.resolve({ configured: args.configured || '', resolved: 'C:/Users/u/Desktop', error: null });
     case 'memory_list': return Promise.resolve([{ title: 'نکته', content: 'متن', ts: 'امروز' }]);
     case 'list_models': return Promise.resolve(['m-server-1', 'm-server-2']);
     default: return Promise.resolve({});
@@ -322,7 +325,7 @@ try { doc.dispatch('DOMContentLoaded'); if (win.__atriaBootPromise) await win.__
 console.log('\n=== 1) پل IPC + راه‌اندازی (boot) ===');
 ok('boot بدون خطا اجرا شد', !bootError, bootError && String(bootError));
 const needed = ['chat_send', 'chat_stop', 'memory_list', 'memory_clear', 'app_meta', 'list_models', 'test_connection', 'secret_set', 'secret_get', 'secret_delete', 'file_apply_edit', 'file_reject_edit', 'file_restore_backup', 'github_connect', 'github_status', 'github_disconnect', 'github_apply_action', 'github_reject_action', 'open_pending_url', 'reject_pending_url', 'update_check', 'update_install',
-  'minimize_win', 'maximize_win', 'close_win', 'chats_load', 'chats_sync', 'dirs_info', 'reveal_dir'];
+  'minimize_win', 'maximize_win', 'close_win', 'chats_load', 'chats_sync', 'dirs_info', 'downloads_root_info', 'reveal_dir'];
 const bridge = win.__atria;
 ok('پل IPC همهٔ توابع لازم را دارد', needed.every((k) => typeof bridge[k] === 'function'),
   needed.filter((k) => !bridge || typeof bridge[k] !== 'function').join(','));
@@ -337,10 +340,10 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.13.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.14.0');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
 ok('UI می‌گوید خواندن و فهرست‌کردن فایل فقط در ورک‌اسپیس است', indexHtml.includes('خواندن و فهرست‌کردن فقط داخل ورک‌اسپیس'));
-ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود می‌ماند'));
+ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس می‌ماند', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است') && indexHtml.includes('کل سیستم — مسیر مطلق (با محافظت)'));
 ok('UI فایل‌های دانلودشده را به پوشهٔ دسکتاپ (Full Access) محدود می‌داند', indexHtml.includes('پوشهٔ دانلود فایل‌های وب') && indexHtml.includes('پیش‌فرض: دسکتاپ') && indexHtml.includes('فقط در Full Access'));
 ok('Full Access در UI شامل دانلود تصویر/مستند می‌شود', indexHtml.includes('دانلود تصویر/مستند در پوشهٔ دسکتاپ'));
 ok('کلید قدیمی به مخزن امن منتقل شد', secretStore.get('c1') === 'k1');
@@ -361,6 +364,14 @@ confirmResult = true; byId.fullAccessVal.checked = true; byId.fullAccessVal.onch
 ok('تأیید صریح Full Access را فعال می‌کند و ذخیره می‌شود', T.st.settings.full_access_mode === true && JSON.parse(localStorage.getItem('atria.settings.v2')).full_access_mode === true && byId.fullAccessIndicator.classList.contains('on'));
 byId.fullAccessProfileVal.value = 'workspace'; byId.fullAccessProfileVal.onchange();
 ok('محدودهٔ نوشتن قابل‌تغییر است و انتخاب ورک‌اسپیس ذخیره می‌شود', T.st.settings.full_access_profile === false && JSON.parse(localStorage.getItem('atria.settings.v2')).full_access_profile === false);
+byId.fullAccessProfileVal.value = 'system'; byId.fullAccessProfileVal.onchange();
+ok('محدودهٔ «کل سیستم» فлаг‌های سیستمی و پروفایل را هم‌زمان روشن می‌کند', T.st.settings.full_access_system === true && T.st.settings.full_access_profile === true && JSON.parse(localStorage.getItem('atria.settings.v2')).full_access_system === true);
+byId.fullAccessProfileVal.value = 'workspace'; byId.fullAccessProfileVal.onchange();
+ok('بازگشت به ورک‌اسپیس فлаг‌های گسترده را خاموش می‌کند', T.st.settings.full_access_system === false && T.st.settings.full_access_profile === false);
+ok('ابزارهای محدودِ سیستم به‌صورت پیش‌فرض روشن‌اند', byId.computerToolsVal.checked === true && T.st.settings.computer_tools === true);
+byId.computerToolsVal.checked = false; byId.computerToolsVal.onchange();
+ok('خاموش‌کردن ابزارهای سیستم ذخیره می‌شود', T.st.settings.computer_tools === false && JSON.parse(localStorage.getItem('atria.settings.v2')).computer_tools === false);
+byId.computerToolsVal.checked = true; byId.computerToolsVal.onchange();
 T.st.sending = true; bridgeCalls.length = 0;
 byId.fullAccessIndicator.click();
 T.st.sending = false;
@@ -466,7 +477,7 @@ ok('chat_send صدا زده شد', bridgeCalls.some((c) => c[0] === 'chat_send')
 const sent = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
 eq('پیام کاربر در payload هست', sent.messages[sent.messages.length - 1].content[0].text, 'سلام آتریا');
 eq('مدلِ در حال اجرا درست است', sent.model, 'model-a');
-ok('web/GitHub/autonomy/Full Access policy در payload هست', sent.web_tools === true && sent.github_tools === true && sent.autonomous_mode === false && sent.full_access_mode === false && sent.full_access_profile === false);
+ok('web/GitHub/autonomy/Full Access policy در payload هست', sent.web_tools === true && sent.github_tools === true && sent.autonomous_mode === false && sent.full_access_mode === false && sent.full_access_profile === false && sent.full_access_system === false && sent.computer_tools === true);
 ok('پوشهٔ دانلود پیش‌فرض در payload خالی است (= دسکتاپ)', sent.downloads_root === '');
 ok('هیچ توکن GitHub وارد payload مدل نشد', !Object.prototype.hasOwnProperty.call(sent, 'github_token'));
 ok('حالت ارسال فعال شد', T.st.sending === true);
@@ -678,6 +689,11 @@ console.log('\n=== 15) بازیابی از دیسک (ادغام) ===');
   ok('reveal_dir از پل IPC عبور کرد', bridgeCalls.some((x) => x[0] === 'reveal_dir'));
   await bridge.dirs_info();
   ok('dirs_info از پل IPC عبور کرد', bridgeCalls.some((x) => x[0] === 'dirs_info'));
+  const dli1 = await bridge.downloads_root_info('');
+  ok('downloads_root_info پوشهٔ مؤثر را برمی‌گرداند', !!dli1 && dli1.resolved === 'C:/Users/u/Desktop' && dli1.error === null, JSON.stringify(dli1));
+  const dli2 = await bridge.downloads_root_info('bad root');
+  ok('downloads_root_info خطای ریشه را گزارش می‌دهد', !!dli2 && dli2.resolved === null && /پیدا نشد/.test(dli2.error), JSON.stringify(dli2));
+  ok('dlRootInfo در تنظیمات متن دارد', !!(byId.dlRootInfo && byId.dlRootInfo.textContent), String(byId.dlRootInfo && byId.dlRootInfo.textContent));
 }
 
 console.log('\n=== 16) تغییرات فایل و به‌روزرسانی امن ===');

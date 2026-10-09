@@ -60,7 +60,7 @@ pub fn tool_catalog() -> Vec<Value> {
 
 /// File-access tools (advertised when enabled).
 pub fn file_tool_catalog() -> Vec<Value> {
-    file_tool_catalog_for_access(false, false, false)
+    file_tool_catalog_for_access(false, false, false, false)
 }
 
 /// The tool description matches the trust mode for this request; enforcement is
@@ -69,14 +69,22 @@ pub fn file_tool_catalog_for_access(
     autonomous_mode: bool,
     full_access_mode: bool,
     full_access_profile: bool,
+    full_access_system: bool,
 ) -> Vec<Value> {
     let write_description = if full_access_mode {
-        let scope = if full_access_profile {
+        let scope = if full_access_system {
+            "an absolute path on this computer (e.g. C:/Users/you/...); a restorable backup is created. System directories (Windows, Program Files, ProgramData, ...), Atria private data, credential/browser paths such as AppData, .ssh, .env, and symlinks are blocked"
+        } else if full_access_profile {
             "a relative path under the Windows user profile, excluding AppData, Atria private data, sensitive config/credential paths such as .ssh, .config, and .env, and symlinks"
         } else {
             "a relative path inside the configured workspace"
         };
-        format!("Write a UTF-8 text file automatically, without a separate approval, only within {scope}. A restorable backup is created and the tool result is the source of truth. Absolute/traversal paths, symlinks, and protected credential/browser locations are blocked. Reads and listings remain restricted to the configured workspace.")
+        let read_note = if full_access_system {
+            "Reads and listings accept absolute paths (e.g. C:/Users/you/...) or relative workspace paths; the same protected locations are blocked."
+        } else {
+            "Reads and listings remain restricted to the configured workspace."
+        };
+        format!("Write a UTF-8 text file automatically, without a separate approval, only within {scope}. A restorable backup is created and the tool result is the source of truth. Traversal, symlinks, and protected credential/browser/system locations are blocked. {read_note}")
     } else if autonomous_mode {
         "Prepare a UTF-8 text file change. In autonomous mode, only a relative path inside the configured workspace may be applied automatically, and a restorable backup is created. Absolute paths, traversal, symlinks, and sensitive credential/browser locations are blocked. In ask-first mode, show the diff and wait for explicit approval. Never write outside the workspace in autonomous mode.".to_string()
     } else {
@@ -85,17 +93,25 @@ pub fn file_tool_catalog_for_access(
     vec![
         serde_json::json!({
             "name": "list_files",
-            "description": "List only files and folders inside the configured workspace using a relative path. Absolute paths, traversal, symlinks, and sensitive credential/browser locations are blocked.",
+            "description": if full_access_system {
+                "List files and folders using an absolute path (e.g. C:/Users/you/Documents) or a relative path inside the configured workspace. Traversal, symlinks, and protected credential/browser/system locations are blocked."
+            } else {
+                "List only files and folders inside the configured workspace using a relative path. Absolute paths, traversal, symlinks, and sensitive credential/browser locations are blocked."
+            },
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "relative folder path, e.g. 'notes'" }
+                    "path": { "type": "string", "description": "folder path; absolute (C:/...) when system file scope is on, otherwise relative to the workspace" }
                 }
             }
         }),
         serde_json::json!({
             "name": "read_file",
-            "description": "Read a UTF-8 text file only inside the configured workspace using a relative path. Absolute paths, traversal, symlinks, and sensitive credential/browser locations are blocked.",
+            "description": if full_access_system {
+                "Read a UTF-8 text file using an absolute path (e.g. C:/Users/you/notes.txt) or a relative path inside the configured workspace. Traversal, symlinks, and protected credential/browser/system locations are blocked."
+            } else {
+                "Read a UTF-8 text file only inside the configured workspace using a relative path. Absolute paths, traversal, symlinks, and sensitive credential/browser locations are blocked."
+            },
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -184,6 +200,27 @@ pub fn github_tool_catalog() -> Vec<Value> {
     github_tool_catalog_for_access(false)
 }
 
+/// Full Access system tools: a bounded read-only system snapshot and opening
+/// fixed Windows Settings pages. No shell, no arbitrary paths, no file access.
+pub fn computer_tool_catalog() -> Vec<Value> {
+    vec![
+        serde_json::json!({
+            "name": "system_info",
+            "description": "Read-only snapshot of this computer: OS version, computer name, CPU core count. Fixed queries only — no files, no credentials, no other data.",
+            "input_schema": { "type": "object", "properties": {} }
+        }),
+        serde_json::json!({
+            "name": "open_windows_settings",
+            "description": "Open a Windows Settings page (Windows only; the action is logged in chat). Allowed areas, exact match: network, wifi, ethernet, bluetooth, display, sound, notifications, apps, privacy, windows-update, power, date-time, accessibility, accounts, developer, defender, about.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "area": { "type": "string" } },
+                "required": ["area"]
+            }
+        }),
+    ]
+}
+
 pub fn github_tool_catalog_for_access(full_access_mode: bool) -> Vec<Value> {
     let mutation_description = if full_access_mode {
         "In Full Access mode, submit the allowlisted mutation automatically without a separate approval. Supported operations only: create_issue, create_comment, create_pull_request, create_file, update_file. The GitHub token's own permissions still apply. Delete/destructive operations, merge, secrets, settings, and admin operations are not supported. File updates require expected_sha from github_read_file and are cancelled if the remote file changed."
@@ -261,6 +298,8 @@ pub fn tool_label(name: &str) -> &'static str {
         "list_files" => "فهرست فایل‌ها",
         "read_file" => "خواندن فایل",
         "write_file" => "نوشتن فایل",
+        "system_info" => "اطلاعات سیستم",
+        "open_windows_settings" => "بازکردن صفحات تنظیمات",
         "web_search" => "جست‌وجوی وب",
         "open_web_page" => "خواندن صفحهٔ وب",
         "open_url" => "بازکردن در مرورگر",
@@ -284,7 +323,7 @@ pub fn execute(name: &str, input: &Value, mem: &mut MemoryStore, root: &Path) ->
     } else {
         root.join(".atria-state")
     };
-    execute_with_data_root(name, input, mem, root, &data_root)
+    execute_with_data_root(name, input, mem, root, &data_root, false)
 }
 
 /// Execute one tool with an explicit private app-data root (used by the Tauri shell).
@@ -294,6 +333,7 @@ pub fn execute_with_data_root(
     mem: &mut MemoryStore,
     root: &Path,
     data_root: &Path,
+    system_scope: bool,
 ) -> ToolOutcome {
     match name {
         "calculator" => {
@@ -347,9 +387,11 @@ pub fn execute_with_data_root(
                 ToolOutcome { output: out, is_error: false }
             }
         }
-        "list_files" => file_list(input, root),
-        "read_file" => file_read(input, root),
-        "write_file" => file_write(input, root, data_root),
+        "list_files" => file_list(input, root, system_scope),
+        "read_file" => file_read(input, root, system_scope),
+        "write_file" => file_write(input, root, data_root, system_scope),
+        "system_info" => system_info(),
+        "open_windows_settings" => open_windows_settings(input),
         other => ToolOutcome { output: format!("unknown tool \"{other}\""), is_error: true },
     }
 }
@@ -551,6 +593,77 @@ fn contains_credential_material(text: &str) -> bool {
     false
 }
 
+/// System locations that file tools must never target, even in Full Access
+/// system file scope (in addition to the credential-focused component list).
+fn is_protected_system_component(component: &str) -> bool {
+    let lower = component.trim_end_matches(|c| c == '.' || c == ' ').to_lowercase();
+    let compact: String = lower.chars().filter(|c| !matches!(c, '-' | '_' | ' ')).collect();
+    matches!(
+        compact.as_str(),
+        "windows" | "programfiles" | "programdata" | "recovery" | "perflogs"
+            | "system32" | "syswow64" | "boot" | "minidump" | "inetpub"
+            | "configmsi" | "$recycle.bin" | "systemvolumeinformation"
+            | "pagefile.sys" | "hiberfil.sys" | "swapfile.sys"
+    ) || lower.starts_with("progra~") || lower == "system~1" || lower == "config~1"
+}
+
+/// Full Access system file scope: split an absolute drive path into the drive
+/// root plus a relative remainder. Applies the same per-component guards as
+/// workspace scope plus the system-directory block list. Relative paths are
+/// refused here — callers route them to workspace scope.
+fn split_system_path(raw: &str) -> Result<(PathBuf, String), String> {
+    let normalized = raw.trim().replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    let drive_ok = bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes.len() == 2 || bytes[2] == b'/');
+    if !drive_ok {
+        return Err("در محدودهٔ فایلِ سیستمی، مسیر باید مطلق با پیشوند درایو باشد (مثلاً C:/Users/you/file.txt)".into());
+    }
+    if normalized.len() >= 4 && &normalized[2..4] == "//" {
+        return Err("UNC/network paths are blocked for file tools".into());
+    }
+    let drive = &normalized[..2];
+    let rest = if normalized.len() > 2 { normalized[2..].trim_start_matches('/') } else { "" };
+    for value in rest.split('/') {
+        match value {
+            "" | "." => continue,
+            ".." => return Err("path traversal using '..' is blocked for file tools".into()),
+            value if value.chars().any(char::is_control) => return Err("path contains a control character".into()),
+            value if value.contains(':') => return Err("colon/Windows alternate data stream paths are blocked".into()),
+            value if value.ends_with('.') || value.ends_with(' ') => return Err("path components ending in a dot or space are ambiguous on Windows".into()),
+            value => {
+                let device = value.split('.').next().unwrap_or("").to_ascii_uppercase();
+                if matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" | "CLOCK$" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9") {
+                    return Err("reserved Windows device names are blocked".into());
+                }
+                if is_protected_file_component(value) {
+                    return Err(format!("access to sensitive credential/browser path component '{value}' is blocked"));
+                }
+                if is_protected_system_component(value) {
+                    return Err(format!("'{value}' is a protected system location and is blocked"));
+                }
+            }
+        }
+    }
+    Ok((PathBuf::from(drive.to_string()), rest.to_string()))
+}
+
+/// Route a file-tool target: relative paths always stay workspace-scoped; in
+/// system scope, absolute drive paths are re-rooted at their drive root.
+fn resolve_file_target(root: &Path, raw: &str, system_scope: bool) -> Result<(PathBuf, String), String> {
+    let trimmed = raw.trim();
+    let bytes = trimmed.as_bytes();
+    let absolute = trimmed.starts_with('/')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':');
+    if system_scope && absolute {
+        let (drive, rest) = split_system_path(trimmed)?;
+        return Ok((drive, if rest.is_empty() { ".".to_string() } else { rest }));
+    }
+    Ok((root.to_path_buf(), trimmed.to_string()))
+}
+
 fn resolve_scoped_path(root: &Path, raw: &str, allow_missing: bool) -> Result<ScopedPath, String> {
     if root.as_os_str().is_empty() {
         return Err("file tools need a configured workspace folder".into());
@@ -625,9 +738,12 @@ fn resolve_scoped_path(root: &Path, raw: &str, allow_missing: bool) -> Result<Sc
     Ok(ScopedPath { root: canonical_root, path: candidate, relative: components.join("/") })
 }
 
-fn file_list(input: &Value, root: &Path) -> ToolOutcome {
-    let rel = input["path"].as_str().unwrap_or("").trim();
-    let dir = match resolve_scoped_path(root, if rel.is_empty() { "." } else { rel }, false) {
+fn file_list(input: &Value, root: &Path, system_scope: bool) -> ToolOutcome {
+    let (root, rel) = match resolve_file_target(root, input["path"].as_str().unwrap_or("").trim(), system_scope) {
+        Ok(v) => v,
+        Err(e) => return ToolOutcome { output: e, is_error: true },
+    };
+    let dir = match resolve_scoped_path(&root, if rel.is_empty() { "." } else { &rel }, false) {
         Ok(scoped) => scoped.path,
         Err(e) => return ToolOutcome { output: e, is_error: true },
     };
@@ -662,12 +778,15 @@ fn file_list(input: &Value, root: &Path) -> ToolOutcome {
     }
 }
 
-fn file_read(input: &Value, root: &Path) -> ToolOutcome {
-    let rel = input["path"].as_str().unwrap_or("").trim();
+fn file_read(input: &Value, root: &Path, system_scope: bool) -> ToolOutcome {
+    let (root, rel) = match resolve_file_target(root, input["path"].as_str().unwrap_or("").trim(), system_scope) {
+        Ok(v) => v,
+        Err(e) => return ToolOutcome { output: e, is_error: true },
+    };
     if rel.is_empty() {
         return ToolOutcome { output: "a relative file path inside the workspace is required".into(), is_error: true };
     }
-    let path = match resolve_scoped_path(root, rel, false) {
+    let path = match resolve_scoped_path(&root, &rel, false) {
         Ok(scoped) => scoped.path,
         Err(e) => return ToolOutcome { output: e, is_error: true },
     };
@@ -783,8 +902,11 @@ fn read_utf8_file_capped(path: &Path, limit: usize) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "refusing to replace a non-UTF-8/binary file with a text edit".into())
 }
 
-fn file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutcome {
-    let rel = input["path"].as_str().unwrap_or("").trim();
+fn file_write(input: &Value, root: &Path, data_root: &Path, system_scope: bool) -> ToolOutcome {
+    let (root, rel) = match resolve_file_target(root, input["path"].as_str().unwrap_or("").trim(), system_scope) {
+        Ok(v) => v,
+        Err(e) => return ToolOutcome { output: e, is_error: true },
+    };
     let content = input["content"].as_str().unwrap_or("");
     if rel.is_empty() {
         return ToolOutcome { output: "a relative path inside the configured workspace is required".into(), is_error: true };
@@ -792,7 +914,7 @@ fn file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutcome {
     if content.len() > MAX_WRITE {
         return ToolOutcome { output: format!("proposed file is larger than {} bytes", MAX_WRITE), is_error: true };
     }
-    let scoped = match resolve_scoped_path(root, rel, true) {
+    let scoped = match resolve_scoped_path(&root, &rel, true) {
         Ok(path) => path,
         Err(error) => return ToolOutcome { output: error, is_error: true },
     };
@@ -849,11 +971,11 @@ fn file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutcome {
 /// Apply automatically in bounded autonomous mode: workspace only, with backup.
 pub fn auto_file_write(input: &Value, root: &Path, data_root: &Path) -> ToolOutcome {
     let raw = input.get("path").and_then(Value::as_str).unwrap_or("").trim();
-    let canonical_root = match validate_auto_write_path(root, raw, false, data_root) {
+    let canonical_root = match validate_auto_write_path(root, raw, false, false, data_root) {
         Ok(path) => path,
         Err(error) => return ToolOutcome { output: error, is_error: true },
     };
-    apply_auto_file_write(input, &canonical_root, data_root, "داخل ورک‌اسپیس", false)
+    apply_auto_file_write(input, &canonical_root, data_root, "داخل ورک‌اسپیس", false, false)
 }
 
 /// Apply automatically in explicit Full Access mode. The selected base is either
@@ -863,8 +985,21 @@ pub fn auto_file_write_full_access(
     input: &Value,
     workspace_root: &Path,
     profile_scope: bool,
+    system_scope: bool,
     data_root: &Path,
 ) -> ToolOutcome {
+    if system_scope {
+        // System scope: the target must be an absolute drive path; the drive
+        // root becomes the write base and all relative-path machinery (guards,
+        // backup/undo, credential checks) applies unchanged underneath it.
+        let (drive, _) = match split_system_path(
+            input.get("path").and_then(Value::as_str).unwrap_or("").trim(),
+        ) {
+            Ok(v) => v,
+            Err(e) => return ToolOutcome { output: e, is_error: true },
+        };
+        return auto_file_write_at_root(input, &drive, false, true, data_root);
+    }
     let root = if profile_scope {
         match user_profile_root() {
             Some(path) => path,
@@ -876,12 +1011,12 @@ pub fn auto_file_write_full_access(
     } else {
         workspace_root.to_path_buf()
     };
-    auto_file_write_at_root(input, &root, profile_scope, data_root)
+    auto_file_write_at_root(input, &root, profile_scope, false, data_root)
 }
 
-fn auto_file_write_at_root(input: &Value, root: &Path, profile_scope: bool, data_root: &Path) -> ToolOutcome {
+fn auto_file_write_at_root(input: &Value, root: &Path, profile_scope: bool, system_scope: bool, data_root: &Path) -> ToolOutcome {
     let raw = input.get("path").and_then(Value::as_str).unwrap_or("").trim();
-    let canonical_root = match validate_auto_write_path(root, raw, profile_scope, data_root) {
+    let canonical_root = match validate_auto_write_path(root, raw, profile_scope, system_scope, data_root) {
         Ok(path) => path,
         Err(error) => return ToolOutcome { output: error, is_error: true },
     };
@@ -889,8 +1024,9 @@ fn auto_file_write_at_root(input: &Value, root: &Path, profile_scope: bool, data
         input,
         &canonical_root,
         data_root,
-        if profile_scope { "داخل پروفایل کاربر" } else { "داخل ورک‌اسپیس" },
+        if system_scope { "در محدودهٔ سیستمی" } else if profile_scope { "داخل پروفایل کاربر" } else { "داخل ورک‌اسپیس" },
         true,
+        system_scope,
     )
 }
 
@@ -906,8 +1042,9 @@ fn apply_auto_file_write(
     data_root: &Path,
     scope_label: &str,
     discard_failed_preview: bool,
+    system_scope: bool,
 ) -> ToolOutcome {
-    let staged = file_write(input, root, data_root);
+    let staged = file_write(input, root, data_root, system_scope);
     if staged.is_error { return staged; }
     let Some(id) = staged.output.split("[ATRIA_PENDING_EDIT:").nth(1).and_then(|s| s.split(']').next()) else {
         return staged; // no-op edit
@@ -943,8 +1080,29 @@ fn validate_auto_write_path(
     root: &Path,
     raw: &str,
     profile_scope: bool,
+    system_scope: bool,
     data_root: &Path,
 ) -> Result<PathBuf, String> {
+    if system_scope {
+        // The drive root is the write base; the absolute target is re-checked
+        // here (defense in depth) and the private Atria data root is refused
+        // in both directions.
+        let (drive, rest) = split_system_path(raw)?;
+        if rest.is_empty() {
+            return Err("مسیر فایل باید یک فایل مشخص باشد، نه ریشهٔ درایو".into());
+        }
+        if let Ok(private_root) = std::fs::canonicalize(data_root) {
+            if private_root.starts_with(&drive) {
+                if let Ok(drive_canon) = std::fs::canonicalize(&drive) {
+                    if drive_canon == private_root || private_root.starts_with(&drive_canon) {
+                        return Err("نوشتن در داده‌های خصوصی Atria مسدود است".into());
+                    }
+                }
+            }
+        }
+        return std::fs::canonicalize(&drive)
+            .map_err(|error| format!("خواندن ریشهٔ درایو ناموفق بود: {error}"));
+    }
     if root.as_os_str().is_empty() {
         return Err("نوشتن خودکار به یک محدودهٔ فایل تنظیم‌شده نیاز دارد".into());
     }
@@ -1280,6 +1438,80 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// Fixed, read-only system snapshot. Commands are hard-coded (no user input
+/// is ever passed to a shell), so there is no injection surface.
+fn system_info() -> ToolOutcome {
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("platform: {}", std::env::consts::OS));
+    if cfg!(windows) {
+        if let Ok(out) = std::process::Command::new("cmd").arg("/C").arg("ver").output() {
+            if out.status.success() {
+                let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !v.is_empty() {
+                    lines.push(format!("os: {}", v.chars().take(120).collect::<String>()));
+                }
+            }
+        }
+    } else if let Ok(out) = std::process::Command::new("uname").arg("-sr").output() {
+        if out.status.success() {
+            lines.push(format!("os: {}", String::from_utf8_lossy(&out.stdout).trim()));
+        }
+    }
+    if let Ok(n) = std::thread::available_parallelism() {
+        lines.push(format!("cpu_cores: {}", n.get()));
+    }
+    if let Ok(out) = std::process::Command::new("hostname").output() {
+        if out.status.success() {
+            let h = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !h.is_empty() {
+                lines.push(format!("computer_name: {}", h.chars().take(80).collect::<String>()));
+            }
+        }
+    }
+    let output: String = lines.join("\n").chars().take(500).collect();
+    ToolOutcome { output, is_error: false }
+}
+
+/// Fixed area -> Settings URI map. `area` must match a key exactly; anything
+/// else is refused, so no shell/URI injection is possible.
+const SETTINGS_AREAS: &[(&str, &str)] = &[
+    ("network", "ms-settings:network-wifi"),
+    ("wifi", "ms-settings:wifi"),
+    ("ethernet", "ms-settings:network-ethernet"),
+    ("bluetooth", "ms-settings:bluetooth"),
+    ("display", "ms-settings:display"),
+    ("sound", "ms-settings:sound"),
+    ("notifications", "ms-settings:notifications"),
+    ("apps", "ms-settings:appsfeatures"),
+    ("privacy", "ms-settings:privacy"),
+    ("windows-update", "ms-settings:windowsupdate"),
+    ("power", "ms-settings:powersaving"),
+    ("date-time", "ms-settings:dateformat"),
+    ("accessibility", "ms-settings:accessibility"),
+    ("accounts", "ms-settings:otherusers"),
+    ("developer", "ms-settings:developers"),
+    ("defender", "ms-settings:windowsdefender"),
+    ("about", "ms-settings:about"),
+];
+
+fn open_windows_settings(input: &Value) -> ToolOutcome {
+    // Validate the area FIRST (input is trusted only against the exact-match
+    // allow-list), then enforce the platform. This keeps injection attempts
+    // rejected identically everywhere and never reaches a shell on bad input.
+    let area = input["area"].as_str().unwrap_or("").trim().to_lowercase();
+    let Some((name, uri)) = SETTINGS_AREAS.iter().find(|(k, _)| **k == area) else {
+        let allowed = SETTINGS_AREAS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ");
+        return ToolOutcome { output: format!("area نامعتبر است؛ مقادیر مجاز: {allowed}"), is_error: true };
+    };
+    if !cfg!(windows) {
+        return ToolOutcome { output: "این ابزار فقط در ویندوز در دسترس است".into(), is_error: true };
+    }
+    match std::process::Command::new("explorer").arg(uri).spawn() {
+        Ok(_) => ToolOutcome { output: format!("صفحهٔ تنظیمات «{name}» در ویندوز باز شد."), is_error: false },
+        Err(e) => ToolOutcome { output: format!("بازکردن تنظیمات ناموفق بود: {e}"), is_error: true },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1343,7 +1575,7 @@ mod tests {
             &mut mem,
             &dir,
             &data,
-        );
+         false);
         let stale_id = stale.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
         std::fs::write(&target, "user edited after preview").unwrap();
         assert!(apply_pending_edit(stale_id, &data).unwrap_err().contains("changed after the preview"));
@@ -1356,7 +1588,7 @@ mod tests {
             &mut mem,
             &dir,
             &data,
-        );
+         false);
         assert!(!out.is_error, "{}", out.output);
         assert!(out.output.contains("NOT been applied"));
         assert!(out.output.contains("-old line") && out.output.contains("+new line"));
@@ -1377,7 +1609,7 @@ mod tests {
             &mut mem,
             &dir,
             &data,
-        );
+         false);
         assert!(out.is_error);
         assert!(!new_target.exists());
 
@@ -1388,7 +1620,7 @@ mod tests {
             &mut mem,
             &dir,
             &data,
-        );
+         false);
         let edit_id = out.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
         let applied = apply_pending_edit(edit_id, &data).unwrap();
         let backup_id = applied.split("[ATRIA_BACKUP:").nth(1).unwrap().split(']').next().unwrap();
@@ -1404,7 +1636,7 @@ mod tests {
             &mut mem,
             &dir,
             &data,
-        );
+         false);
         let edit_id = out.output.split("[ATRIA_PENDING_EDIT:").nth(1).unwrap().split(']').next().unwrap();
         reject_pending_edit(edit_id, &data).unwrap();
         assert!(!dir.join("notes/rejected.txt").exists());
@@ -1417,7 +1649,7 @@ mod tests {
             &mut mem,
             &dir,
             &data,
-        );
+         false);
         assert!(out.is_error);
         assert!(!sibling.exists());
 
@@ -1466,6 +1698,7 @@ mod tests {
             &serde_json::json!({"path":"Documents/note.txt","content":"after"}),
             &profile,
             true,
+            false,
             &data,
         );
         assert!(!applied.is_error, "{}", applied.output);
@@ -1488,6 +1721,7 @@ mod tests {
                 &serde_json::json!({"path":path,"content":"blocked"}),
                 &profile,
                 true,
+                false,
                 &data,
             );
             assert!(result.is_error, "profile write should be blocked: {path}");
@@ -1501,6 +1735,7 @@ mod tests {
             &serde_json::json!({"path":"private-store/secret.json","content":"blocked"}),
             &profile,
             true,
+            false,
             &private,
         );
         assert!(result.is_error);
@@ -1515,6 +1750,7 @@ mod tests {
                 &serde_json::json!({"path":"linked/escape.txt","content":"blocked"}),
                 &profile,
                 true,
+                false,
                 &data,
             );
             assert!(result.is_error);
@@ -1552,7 +1788,7 @@ mod tests {
 
         let safe = execute_with_data_root(
             "read_file", &serde_json::json!({"path":"notes.txt"}), &mut mem, &workspace, &data,
-        );
+         false);
         assert!(!safe.is_error);
         assert_eq!(safe.output, "safe note");
 
@@ -1568,13 +1804,13 @@ mod tests {
         ] {
             let result = execute_with_data_root(
                 "read_file", &serde_json::json!({"path":path}), &mut mem, &workspace, &data,
-            );
+             false);
             assert!(result.is_error, "read should be blocked: {path}");
         }
 
         let listing = execute_with_data_root(
             "list_files", &serde_json::json!({"path":"."}), &mut mem, &workspace, &data,
-        );
+         false);
         assert!(!listing.is_error);
         assert!(listing.output.contains("notes.txt"));
         for sensitive in [".env", "credentials.json", "cookies.sqlite", ".git"] {
@@ -1582,20 +1818,20 @@ mod tests {
         }
         let traversal = execute_with_data_root(
             "list_files", &serde_json::json!({"path":"../"}), &mut mem, &workspace, &data,
-        );
+         false);
         assert!(traversal.is_error);
 
         let overwrite_credential = execute_with_data_root(
             "write_file", &serde_json::json!({"path":"config.txt", "content":"replacement"}),
             &mut mem, &workspace, &data,
-        );
+         false);
         assert!(overwrite_credential.is_error);
         assert!(std::fs::read_to_string(workspace.join("config.txt")).unwrap().contains("sk-proj-"));
 
         let write_outside = execute_with_data_root(
             "write_file", &serde_json::json!({"path":"../outside-secret.txt", "content":"changed"}),
             &mut mem, &workspace, &data,
-        );
+         false);
         assert!(write_outside.is_error);
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "outside secret");
 
@@ -1604,11 +1840,11 @@ mod tests {
             symlink(&outside, workspace.join("outside-link.txt")).unwrap();
             let linked = execute_with_data_root(
                 "read_file", &serde_json::json!({"path":"outside-link.txt"}), &mut mem, &workspace, &data,
-            );
+             false);
             assert!(linked.is_error);
             let listing = execute_with_data_root(
                 "list_files", &serde_json::json!({"path":"."}), &mut mem, &workspace, &data,
-            );
+             false);
             assert!(!listing.output.contains("outside-link.txt"));
         }
         let _ = std::fs::remove_dir_all(root);
@@ -1626,7 +1862,7 @@ mod tests {
         let mut mem = MemoryStore::in_memory();
         let result = execute_with_data_root(
             "read_file", &serde_json::json!({"path":"unicode.txt"}), &mut mem, &root, &root.join("data"),
-        );
+         false);
         assert!(!result.is_error, "{}", result.output);
         let marker = result.output.find("\n… (truncated)").unwrap();
         let returned_text = &result.output[..marker];
@@ -1650,7 +1886,7 @@ mod tests {
         let full_access_write = full_access.iter().find(|tool| tool["name"] == "github_propose_change").unwrap();
         assert!(full_access_write["description"].as_str().unwrap().contains("automatically"));
         assert!(!full_access_write["description"].as_str().unwrap().contains("separate explicit approval"));
-        let file = file_tool_catalog_for_access(false, true, true);
+        let file = file_tool_catalog_for_access(false, true, true, false);
         let file_write = file.iter().find(|tool| tool["name"] == "write_file").unwrap();
         assert!(file_write["description"].as_str().unwrap().contains("user profile"));
     }
@@ -1674,5 +1910,86 @@ mod tests {
         assert!(desc.contains("never overwritten"));
         let pin = full.iter().find(|tool| tool["name"] == "pinterest_tag_images").unwrap();
         assert!(pin["description"].as_str().unwrap().contains("no login"));
+    }
+
+    #[test]
+    fn split_system_path_enforces_drive_absolute_and_blocked_locations() {
+        let (drive, rest) = split_system_path("C:/Users/you/notes/todo.txt").unwrap();
+        assert_eq!(drive.to_string_lossy(), "C:");
+        assert_eq!(rest, "Users/you/notes/todo.txt");
+        let (drive2, rest2) = split_system_path("c:\\Users\\you\\x.md").unwrap();
+        assert_eq!(drive2.to_string_lossy(), "c:");
+        assert_eq!(rest2, "Users/you/x.md");
+        assert!(split_system_path("relative/path.txt").is_err());
+        assert!(split_system_path("/abs/no-drive.txt").is_err());
+        assert!(split_system_path("C:/../outside.txt").is_err());
+        assert!(split_system_path("C:/Windows/system.ini").is_err());
+        assert!(split_system_path("C:/Program Files/app/x.exe").is_err());
+        assert!(split_system_path("C:/ProgramData/x.txt").is_err());
+        assert!(split_system_path("C:/Users/you/.ssh/id_ed25519").is_err());
+        assert!(split_system_path("C:/Users/you/.env").is_err());
+        assert!(split_system_path("C:/Users/you/credentials.json").is_err());
+        assert!(split_system_path("C:/CON/x.txt").is_err());
+        assert!(split_system_path("C:/Users/you/file.txt:hidden").is_err());
+        let (d3, r3) = split_system_path("D:").unwrap();
+        assert_eq!(d3.to_string_lossy(), "D:");
+        assert_eq!(r3, "");
+    }
+
+    #[test]
+    fn computer_tools_are_bounded_and_injection_free() {
+        let cat = computer_tool_catalog();
+        let names: Vec<&str> = cat.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["system_info", "open_windows_settings"]);
+        for tool in &cat {
+            let desc = tool["description"].as_str().unwrap();
+            assert!(!desc.to_lowercase().contains("shell command"), "no arbitrary shell advertised: {desc}");
+        }
+        let mut mem = MemoryStore::in_memory();
+        let none = Path::new("");
+        let out = execute("system_info", &serde_json::json!({}), &mut mem, none);
+        assert!(!out.is_error, "{}", out.output);
+        assert!(out.output.contains("platform:"), "{}", out.output);
+        assert!(out.output.chars().count() <= 500, "{}", out.output);
+        assert!(!out.output.to_lowercase().contains("password"));
+        let bad = execute("open_windows_settings", &serde_json::json!({ "area": "network; rm -rf /" }), &mut mem, none);
+        assert!(bad.is_error, "{}", bad.output);
+        let unknown = execute("open_windows_settings", &serde_json::json!({ "area": "regedit" }), &mut mem, none);
+        assert!(unknown.is_error, "{}", unknown.output);
+        assert!(unknown.output.contains("network"), "{}", unknown.output);
+        let empty = execute("open_windows_settings", &serde_json::json!({}), &mut mem, none);
+        assert!(empty.is_error);
+    }
+
+    #[test]
+    fn system_scope_file_tools_route_absolute_paths() {
+        let dir = std::env::temp_dir().join(format!("atria-sys-{}", std::process::id()));
+        let ws = dir.join("workspace");
+        let data = dir.join("app-data");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(ws.join("note.txt"), "hello workspace").unwrap();
+        let mut mem = MemoryStore::in_memory();
+
+        // relative path stays workspace-scoped even in system scope
+        let ok = execute_with_data_root("read_file", &serde_json::json!({ "path": "note.txt" }), &mut mem, &ws, &data, true);
+        assert!(!ok.is_error, "{}", ok.output);
+        assert!(ok.output.contains("hello workspace"), "{}", ok.output);
+
+        // absolute paths are blocked when system scope is off
+        let blocked = execute_with_data_root("read_file", &serde_json::json!({ "path": "C:/Users/you/notes/todo.txt" }), &mut mem, &ws, &data, false);
+        assert!(blocked.is_error, "{}", blocked.output);
+        assert!(blocked.output.contains("absolute paths are blocked"), "{}", blocked.output);
+
+        // system scope: protected system/credential locations are refused
+        for path in ["C:/Windows/win.ini", "C:/Users/you/.ssh/id_rsa", "C:/Users/you/ProgramData/x.txt", "C:/../outside.txt"] {
+            let out = execute_with_data_root("read_file", &serde_json::json!({ "path": path }), &mut mem, &ws, &data, true);
+            assert!(out.is_error, "should block {path}: {}", out.output);
+        }
+        // system scope: auto-write requires an explicit absolute target
+        let rel_auto = auto_file_write_full_access(&serde_json::json!({ "path": "note.txt", "content": "x" }), &ws, false, true, &data);
+        assert!(rel_auto.is_error, "{}", rel_auto.output);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

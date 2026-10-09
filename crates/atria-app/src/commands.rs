@@ -50,6 +50,12 @@ pub struct ChatPayload {
     /// When Full Access is on, allow backed-up writes under the Windows user profile (excluding protected paths).
     #[serde(default = "default_true")]
     pub full_access_profile: bool,
+    /// Full Access: file tools accept absolute system paths (guarded).
+    #[serde(default)]
+    pub full_access_system: bool,
+    /// Full Access: bounded system tools (read-only system info + Windows Settings pages).
+    #[serde(default = "default_true")]
+    pub computer_tools: bool,
     /// Download root for Full Access web downloads; empty means the user's Desktop.
     #[serde(default)]
     pub downloads_root: String,
@@ -116,6 +122,8 @@ pub async fn test_connection(base: String, key: String, model: String, kind: Str
         autonomous_mode: false,
         full_access_mode: false,
         full_access_profile: true,
+        full_access_system: false,
+        computer_tools: true,
         downloads_root: String::new(),
         web_thinking: false,
         web_search: false,
@@ -309,6 +317,29 @@ pub fn dirs_info() -> Result<serde_json::Value, String> {
     }))
 }
 
+/// Where the Full Access web-download tools will put files for a given
+/// configured root (empty = default Desktop detection). Resolves exactly the
+/// same way the tools do, so Settings can show the effective folder — or the
+/// reason resolution fails.
+#[tauri::command]
+pub fn downloads_root_info(configured: String) -> Result<serde_json::Value, String> {
+    let root = atria_root();
+    let data_root = root.join("data");
+    let configured = configured.trim().to_string();
+    match atria_core::downloads::resolve_download_root(&configured, &data_root) {
+        Ok(resolved) => Ok(serde_json::json!({
+            "configured": configured,
+            "resolved": resolved.to_string_lossy().to_string(),
+            "error": null,
+        })),
+        Err(e) => Ok(serde_json::json!({
+            "configured": configured,
+            "resolved": null,
+            "error": e,
+        })),
+    }
+}
+
 /// Load every saved conversation (`~/.atria/chats/*.json`).
 #[tauri::command]
 pub fn chats_load() -> Result<Vec<String>, String> {
@@ -415,6 +446,8 @@ pub async fn chat_send(
             autonomous_mode: payload.autonomous_mode,
             full_access_mode: payload.full_access_mode,
             full_access_profile: payload.full_access_profile,
+            full_access_system: payload.full_access_system,
+            computer_tools: payload.computer_tools,
             downloads_root: payload.downloads_root.trim().to_string(),
             web_thinking: payload.thinking,
             web_search: payload.web_search,
