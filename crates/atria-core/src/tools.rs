@@ -200,6 +200,30 @@ pub fn github_tool_catalog() -> Vec<Value> {
     github_tool_catalog_for_access(false)
 }
 
+/// Terminal tool. In Full Access the command runs immediately (the user
+/// opted into no per-command approvals); otherwise it is staged and nothing
+/// runs until the user approves it in the chat. No admin escalation either
+/// way — commands run with the app's own privileges, bounded by a timeout and
+/// a capped output tail.
+pub fn terminal_tool_catalog(full_access_mode: bool) -> Vec<Value> {
+    let description = if full_access_mode {
+        "Run a terminal command on this computer (Windows cmd /C, POSIX sh -c). Runs immediately in Full Access without a separate approval; the command, working folder, exit code and an output tail are always logged in the chat. Working folder: the active project folder when set, otherwise the workspace. No admin escalation. Commands are limited to 120 seconds and output is truncated to the last 16KB. Use for builds, installs, git, scripts and system tasks the file tools cannot do."
+    } else {
+        "Run a terminal command on this computer (Windows cmd /C, POSIX sh -c). Staged: the exact command line is shown in the chat and NOTHING runs until the user approves it there. Working folder: the active project folder when set, otherwise the workspace. No admin escalation. Use for builds, installs, git, scripts and system tasks the file tools cannot do."
+    };
+    vec![serde_json::json!({
+        "name": "run_command",
+        "description": description,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": { "type": "string", "description": "the exact command line to run (e.g. 'cargo build --release')" }
+            },
+            "required": ["command"]
+        }
+    })]
+}
+
 /// Full Access system tools: a bounded read-only system snapshot and opening
 /// fixed Windows Settings pages. No shell, no arbitrary paths, no file access.
 pub fn computer_tool_catalog() -> Vec<Value> {
@@ -300,6 +324,7 @@ pub fn tool_label(name: &str) -> &'static str {
         "write_file" => "نوشتن فایل",
         "system_info" => "اطلاعات سیستم",
         "open_windows_settings" => "بازکردن صفحات تنظیمات",
+        "run_command" => "اجرای دستور ترمینال",
         "web_search" => "جست‌وجوی وب",
         "open_web_page" => "خواندن صفحهٔ وب",
         "open_url" => "بازکردن در مرورگر",
@@ -405,9 +430,32 @@ pub async fn execute_async_tool(
     autonomous_mode: bool,
     full_access_mode: bool,
     downloads_root: &str,
+    command_cwd: &str,
     data_root: &Path,
 ) -> Option<ToolOutcome> {
     let result = match name {
+        "run_command" => {
+            let command = input.get("command").and_then(Value::as_str).unwrap_or("");
+            if full_access_mode {
+                // Explicit Full Access: the user opted into no per-command
+                // approvals; the run is still fully logged in the chat.
+                let command_owned = command.to_string();
+                let cwd_owned = command_cwd.to_string();
+                let done = tokio::task::spawn_blocking(move || {
+                    let outcome = run_command_full_access(&command_owned, &cwd_owned, COMMAND_TIMEOUT_SECS);
+                    if outcome.is_error { Err(outcome.output) } else { Ok(outcome.output) }
+                })
+                .await;
+                Some(match done {
+                    Ok(result) => result,
+                    Err(_) => Err("execution worker unavailable".into()),
+                })
+            } else {
+                // Ask/autonomous modes: stage and wait for the user's approval.
+                let outcome = stage_command(command, command_cwd, data_root);
+                Some(if outcome.is_error { Err(outcome.output) } else { Ok(outcome.output) })
+            }
+        }
         "web_search" => {
             let query = input.get("query").and_then(Value::as_str).unwrap_or("");
             let count = input.get("count").and_then(Value::as_u64).unwrap_or(5) as usize;
@@ -1512,6 +1560,229 @@ fn open_windows_settings(input: &Value) -> ToolOutcome {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Terminal command tool: staged approval (ask modes) or direct execution
+// (explicit Full Access). Bounded: 120s timeout, 16KB output tail, no admin
+// escalation. Every run is visible in the chat (ToolStart carries the command
+// text, ToolEnd the exit code and output tail).
+// ---------------------------------------------------------------------------
+
+const MAX_COMMAND_CHARS: usize = 4_000;
+const COMMAND_TIMEOUT_SECS: u64 = 120;
+const COMMAND_OUTPUT_CAP: usize = 16_000;
+
+#[derive(Serialize, Deserialize)]
+struct PendingCommand {
+    command: String,
+    cwd: String,
+}
+
+/// Staged command ids are app-generated; refuse path-shaped ids to avoid any
+/// chance of escaping the pending-commands folder.
+fn valid_action_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 96 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Keep only the last `limit` characters — the tail of command output is the
+/// part that matters (final status, errors), and it bounds the model context.
+fn cap_output(combined: &str, limit: usize) -> String {
+    let total = combined.chars().count();
+    if total <= limit {
+        return combined.to_string();
+    }
+    let head = total - limit;
+    let tail: String = combined.chars().skip(head).collect();
+    format!("… ({} نویسهٔ اول برای رعایت سقف اندازه حذف شد؛ این آخرِ خروجی است)\n{tail}", head)
+}
+
+/// Kill a timed-out command and everything it spawned. Windows uses
+/// `taskkill /T` (whole process tree); Unix kills the dedicated process group.
+fn kill_command_tree(child: &mut std::process::Child) {
+    let pid = child.id();
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .spawn();
+    }
+    #[cfg(unix)]
+    {
+        // The shell was started with process_group(0), so its pgid == its pid.
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+}
+
+/// Spawn the shell with the command, bounded by `timeout`. stdout+stderr are
+/// drained on separate threads (avoids pipe deadlocks), the child is killed
+/// on timeout. Returns (exit code, capped combined output).
+fn run_command_capped(command: &str, cwd: Option<&std::path::Path>, timeout: std::time::Duration) -> Result<(i32, String), String> {
+    let mut cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.arg("/C").arg(command);
+        c
+    } else {
+        let mut c = std::process::Command::new("sh");
+        c.arg("-c").arg(command);
+        c
+    };
+    if let Some(dir) = cwd {
+        if dir.is_dir() {
+            cmd.current_dir(dir);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    // Unix: run in our own process group so a timeout can kill the whole
+    // tree (the shell may fork the actual command).
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("اجرای دستور ناموفق بود: {e}"))?;
+    let out_thread = {
+        let mut stdout = child.stdout.take().expect("stdout piped");
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = Read::read_to_string(&mut stdout, &mut buf);
+            buf
+        })
+    };
+    let err_thread = {
+        let mut stderr = child.stderr.take().expect("stderr piped");
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = Read::read_to_string(&mut stderr, &mut buf);
+            buf
+        })
+    };
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(e) => return Err(format!("پیگیری اجرای دستور ناموفق بود: {e}")),
+        }
+        if start.elapsed() > timeout {
+            kill_command_tree(&mut child);
+            let _ = child.wait();
+            // Drain threads are left detached: killing the tree closes the
+            // pipes, but we must not block on a late child here.
+            return Err(format!("دستور بیش از {} ثانیه طول کشید و متوقف شد", timeout.as_secs()));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let stdout = out_thread.join().unwrap_or_default();
+    let stderr = err_thread.join().unwrap_or_default();
+    let combined = format!("{stdout}{stderr}");
+    let exit = status.code().unwrap_or(-1);
+    Ok((exit, cap_output(&combined, COMMAND_OUTPUT_CAP)))
+}
+
+fn validate_command(command: &str) -> Result<String, String> {
+    let command = command.trim().to_string();
+    if command.is_empty() {
+        return Err("متن دستور خالی است".into());
+    }
+    if command.chars().count() > MAX_COMMAND_CHARS {
+        return Err(format!("دستور بیش از {MAX_COMMAND_CHARS} نویسه است"));
+    }
+    Ok(command)
+}
+
+/// Ask modes: stage the command; nothing runs until the user approves it in
+/// the chat (same review flow as staged file edits).
+fn stage_command(command: &str, cwd: &str, data_root: &Path) -> ToolOutcome {
+    let command = match validate_command(command) {
+        Ok(c) => c,
+        Err(e) => return ToolOutcome { output: e, is_error: true },
+    };
+    let id = new_id("cmd");
+    let dir = data_root.join("pending-commands");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return ToolOutcome { output: format!("staging command failed: {e}"), is_error: true };
+    }
+    let pending = PendingCommand { command: command.clone(), cwd: cwd.to_string() };
+    let file = dir.join(format!("{id}.json"));
+    let serialized = match serde_json::to_vec(&pending) {
+        Ok(v) => v,
+        Err(e) => return ToolOutcome { output: format!("staging command failed: {e}"), is_error: true },
+    };
+    if let Err(e) = std::fs::write(file, serialized) {
+        return ToolOutcome { output: format!("staging command failed: {e}"), is_error: true };
+    }
+    ToolOutcome {
+        output: format!(
+            "این دستور هنوز اجرا نشده است. در آتریا آن را بررسی کن و تأیید یا رد کن.\n[ATRIA_PENDING_COMMAND:{id}]\nدستور: {command}\nپوشهٔ اجرا: {cwd}"
+        ),
+        is_error: false,
+    }
+}
+
+/// Full Access: run now (the user opted into no per-command approvals).
+fn run_command_full_access(command: &str, cwd: &str, timeout_secs: u64) -> ToolOutcome {
+    let command = match validate_command(command) {
+        Ok(c) => c,
+        Err(e) => return ToolOutcome { output: e, is_error: true },
+    };
+    let cwd_owned = cwd.to_string();
+    let cmd_owned = command.clone();
+    let result = std::thread::spawn(move || {
+        let cwd_path = std::path::PathBuf::from(&cwd_owned);
+        let cwd_arg = if cwd_path.is_dir() { Some(cwd_path.as_path()) } else { None };
+        run_command_capped(&cmd_owned, cwd_arg, std::time::Duration::from_secs(timeout_secs))
+    })
+    .join()
+    .unwrap_or(Err("execution worker failed".into()));
+    match result {
+        Ok((exit, output)) => ToolOutcome {
+            output: format!("دستور اجرا شد. کد خروجی: {exit}\nپوشهٔ اجرا: {cwd}\nخروجی:\n{output}"),
+            is_error: false,
+        },
+        Err(e) => ToolOutcome { output: e, is_error: true },
+    }
+}
+
+/// Apply a staged terminal command after the user approved it in the chat.
+/// Synchronous call from the app layer (which offloads to a worker).
+pub fn apply_pending_command(id: &str, data_root: &Path, timeout_secs: u64) -> Result<String, String> {
+    if !valid_action_id(id) {
+        return Err("invalid command action id".into());
+    }
+    let file = data_root.join("pending-commands").join(format!("{id}.json"));
+    let bytes = std::fs::read(&file).map_err(|e| format!("staged command not found: {e}"))?;
+    let pending: PendingCommand = serde_json::from_slice(&bytes).map_err(|e| format!("invalid staged command: {e}"))?;
+    let _ = std::fs::remove_file(&file); // approved (or failed) either way: one-shot
+    let cwd_path = std::path::PathBuf::from(&pending.cwd);
+    let cwd_arg = if cwd_path.is_dir() { Some(cwd_path.as_path()) } else { None };
+    let (exit, output) = run_command_capped(&pending.command, cwd_arg, std::time::Duration::from_secs(timeout_secs))?;
+    Ok(format!("دستور اجرا شد (تأییده‌شده توسط کاربر). کد خروجی: {exit}\nپوشهٔ اجرا: {}\nخروجی:\n{output}", pending.cwd))
+}
+
+/// Reject a staged terminal command (deletes the staged action).
+pub fn reject_pending_command(id: &str, data_root: &Path) -> Result<(), String> {
+    if !valid_action_id(id) {
+        return Err("invalid command action id".into());
+    }
+    let file = data_root.join("pending-commands").join(format!("{id}.json"));
+    match std::fs::remove_file(&file) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("reject failed: {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1991,5 +2262,188 @@ mod tests {
         let rel_auto = auto_file_write_full_access(&serde_json::json!({ "path": "note.txt", "content": "x" }), &ws, false, true, &data);
         assert!(rel_auto.is_error, "{}", rel_auto.output);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    // ------------------------------------------------------------------
+    // Terminal tool (run_command)
+    // ------------------------------------------------------------------
+
+    fn terminal_temp(prefix: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("atria-term-{prefix}-{}-{nonce}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn cap_output_keeps_tail_and_notes_trim() {
+        let short = cap_output("abc", 10);
+        assert_eq!(short, "abc");
+        let long = cap_output(&"x".repeat(40), 10);
+        assert!(long.ends_with(&"x".repeat(10)));
+        assert!(long.contains("حذف شد"));
+        assert!(long.starts_with('…'));
+    }
+
+    #[test]
+    fn terminal_timeout_kills_long_command() {
+        let hang = if cfg!(windows) { "ping 127.0.0.1 -n 15" } else { "sleep 5" };
+        let started = std::time::Instant::now();
+        let err = run_command_capped(hang, None, std::time::Duration::from_secs(1))
+            .expect_err("long command must time out");
+        assert!(err.contains("متوقف شد"), "unexpected error: {err}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(4), "kill did not happen promptly");
+    }
+
+    #[test]
+    fn terminal_capped_output_and_exit_codes() {
+        let (exit, _out) = run_command_capped("exit 3", None, std::time::Duration::from_secs(10))
+            .expect("exit 3 must run");
+        assert_eq!(exit, 3);
+        // Large output is capped to the 16KB tail (pure cap logic is tested
+        // above; here we only assert the runner returns capped output).
+        let big = if cfg!(windows) {
+            "for /L %i in (1,1,6000) do @echo line-%i"
+        } else {
+            "seq 1 6000"
+        };
+        let (exit, out) = run_command_capped(big, None, std::time::Duration::from_secs(30))
+            .expect("big command must run");
+        assert_eq!(exit, 0);
+        assert!(out.chars().count() <= COMMAND_OUTPUT_CAP + 120, "output not capped: {}", out.chars().count());
+        assert!(out.contains("حذف شد"));
+    }
+
+    #[test]
+    fn terminal_runs_in_given_cwd() {
+        let dir = terminal_temp("cwd");
+        let marker = dir.file_name().unwrap().to_string_lossy().to_string();
+        let (exit, out) = run_command_capped(
+            if cfg!(windows) { "cd" } else { "pwd" },
+            Some(&dir),
+            std::time::Duration::from_secs(10),
+        )
+        .expect("cd/pwd must run");
+        assert_eq!(exit, 0);
+        assert!(out.contains(&marker), "cwd output did not contain {marker}: {out}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn terminal_ask_mode_stages_and_applies() {
+        let data_root = terminal_temp("stage");
+        let got = execute_async_tool(
+            "run_command",
+            &serde_json::json!({ "command": "echo hello-atria" }),
+            "",
+            false,
+            false,
+            "",
+            data_root.to_string_lossy().as_ref(),
+            &data_root,
+        )
+        .await
+        .expect("run_command must be handled");
+        assert!(!got.is_error, "staging should not be an error: {}", got.output);
+        let m = "[ATRIA_PENDING_COMMAND:";
+        let id = got.output.split_once(m).expect("pending marker").1.split(']').next().expect("id");
+        assert!(got.output.contains("echo hello-atria"), "command must be visible: {}", got.output);
+        assert!(got.output.contains("هنوز اجرا نشده"));
+        // nothing ran yet
+        let staged = data_root.join("pending-commands").join(format!("{id}.json"));
+        assert!(staged.exists());
+        // user approves
+        let applied = apply_pending_command(id, &data_root, 30).expect("apply must work");
+        assert!(applied.contains("hello-atria"), "applied output: {applied}");
+        assert!(!staged.exists(), "staged action must be consumed");
+        // rejecting a second time is a no-op error-free
+        assert!(reject_pending_command(id, &data_root).is_ok());
+        let _ = std::fs::remove_dir_all(&data_root);
+    }
+
+    #[tokio::test]
+    async fn terminal_ask_mode_reject_drops_stage() {
+        let data_root = terminal_temp("reject");
+        let got = execute_async_tool(
+            "run_command",
+            &serde_json::json!({ "command": "echo never-runs" }),
+            "",
+            false,
+            false,
+            "",
+            data_root.to_string_lossy().as_ref(),
+            &data_root,
+        )
+        .await
+        .expect("handled");
+        let id = got.output.split_once("[ATRIA_PENDING_COMMAND:").expect("marker").1.split(']').next().expect("id");
+        reject_pending_command(id, &data_root).expect("reject");
+        assert!(!data_root.join("pending-commands").join(format!("{id}.json")).exists());
+        let _ = std::fs::remove_dir_all(&data_root);
+    }
+
+    #[tokio::test]
+    async fn terminal_full_access_runs_without_stage() {
+        let data_root = terminal_temp("fa");
+        let got = execute_async_tool(
+            "run_command",
+            &serde_json::json!({ "command": "echo hello-atria" }),
+            "",
+            false,
+            true,
+            "",
+            data_root.to_string_lossy().as_ref(),
+            &data_root,
+        )
+        .await
+        .expect("handled");
+        assert!(!got.is_error, "run failed: {}", got.output);
+        assert!(got.output.contains("hello-atria"), "output: {}", got.output);
+        assert!(got.output.contains("کد خروجی: 0"), "exit code missing: {}", got.output);
+        assert!(!got.output.contains("[ATRIA_PENDING_COMMAND:"), "FA must not stage");
+        let _ = std::fs::remove_dir_all(&data_root);
+    }
+
+    #[tokio::test]
+    async fn terminal_full_access_reports_failure_exit() {
+        let data_root = terminal_temp("faerr");
+        let got = execute_async_tool(
+            "run_command",
+            &serde_json::json!({ "command": "exit 5" }),
+            "",
+            false,
+            true,
+            "",
+            data_root.to_string_lossy().as_ref(),
+            &data_root,
+        )
+        .await
+        .expect("handled");
+        // completed with a non-zero exit code: reported, not an error outcome
+        assert!(!got.is_error);
+        assert!(got.output.contains("کد خروجی: 5"), "output: {}", got.output);
+        let _ = std::fs::remove_dir_all(&data_root);
+    }
+
+    #[tokio::test]
+    async fn terminal_rejects_empty_and_oversize_commands() {
+        let data_root = terminal_temp("bad");
+        let empty = execute_async_tool(
+            "run_command",
+            &serde_json::json!({ "command": "   " }),
+            "", false, true, "", "", &data_root,
+        )
+        .await.expect("handled");
+        assert!(empty.is_error, "empty command must be rejected");
+        let huge = execute_async_tool(
+            "run_command",
+            &serde_json::json!({ "command": "echo ".to_string() + &"a".repeat(MAX_COMMAND_CHARS + 1) }),
+            "", false, true, "", "", &data_root,
+        )
+        .await.expect("handled");
+        assert!(huge.is_error, "oversize command must be rejected");
+        let _ = std::fs::remove_dir_all(&data_root);
     }
 }

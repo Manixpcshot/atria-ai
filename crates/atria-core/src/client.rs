@@ -76,6 +76,13 @@ pub struct ClientConfig {
     /// Full Access bounded system tools: read-only system info and fixed
     /// Windows Settings pages (no shell, no explorer, no app launching).
     pub computer_tools: bool,
+    /// Full Access terminal: run_command executes immediately when Full
+    /// Access is on (explicit user opt-in); staged for approval otherwise.
+    pub terminal_tools: bool,
+    /// Optional active project folder. When non-empty it becomes the working
+    /// base for file tools (relative paths), web downloads and terminal
+    /// commands instead of the configured workspace.
+    pub project_root: String,
     /// Download root for the Full Access web-download tools; empty means the
     /// user's Desktop. The model may only address relative subfolders inside it.
     pub downloads_root: String,
@@ -113,6 +120,8 @@ impl std::fmt::Debug for ClientConfig {
             .field("full_access_profile", &self.full_access_profile)
             .field("full_access_system", &self.full_access_system)
             .field("computer_tools", &self.computer_tools)
+            .field("terminal_tools", &self.terminal_tools)
+            .field("project_root", &self.project_root)
             .field("downloads_root", &self.downloads_root)
             .field("web_thinking", &self.web_thinking)
             .field("web_search", &self.web_search)
@@ -145,6 +154,8 @@ impl Default for ClientConfig {
             full_access_profile: true,
             full_access_system: false,
             computer_tools: true,
+            terminal_tools: true,
+            project_root: String::new(),
             downloads_root: String::new(),
             web_thinking: true,
             web_search: false,

@@ -73,6 +73,7 @@ const DEFAULTS = {
   computer_tools: true,
   workspace: '',
   downloads_root: '',
+  terminal_tools: true,
   ds_search: false,
 };
 const LS_SETTINGS = 'atria.settings.v2';
@@ -121,6 +122,7 @@ function loadSettings() {
   s.full_access_system = s.full_access_system === true;
   s.computer_tools = s.computer_tools !== false;
   s.downloads_root = typeof s.downloads_root === 'string' ? s.downloads_root : '';
+  s.terminal_tools = s.terminal_tools !== false;
   return s;
 }
 function saveSettings() {
@@ -141,6 +143,7 @@ function loadProjects() {
       id: p.id, name: String(p.name || 'پروژه'), notes: String(p.notes || ''),
       tasks: Array.isArray(p.tasks) ? p.tasks.map((t) => ({ id: String(t.id || ''), text: String(t.text || ''), done: !!t.done })).filter((t) => t.id && t.text) : [],
       checkpoint: p.checkpoint && typeof p.checkpoint === 'object' ? p.checkpoint : null,
+      folder: String(p.folder || ''),
       updatedAt: Number(p.updatedAt || 0),
     })) : [];
   } catch { return []; }
@@ -282,7 +285,7 @@ function checkpointProject(project, chat) {
   if (els.projectCheckpoint) renderProjectManager();
 }
 function createProject() {
-  const project = { id: 'p' + Date.now() + Math.random().toString(36).slice(2, 7), name: 'پروژهٔ تازه', notes: '', tasks: [], checkpoint: null, updatedAt: Date.now() };
+  const project = { id: 'p' + Date.now() + Math.random().toString(36).slice(2, 7), name: 'پروژهٔ تازه', notes: '', tasks: [], checkpoint: null, folder: '', updatedAt: Date.now() };
   st.projects.unshift(project);
   setCurrentProject(project.id);
   saveProjects();
@@ -307,6 +310,7 @@ function renderProjectManager() {
   if (!project) return;
   if (els.projectName && els.projectName.value !== project.name) els.projectName.value = project.name;
   if (els.projectNotes && els.projectNotes.value !== project.notes) els.projectNotes.value = project.notes;
+  if (els.projectFolder && els.projectFolder.value !== (project.folder || '')) els.projectFolder.value = project.folder || '';
   if (els.projectCheckpoint) {
     if (project.checkpoint && project.checkpoint.updatedAt) {
       const when = new Date(project.checkpoint.updatedAt).toLocaleString('fa-IR');
@@ -1018,6 +1022,7 @@ function cacheEls() {
     btnSettings: $('#btnSettings'), btnMemory: $('#btnMemory'), btnProjects: $('#btnProjects'), btnSide: $('#btnSide'),
     projectsModal: $('#projectsModal'), projectsX: $('#projectsX'), projectList: $('#projectList'), projectDetail: $('#projectDetail'),
     projectCreate: $('#projectCreate'), projectName: $('#projectName'), projectNotes: $('#projectNotes'),
+    projectFolder: $('#projectFolder'), projectFolderPick: $('#projectFolderPick'), projectFolderClear: $('#projectFolderClear'),
     projectCheckpoint: $('#projectCheckpoint'), projectTaskCount: $('#projectTaskCount'), projectTasks: $('#projectTasks'),
     projectTaskInput: $('#projectTaskInput'), projectTaskAdd: $('#projectTaskAdd'), projectAttach: $('#projectAttach'),
     projectCheckpointSave: $('#projectCheckpointSave'), projectResume: $('#projectResume'), projectDelete: $('#projectDelete'),
@@ -1039,6 +1044,7 @@ function cacheEls() {
     toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'), dlRootVal: $('#dlRootVal'), dlRootInfo: $('#dlRootInfo'),
     webToolsVal: $('#webToolsVal'), githubToolsVal: $('#githubToolsVal'), autoModeVal: $('#autoModeVal'),
     fullAccessVal: $('#fullAccessVal'), fullAccessProfileVal: $('#fullAccessProfileVal'), computerToolsVal: $('#computerToolsVal'),
+    terminalToolsVal: $('#terminalToolsVal'),
     githubTokenInput: $('#githubTokenInput'), githubConnect: $('#githubConnect'), githubDisconnect: $('#githubDisconnect'), githubStatus: $('#githubStatus'),
     dsSearchRow: $('#dsSearchRow'), dsSearchVal: $('#dsSearchVal'),
     tokenGuide: $('#tokenGuide'), tokenGuideX: $('#tokenGuideX'), tokenGuideClose: $('#tokenGuideClose'),
@@ -1249,6 +1255,10 @@ function refreshDlRootInfo() {
     els.computerToolsVal.checked = st.settings.computer_tools !== false;
     els.computerToolsVal.onchange = () => { st.settings.computer_tools = els.computerToolsVal.checked; saveSettings(); };
   }
+  if (els.terminalToolsVal) {
+    els.terminalToolsVal.checked = st.settings.terminal_tools !== false;
+    els.terminalToolsVal.onchange = () => { st.settings.terminal_tools = els.terminalToolsVal.checked; saveSettings(); };
+  }
   if (els.fullAccessVal) {
     els.fullAccessVal.checked = st.settings.full_access_mode === true;
     els.fullAccessVal.onchange = () => setFullAccessMode(els.fullAccessVal.checked);
@@ -1294,7 +1304,7 @@ function setFullAccessMode(enabled) {
     const scopeLabel = scopeVal === 'system'
       ? 'کل سیستم (مسیر مطلق، با محافظت)'
       : scopeVal === 'profile' ? 'پروفایل کاربر ویندوز (به‌جز مسیرهای محافظت‌شده)' : 'فقط ورک‌اسپیس';
-    const accepted = !window.confirm || window.confirm(`دسترسی خودکار گسترده پرخطر است: عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی و نوشتن فایل در ${scopeLabel} بدون تأیید جداگانه اجرا می‌شوند. محتوای فایل‌های خوانده‌شده از ورک‌اسپیسِ مجاز ممکن است به مدل فعال ارسال شود. توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ شِل/مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`);
+    const accepted = !window.confirm || window.confirm(`دسترسی خودکار گسترده پرخطر است: عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی، نوشتن فایل در ${scopeLabel} و اجرای دستورات ترمینال بدون تأیید تک‌به‌تک اجرا می‌شوند. ترمینال با محدودیت ۱۲۰ ثانیه و بدون ارتقاء به مدیر اجرا می‌شود و متن هر دستور و نتیجه‌اش در گفتگو ثبت می‌شود؛ با این حال محتوای نامطمئنِ وب یا فایل می‌تواند به مدل دستور مخرب را پیشنهاد کند (ریسک prompt-injection). توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ دسترسی مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`);
     if (!accepted) {
       if (els.fullAccessVal) els.fullAccessVal.checked = false;
       syncChips();
@@ -1415,6 +1425,7 @@ function hasPendingApproval(name, output) {
   if (name === 'write_file') return /\[ATRIA_PENDING_EDIT:[A-Za-z0-9_-]+\]/.test(value);
   if (name === 'github_propose_change') return /\[ATRIA_PENDING_GITHUB:[A-Za-z0-9_-]+\]/.test(value);
   if (name === 'open_url') return /\[ATRIA_PENDING_URL:[A-Za-z0-9_-]+\]/.test(value);
+  if (name === 'run_command') return /\[ATRIA_PENDING_COMMAND:[A-Za-z0-9_-]+\]/.test(value);
   return false;
 }
 function persistFileEditItem(item) {
@@ -1508,6 +1519,49 @@ function persistToolOutput(card, output) {
   }
   const out = card && card.querySelector('.tool-out');
   if (out) out.textContent = clearMarkerOutput(output);
+}
+
+function commandActions(card, rawOutput) {
+  if (!card) return;
+  const pending = /\[ATRIA_PENDING_COMMAND:([A-Za-z0-9_-]+)\]/.exec(String(rawOutput || ''));
+  if (!pending) return;
+  const io = card.querySelector('.tool-io');
+  if (!io) return;
+  let actions = card.querySelector('.command-actions');
+  if (!actions) { actions = document.createElement('div'); actions.className = 'command-actions'; io.appendChild(actions); }
+  actions.innerHTML = '';
+  card.classList.add('needs-approval');
+  const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'btn tiny primary'; approve.textContent = '✓ اجرای دستور';
+  const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'btn tiny danger'; reject.textContent = 'رد دستور';
+  const status = document.createElement('span'); status.className = 'file-edit-status'; status.textContent = 'دستور هنوز اجرا نشده؛ متن آن را بررسی کن.';
+  approve.onclick = async () => {
+    approve.disabled = true; reject.disabled = true; status.textContent = 'در حال اجرا…';
+    try {
+      const result = await window.__atria.command_apply_command({ id: pending[1] });
+      const msg = String(result || '');
+      card.classList.remove('needs-approval'); card.classList.add('command-applied');
+      status.textContent = 'دستور اجرا شد (ثبت شد).';
+      if (card._item) {
+        card._item.out = String(card._item.out || '')
+          .replace(/\[ATRIA_PENDING_COMMAND:[A-Za-z0-9_-]+\]/, msg ? 'Command executed after user approval.\n' + msg : 'Command executed after user approval.');
+        persistFileEditItem(card._item);
+      }
+    } catch (e) { status.textContent = 'اجرا ناموفق: ' + String(e && e.message || e); approve.disabled = false; reject.disabled = false; }
+  };
+  reject.onclick = async () => {
+    approve.disabled = true; reject.disabled = true; status.textContent = 'در حال رد…';
+    try {
+      await window.__atria.command_reject_command({ id: pending[1] });
+      card.classList.remove('needs-approval');
+      status.textContent = 'دستور رد شد؛ اجرا نشد.';
+      if (card._item) {
+        card._item.out = String(card._item.out || '')
+          .replace(/\[ATRIA_PENDING_COMMAND:[A-Za-z0-9_-]+\]/, 'Command rejected by the user; nothing was run.');
+        persistFileEditItem(card._item);
+      }
+    } catch (e) { status.textContent = 'رد ناموفق: ' + String(e && e.message || e); approve.disabled = false; reject.disabled = false; }
+  };
+  actions.appendChild(approve); actions.appendChild(reject); actions.appendChild(status);
 }
 
 function githubActionActions(card, rawOutput) {
@@ -1660,6 +1714,7 @@ function historyPanelEl(flow) {
         out.classList.remove('hidden');
         out.textContent = clearMarkerOutput(it.out);
         if (it.name === 'write_file') fileEditActions(card, it.out);
+        if (it.name === 'run_command') commandActions(card, it.out);
         if (it.name === 'github_propose_change') githubActionActions(card, it.out);
         if (it.name === 'open_url') openUrlActions(card, it.out);
       }
@@ -1972,6 +2027,8 @@ function startTurn() {
       full_access_profile: st.settings.full_access_profile !== false,
       full_access_system: st.settings.full_access_system === true,
       computer_tools: st.settings.computer_tools !== false,
+      terminal_tools: st.settings.terminal_tools !== false,
+      project_root: (activeProject() || {}).folder || '',
       workspace: st.settings.workspace || '',
       downloads_root: (st.settings.downloads_root || '').trim(),
       thinking: !!st.settings.thinking,
@@ -2248,6 +2305,7 @@ function onToolEnd(id, ok, output) {
   out.textContent = clearMarkerOutput(String(output || '').slice(0, outputLimit));
   if (hasApproval) card.classList.add('needs-approval');
   if (toolName === 'write_file') fileEditActions(card, output);
+  if (toolName === 'run_command') commandActions(card, output);
   if (toolName === 'github_propose_change') githubActionActions(card, output);
   if (toolName === 'open_url') openUrlActions(card, output);
   if (card._item) {
@@ -2933,6 +2991,27 @@ async function boot() {
   if (els.projectCheckpointSave) els.projectCheckpointSave.onclick = () => { const p = activeProject(); const c = currentChat(); if (!p || !c) return toast('گفتگویی برای ذخیره وجود ندارد', 'warn'); c.projectId = p.id; checkpointProject(p, c); toast('نقطهٔ پروژه ذخیره شد', 'ok'); };
   if (els.projectResume) els.projectResume.onclick = resumeProjectInNewChat;
   if (els.projectDelete) els.projectDelete.onclick = () => { const p = activeProject(); if (!p) return; if (!confirm('پروژهٔ «' + p.name + '» حذف شود؟ گفتگوها حذف نمی‌شوند.')) return; st.projects = st.projects.filter((x) => x.id !== p.id); setCurrentProject(st.projects[0] ? st.projects[0].id : ''); saveProjects(); renderProjectManager(); };
+  if (els.projectFolder) {
+    els.projectFolder.oninput = () => { const p = activeProject(); if (!p) return; p.folder = els.projectFolder.value; p.updatedAt = Date.now(); saveProjects(); };
+    els.projectFolder.onblur = () => { els.projectFolder.value = els.projectFolder.value.trim(); const p = activeProject(); if (!p) return; p.folder = els.projectFolder.value; saveProjects(); };
+  }
+  if (els.projectFolderPick) els.projectFolderPick.onclick = async () => {
+    const dlg = window.__TAURI__ && window.__TAURI__.dialog;
+    if (!dlg || typeof dlg.open !== 'function') { toast('انتخاب پوشه فقط در نسخهٔ دسکتاپ در دسترس است؛ مسیر را دستی بنویس', 'err'); return; }
+    try {
+      const picked = await dlg.open({ directory: true, multiple: false, title: 'انتخاب پوشهٔ پروژه' });
+      if (picked && els.projectFolder) {
+        els.projectFolder.value = picked;
+        const p = activeProject();
+        if (p) { p.folder = picked; p.updatedAt = Date.now(); saveProjects(); }
+      }
+    } catch (e) { toast('انتخاب پوشه ناموفق بود: ' + (e && e.message || e), 'err'); }
+  };
+  if (els.projectFolderClear) els.projectFolderClear.onclick = () => {
+    if (els.projectFolder) els.projectFolder.value = '';
+    const p = activeProject();
+    if (p) { p.folder = ''; p.updatedAt = Date.now(); saveProjects(); }
+  };
   if (els.btnCheckUpdate) els.btnCheckUpdate.onclick = () => checkForUpdate(false);
   if (els.btnInstallUpdate) els.btnInstallUpdate.onclick = installUpdate;
   els.btnSide.onclick = () => els.frame.classList.toggle('side-hidden');

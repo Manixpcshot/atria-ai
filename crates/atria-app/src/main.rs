@@ -13,6 +13,7 @@ use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Persistent storage under the user's ~/.atria folder (like official AI apps):
             // chats/ + workspace/ + memory.json
@@ -84,6 +85,8 @@ fn main() {
             commands::github_reject_action,
             commands::open_pending_url,
             commands::reject_pending_url,
+            commands::command_apply_command,
+            commands::command_reject_command,
             commands::dirs_info,
             commands::downloads_root_info,
             commands::chats_load,

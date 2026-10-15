@@ -1505,6 +1505,10 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
 .update-status { color: #9aa8c8; font-size: 10.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .file-edit-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 3px 1px; }
 .file-edit-actions .btn { padding: 5px 9px; font-size: 10px; }
+.command-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 3px 1px; }
+.command-actions .btn { padding: 5px 9px; font-size: 10px; }
+.project-folder-row { display: flex; align-items: center; gap: 6px; }
+.project-folder-row input { flex: 1; }
 .file-edit-status { color: #a8d9bd; font-size: 10px; }
 .tool-card.needs-approval { border-color: rgba(255,196,108,.46); box-shadow: 0 0 0 1px rgba(255,196,108,.08); }
 .tool-card.file-applied, .tool-card.github-applied { border-color: rgba(80,210,150,.32); }

@@ -56,6 +56,12 @@ pub struct ChatPayload {
     /// Full Access: bounded system tools (read-only system info + Windows Settings pages).
     #[serde(default = "default_true")]
     pub computer_tools: bool,
+    /// Terminal tool: staged for approval in ask modes, direct under Full Access.
+    #[serde(default = "default_true")]
+    pub terminal_tools: bool,
+    /// Optional active project folder: working base for files/downloads/commands.
+    #[serde(default)]
+    pub project_root: String,
     /// Download root for Full Access web downloads; empty means the user's Desktop.
     #[serde(default)]
     pub downloads_root: String,
@@ -124,6 +130,8 @@ pub async fn test_connection(base: String, key: String, model: String, kind: Str
         full_access_profile: true,
         full_access_system: false,
         computer_tools: true,
+        terminal_tools: true,
+        project_root: String::new(),
         downloads_root: String::new(),
         web_thinking: false,
         web_search: false,
@@ -213,6 +221,26 @@ pub fn open_pending_url(id: String, state: State<'_, AppState>) -> Result<String
 pub fn reject_pending_url(id: String, state: State<'_, AppState>) -> Result<(), String> {
     let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
     atria_core::web::reject_pending_url(&id, root)
+}
+
+/// Apply a staged terminal command after the user approved it in the chat.
+/// Runs on a worker thread so a long command cannot block the UI thread.
+#[tauri::command]
+pub async fn command_apply_command(id: String, state: State<'_, AppState>) -> Result<String, String> {
+    let root = state
+        .mem_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
+    tokio::task::spawn_blocking(move || atria_core::tools::apply_pending_command(&id, &root, 120))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn command_reject_command(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    atria_core::tools::reject_pending_command(&id, root)
 }
 
 /// Store provider credentials in the current Windows user’s Credential Manager.
@@ -448,6 +476,8 @@ pub async fn chat_send(
             full_access_profile: payload.full_access_profile,
             full_access_system: payload.full_access_system,
             computer_tools: payload.computer_tools,
+            terminal_tools: payload.terminal_tools,
+            project_root: payload.project_root.trim().to_string(),
             downloads_root: payload.downloads_root.trim().to_string(),
             web_thinking: payload.thinking,
             web_search: payload.web_search,

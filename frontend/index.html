@@ -312,7 +312,7 @@
               <option value="profile">پروفایل کاربر ویندوز — گسترده</option>
               <option value="workspace">فقط ورک‌اسپیس</option>
             </select>
-            <span class="fhint">این محدوده فقط برای نوشتن خودکار است. در محدودهٔ «کل سیستم»، خواندن و فهرست‌کردن هم مسیر مطلق می‌پذیرند؛ در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است. traversal، symlinkها، مسیرهای کلید/اعتبارنامه (AppData، .ssh، .env) و دایرکتوری‌های سیستمی (Windows، Program Files، ProgramData) در همهٔ حالت‌ها مسدودند. نوشتن، پشتیبان قابل‌بازگردانی می‌سازد. مجوز توکن GitHub گسترش نمی‌یابد؛ شِل، دسترسی مدیر، حذف مستقیم، merge، secrets یا تنظیمات GitHub فعال نمی‌شوند. محتوای فایل‌های خوانده‌شده از محدودهٔ مجاز ممکن است برای تحلیل به مدل فعال فرستاده شود.</span>
+            <span class="fhint">این محدوده فقط برای نوشتن خودکار است. در محدودهٔ «کل سیستم»، خواندن و فهرست‌کردن هم مسیر مطلق می‌پذیرند؛ در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است. traversal، symlinkها، مسیرهای کلید/اعتبارنامه (AppData، .ssh، .env) و دایرکتوری‌های سیستمی (Windows، Program Files، ProgramData) در همهٔ حالت‌ها مسدودند. نوشتن، پشتیبان قابل‌بازگردانی می‌سازد. مجوز توکن GitHub گسترش نمی‌یابد؛ دسترسی مدیر، حذف مستقیم، merge، secrets یا تنظیمات GitHub فعال نمی‌شوند. ترمینال ابزار جداگانه‌ای است: فقط با محدودیت ۱۲۰ ثانیه، بدون ارتقاء به مدیر و با ثبت کاملِ هر دستور و نتیجه در گفتگو. محتوای فایل‌های خوانده‌شده از محدودهٔ مجاز ممکن است برای تحلیل به مدل فعال فرستاده شود.</span>
           </div>
           <div class="set-row">
             <div class="set-row-text">
@@ -320,6 +320,13 @@
               <div class="set-desc">فقط در Full Access: دو ابزار محدودِ سیستمی فعال می‌شوند — «اطلاعات سیستم» (خوان‌تنها: نسخهٔ سیستم‌عامل، تعداد هسته، نام رایانه) و «بازکردن صفحات تنظیمات ویندوز» (فقط فهرست ثابتِ صفحات تنظیمات). نتیجهٔ هر اقدام در گفتگو ثبت می‌شود. بدون ترمینال، بدون ماوس/کیبورد، بدون اجرای برنامهٔ دلخواه و بدون نوشتن مستقیم فایل.</div>
             </div>
             <label class="switch-field sm"><input type="checkbox" id="computerToolsVal"><span class="switch"></span></label>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">ترمینال — اجرای دستورات (run_command)</div>
+              <div class="set-desc">در حالت عادی و «خودمختاری محدود» هر دستور پیش از اجرا در گفتگو نمایش داده می‌شود و فقط با تأیید تو اجرا می‌گردد؛ در Full Access بدون تأیید تک‌به‌تک اجرا می‌شود (با ثبت کامل متن دستور، پوشهٔ اجرا، کد خروجی و خروجی). محدودیت‌ها: ۱۲۰ ثانیه، بدون ارتقاء به مدیر، خروجی تا ۱۶KB. پوشهٔ اجرا: پوشهٔ پروژهٔ فعال یا ورک‌اسپیس.</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="terminalToolsVal"><span class="switch"></span></label>
           </div>
           <div class="set-sec-title">GitHub — دسترسی امن</div>
           <div class="field">
@@ -382,6 +389,14 @@
         </aside>
         <section class="project-detail" id="projectDetail">
           <div class="field"><label class="flabel" for="projectName">نام پروژه</label><input id="projectName" type="text" dir="auto" maxlength="100"></div>
+          <div class="field"><label class="flabel" for="projectFolder">پوشهٔ پروژه (اختیاری)</label>
+            <div class="project-folder-row">
+              <input id="projectFolder" type="text" dir="auto" placeholder="مثل C:/Projects/tafriki — خالی = ورک‌اسپیس">
+              <button class="btn tiny" id="projectFolderPick" type="button">انتخاب…</button>
+              <button class="btn tiny" id="projectFolderClear" type="button">پاک کردن</button>
+            </div>
+            <span class="fhint">وقتی پوشه تعیین است، همهٔ کارِ این پروژه — خواندن/نوشتن فایل، دانلودهای وب و دستورات ترمینال — در همان پوشه انجام می‌شود. کاملاً اختیاری است؛ بدون پوشه، رفتار امروز (ورک‌اسپیس) حفظ می‌شود.</span>
+          </div>
           <div class="field"><label class="flabel" for="projectNotes">یادداشت و زمینهٔ ماندگار</label><textarea id="projectNotes" rows="4" dir="auto" placeholder="هدف، تصمیم‌ها، محدودیت‌ها…"></textarea></div>
           <div class="project-checkpoint" id="projectCheckpoint">هنوز نقطهٔ ذخیره‌ای ثبت نشده است.</div>
           <div class="project-task-head"><strong>کارهای پروژه</strong><span id="projectTaskCount">۰ کار</span></div>
@@ -495,6 +510,8 @@
       github_reject_action: function (a) { return invoke('github_reject_action', a); },
       open_pending_url: function (a) { return invoke('open_pending_url', a); },
       reject_pending_url: function (a) { return invoke('reject_pending_url', a); },
+      command_apply_command: function (a) { return invoke('command_apply_command', a); },
+      command_reject_command: function (a) { return invoke('command_reject_command', a); },
       update_check: function () { return invoke('update_check'); },
       update_install: function () { return invoke('update_install'); },
       chats_load: function () { return invoke('chats_load'); },

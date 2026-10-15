@@ -190,13 +190,13 @@ function addId(id, tag, cls, parent) {
 }
 for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', 'btnNew', 'convList',
   'btnSettings', 'btnMemory', 'btnProjects', 'btnSide', 'projectsModal', 'projectsX', 'projectList', 'projectDetail', 'projectCreate',
-  'projectName', 'projectNotes', 'projectCheckpoint', 'projectTaskCount', 'projectTasks', 'projectTaskInput', 'projectTaskAdd',
+  'projectName', 'projectNotes', 'projectFolder', 'projectFolderPick', 'projectFolderClear', 'projectCheckpoint', 'projectTaskCount', 'projectTasks', 'projectTaskInput', 'projectTaskAdd',
   'projectAttach', 'projectCheckpointSave', 'projectResume', 'projectDelete', 'ctxLimitVal', 'ctxMeter', 'btnCheckUpdate', 'btnInstallUpdate', 'updateStatus', 'projectChip', 'btnMin', 'btnMax', 'btnClose', 'btnScroll',
   'modelChip', 'modelPick', 'mpName', 'modelMenu', 'chipAgent', 'chipThink', 'chipFiles', 'fullAccessIndicator',
   'settingsModal', 'settingsX', 'settingsTitle', 'settingsSubtitle', 'memoryModal', 'memoryX', 'memoryClose',
   'memList', 'memClear', 'btnWipe', 'cmdk', 'cmdkInput', 'cmdkList', 'cmdkX', 'toasts',
   'tempVal', 'tempOut', 'thinkVal', 'memVal', 'streamVal', 'sysVal', 'maxTokVal',
-  'toolsVal', 'fileToolsVal', 'wsVal', 'dlRootVal', 'dlRootInfo', 'webToolsVal', 'githubToolsVal', 'autoModeVal', 'fullAccessVal', 'fullAccessProfileVal', 'computerToolsVal', 'githubTokenInput', 'githubConnect', 'githubDisconnect', 'githubStatus', 'dsSearchRow', 'dsSearchVal',
+  'toolsVal', 'fileToolsVal', 'wsVal', 'dlRootVal', 'dlRootInfo', 'webToolsVal', 'githubToolsVal', 'autoModeVal', 'fullAccessVal', 'fullAccessProfileVal', 'computerToolsVal', 'terminalToolsVal', 'githubTokenInput', 'githubConnect', 'githubDisconnect', 'githubStatus', 'dsSearchRow', 'dsSearchVal',
   'tokenGuide', 'tokenGuideX', 'tokenGuideClose', 'connSummary', 'connList', 'connAdd', 'connForm', 'connsBody',
   'cfName', 'cfKind', 'cfTemplate', 'cfBase', 'cfKey', 'cfKeyEye', 'cfKeyLabel', 'cfTokenGuide', 'cfHint',
   'cfTags', 'cfModelInput', 'cfModelAdd', 'cfFetchModels', 'cfSrvWrap', 'cfSrvSearch', 'cfSrvList',
@@ -232,7 +232,7 @@ let urlOpenBehavior = 'ok';
 let chatsLoadCalled = 0;
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.15.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.16.0' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -253,7 +253,9 @@ function router(cmd, args = {}) {
       if (urlOpenBehavior === 'network-error') return Promise.reject(new Error('open failed'));
       return Promise.resolve('opened');
     case 'reject_pending_url': return Promise.resolve();
-    case 'update_check': return Promise.resolve({ current_version: '0.15.0', latest_version: '0.15.0', available: false, release_url: '', download_size: 0 });
+    case 'command_apply_command': return Promise.resolve('دستور اجرا شد (تأییده‌شده توسط کاربر). کد خروجی: 0\nخروجی:\nhello-atria');
+    case 'command_reject_command': return Promise.resolve();
+    case 'update_check': return Promise.resolve({ current_version: '0.16.0', latest_version: '0.16.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'chats_load': chatsLoadCalled++; return Promise.resolve(chatsLoadPayload);
     case 'dirs_info': return Promise.resolve({ chats: 'C:/u/.atria/chats', workspace: 'C:/u/.atria/workspace', memory: 'C:/u/.atria/memory.json' });
@@ -309,7 +311,7 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), '
   ' wipeChats, openMemory, openCmdk, retryLast, syncChips, updateModelPick, updateConnTab,' +
   ' setActiveConn, resetAttemptStream, USAGE_TOT, createProject, openProjects, addProjectTask,' +
   ' resumeProjectInNewChat, projectContextText, checkpointProject, toggleModelFavorite, modelCapabilities, saveConns,' +
-  ' fileEditActions, githubActionActions, openUrlActions, hasPendingApproval, toolCardEl, checkForUpdate, installUpdate };';
+  ' fileEditActions, commandActions, githubActionActions, openUrlActions, hasPendingApproval, toolCardEl, checkForUpdate, installUpdate, setCurrentProject, activeProject };';
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 const T = sandbox.__T;
 
@@ -324,7 +326,7 @@ try { doc.dispatch('DOMContentLoaded'); if (win.__atriaBootPromise) await win.__
 
 console.log('\n=== 1) پل IPC + راه‌اندازی (boot) ===');
 ok('boot بدون خطا اجرا شد', !bootError, bootError && String(bootError));
-const needed = ['chat_send', 'chat_stop', 'memory_list', 'memory_clear', 'app_meta', 'list_models', 'test_connection', 'secret_set', 'secret_get', 'secret_delete', 'file_apply_edit', 'file_reject_edit', 'file_restore_backup', 'github_connect', 'github_status', 'github_disconnect', 'github_apply_action', 'github_reject_action', 'open_pending_url', 'reject_pending_url', 'update_check', 'update_install',
+const needed = ['chat_send', 'chat_stop', 'memory_list', 'memory_clear', 'app_meta', 'list_models', 'test_connection', 'secret_set', 'secret_get', 'secret_delete', 'file_apply_edit', 'file_reject_edit', 'file_restore_backup', 'github_connect', 'github_status', 'github_disconnect', 'github_apply_action', 'github_reject_action', 'open_pending_url', 'reject_pending_url', 'command_apply_command', 'command_reject_command', 'update_check', 'update_install',
   'minimize_win', 'maximize_win', 'close_win', 'chats_load', 'chats_sync', 'dirs_info', 'downloads_root_info', 'reveal_dir'];
 const bridge = win.__atria;
 ok('پل IPC همهٔ توابع لازم را دارد', needed.every((k) => typeof bridge[k] === 'function'),
@@ -340,7 +342,7 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.15.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.16.0');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
 ok('UI می‌گوید خواندن و فهرست‌کردن فایل فقط در ورک‌اسپیس است', indexHtml.includes('خواندن و فهرست‌کردن فقط داخل ورک‌اسپیس'));
 ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس می‌ماند', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است') && indexHtml.includes('کل سیستم — مسیر مطلق (با محافظت)'));
@@ -478,6 +480,7 @@ const sent = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
 eq('پیام کاربر در payload هست', sent.messages[sent.messages.length - 1].content[0].text, 'سلام آتریا');
 eq('مدلِ در حال اجرا درست است', sent.model, 'model-a');
 ok('web/GitHub/autonomy/Full Access policy در payload هست', sent.web_tools === true && sent.github_tools === true && sent.autonomous_mode === false && sent.full_access_mode === false && sent.full_access_profile === false && sent.full_access_system === false && sent.computer_tools === true);
+ok('ترمینال روشن و بدون پوشهٔ پروژه payload رفت', sent.terminal_tools === true && sent.project_root === '');
 ok('پوشهٔ دانلود پیش‌فرض در payload خالی است (= دسکتاپ)', sent.downloads_root === '');
 ok('هیچ توکن GitHub وارد payload مدل نشد', !Object.prototype.hasOwnProperty.call(sent, 'github_token'));
 ok('حالت ارسال فعال شد', T.st.sending === true);
@@ -752,6 +755,43 @@ urlOpenBehavior = 'network-error';
 await urlFailCard.querySelector('.browser-open-actions').querySelector('.btn.primary').click(); await sleep(10);
 ok('خطای بازکردن URL نیز پیش‌نویس را یک‌باره مصرف می‌کند', !urlFailItem.out.includes('ATRIA_PENDING_URL') && urlFailCard.querySelector('.browser-open-actions').querySelector('.btn.primary').disabled);
 urlOpenBehavior = 'ok';
+console.log('\n=== 16b) ترمینال: تأییدِ هر دستور + پوشهٔ پروژه ===');
+ok('hasPendingApproval marker ترمینال را می‌شناسد', T.hasPendingApproval('run_command', 'x\n[ATRIA_PENDING_COMMAND:cmd-x-1]\nx') === true && T.hasPendingApproval('run_command', 'دستور اجرا شد. کد خروجی: 0') === false);
+const cmdCard = T.toolCardEl('اجرای دستور ترمینال', 'run_command', { command: 'echo hello' }, false);
+const cmdItem = { k: 'p', title: 'اجرای دستور ترمینال', name: 'run_command', ok: true, in: '{"command":"echo hello"}', out: 'این دستور هنوز اجرا نشده است. در آتریا آن را بررسی کن و تأیید یا رد کن.\n[ATRIA_PENDING_COMMAND:cmd-test-1]\nدستور: echo hello\nپوشهٔ اجرا: C:/u/.atria/workspace' };
+T.st.chats[0].messages.push({ role: 'ai', plain: 'cmd test', flow: [cmdItem] });
+cmdCard._item = cmdItem;
+T.commandActions(cmdCard, cmdItem.out);
+ok('دستور ترمینال تا کلیک کاربر منتظر می‌ماند', cmdCard.classList.contains('needs-approval') && !!cmdCard.querySelector('.command-actions'));
+bridgeCalls.length = 0;
+await cmdCard.querySelector('.command-actions').querySelector('.btn.primary').click();
+await sleep(10);
+ok('دستور فقط پس از تأیید اجرا شد و marker از تاریخچه پاک شد', bridgeCalls.some((c) => c[0] === 'command_apply_command' && c[1].id === 'cmd-test-1') && !cmdItem.out.includes('ATRIA_PENDING_COMMAND') && cmdItem.out.includes('کد خروجی: 0') && !cmdCard.classList.contains('needs-approval'));
+const cmdRejectCard = T.toolCardEl('دستور قابل‌رد', 'run_command', { command: 'echo never' }, false);
+const cmdRejectItem = { k: 'p', title: 'اجرای دستور ترمینال', name: 'run_command', ok: true, in: '{"command":"echo never"}', out: 'این دستور هنوز اجرا نشده است.\n[ATRIA_PENDING_COMMAND:cmd-rej-1]\nدستور: echo never' };
+T.st.chats[0].messages.push({ role: 'ai', plain: 'cmd reject test', flow: [cmdRejectItem] });
+cmdRejectCard._item = cmdRejectItem;
+T.commandActions(cmdRejectCard, cmdRejectItem.out);
+bridgeCalls.length = 0;
+await cmdRejectCard.querySelector('.command-actions').querySelector('.btn.danger').click();
+await sleep(10);
+ok('رد دستور، اجرا را لغو و marker را پاک کرد', bridgeCalls.some((c) => c[0] === 'command_reject_command' && c[1].id === 'cmd-rej-1') && !cmdRejectItem.out.includes('ATRIA_PENDING_COMMAND') && cmdRejectItem.out.includes('rejected'));
+ok('چک‌باکس ترمینال همگام است', byId.terminalToolsVal.checked === true && T.st.settings.terminal_tools === true);
+byId.terminalToolsVal.checked = false; byId.terminalToolsVal.onchange();
+ok('خاموش‌کردن ترمینال در settings ماند', T.st.settings.terminal_tools === false);
+byId.terminalToolsVal.checked = true; byId.terminalToolsVal.onchange();
+const prevProject = T.st.currentProjectId;
+const folderProject = { id: 'p-folder-test', name: 'پروژهٔ پوشه‌ای', notes: '', tasks: [], checkpoint: null, folder: 'D:/projects/tafriki', updatedAt: Date.now() };
+T.st.projects.unshift(folderProject);
+T.setCurrentProject(folderProject.id);
+byId.input.value = 'پوشهٔ پروژه فعال';
+T.setActiveConn('c1');
+bridgeCalls.length = 0;
+byId.btnSend.click();
+const sent2 = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+ok('پوشهٔ پروژهٔ فعال به‌عنوان project_root رفت', sent2.project_root === 'D:/projects/tafriki');
+T.setCurrentProject(prevProject || '');
+ok('دکمهٔ انتخاب پوشه بدون Tauri-dialog خطا نمی‌دهد', (() => { try { byId.projectFolderPick.click(); return true; } catch (e) { return false; } })());
 const updateBtn = byId.btnCheckUpdate;
 await T.checkForUpdate(false);
 ok('بررسی نسخهٔ امضاشده نتیجه می‌دهد', byId.updateStatus.textContent.includes('به‌روز'));

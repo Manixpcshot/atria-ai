@@ -5,7 +5,7 @@ use crate::memory::MemoryStore;
 use crate::tools::{
     auto_file_write, auto_file_write_full_access, execute_async_tool, execute_with_data_root,
     computer_tool_catalog, file_tool_catalog_for_access, github_tool_catalog_for_access,
-    tool_catalog, tool_label,
+    terminal_tool_catalog, tool_catalog, tool_label,
     web_tool_catalog_for_access,
 };
 use crate::types::{Block, Message, Role};
@@ -128,6 +128,11 @@ pub async fn run_agent(
         if cfg.full_access_mode && cfg.computer_tools {
             tools.extend(computer_tool_catalog());
         }
+        if cfg.terminal_tools {
+            // Staged for approval in ask/autonomous modes; direct (with full
+            // chat logging) only under the explicit Full Access opt-in.
+            tools.extend(terminal_tool_catalog(cfg.full_access_mode));
+        }
         let mut request_cfg = cfg.clone();
         request_cfg.tool_use_enabled = !tools.is_empty();
 
@@ -228,7 +233,10 @@ pub async fn run_agent(
         }
 
         // Execute the enabled tools locally; file/network write policy follows the selected trust mode.
-        let root = Path::new(&cfg.workspace);
+        // An active project folder (when the user set one) becomes the working
+        // base for file tools, downloads and terminal commands.
+        let (root, effective_downloads_root, command_cwd) = effective_roots(cfg);
+        let root = root.as_path();
         let data_root = Path::new(&cfg.app_data);
         let mut results = Vec::new();
         if turn.stop_reason == "tool_use" {
@@ -259,7 +267,8 @@ pub async fn run_agent(
                         &cfg.github_token,
                         cfg.autonomous_mode,
                         cfg.full_access_mode,
-                        &cfg.downloads_root,
+                        &effective_downloads_root,
+                        &command_cwd,
                         data_root,
                     ).await {
                         res
@@ -298,6 +307,26 @@ pub async fn run_agent(
         .map(Message::plain_text)
         .unwrap_or_default();
     Ok(out)
+}
+
+/// Resolve the working bases for one agent run: an optional active project
+/// folder replaces the configured workspace for relative file paths, becomes
+/// the web-download root (the user's "all work happens there" choice) and the
+/// default terminal working directory.
+pub(crate) fn effective_roots(cfg: &ClientConfig) -> (std::path::PathBuf, String, String) {
+    let project = cfg.project_root.trim().to_string();
+    let base: std::path::PathBuf = if project.is_empty() {
+        std::path::PathBuf::from(cfg.workspace.clone())
+    } else {
+        std::path::PathBuf::from(project.clone())
+    };
+    let downloads = if project.is_empty() {
+        cfg.downloads_root.clone()
+    } else {
+        project
+    };
+    let cwd = base.to_string_lossy().to_string();
+    (base, downloads, cwd)
 }
 
 fn normalize_new_messages(messages: Vec<Message>) -> Vec<Message> {
@@ -389,6 +418,23 @@ mod tests {
     }
 }
 
+    #[test]
+    fn project_root_replaces_workspace_when_set() {
+        let mut cfg = ClientConfig::default();
+        cfg.workspace = "/home/u/atria/workspace".into();
+        cfg.downloads_root = "/home/u/Downloads".into();
+        let (root, downloads, cwd) = effective_roots(&cfg);
+        assert_eq!(root.to_string_lossy(), "/home/u/atria/workspace");
+        assert_eq!(downloads, "/home/u/Downloads");
+        assert_eq!(cwd, "/home/u/atria/workspace");
+
+        cfg.project_root = "D:/projects/tafriki".into();
+        let (root, downloads, cwd) = effective_roots(&cfg);
+        assert_eq!(root.to_string_lossy(), "D:/projects/tafriki");
+        assert_eq!(downloads, "D:/projects/tafriki");
+        assert_eq!(cwd, "D:/projects/tafriki");
+    }
+
 #[cfg(test)]
 mod retry_tests {
     use super::is_retryable;
@@ -422,4 +468,6 @@ mod retry_tests {
         assert!(!is_retryable(&api(404, "model not found")));
         assert!(!is_retryable(&CoreError::Stopped));
     }
+
+
 }
