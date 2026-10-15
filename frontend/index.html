@@ -529,6 +529,25 @@
   <script src="app.js"></script>
 <div class="model-menu hidden" id="modelMenu"></div>
 <div class="project-menu hidden" id="projectMenu"></div>
+
+  <!-- ============ Update prompt ============ -->
+  <div class="modal-backdrop hidden" id="updateModal">
+    <div class="modal glass update-prompt" role="dialog" aria-modal="true" aria-labelledby="updatePromptTitle">
+      <div class="modal-head">
+        <h2>🚀 به‌روزرسانی آتریا</h2>
+        <button class="x" id="updateModalX" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="update-prompt-title" id="updatePromptTitle">نسخهٔ تازهٔ آتریا آماده است</p>
+        <p class="fhint" id="updatePromptBody"></p>
+        <div class="update-prompt-actions">
+          <button class="btn primary" id="updatePromptYes" type="button">✓ حالا به‌روز کنم</button>
+          <button class="btn" id="updatePromptNo" type="button">نه، بعداً</button>
+        </div>
+        <div class="update-status" id="updatePromptStatus" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
 <div class="project-menu hidden" id="projectMenu"></div>
 <div class="project-menu hidden" id="projectMenu"></div>
 <div class="project-menu hidden" id="projectMenu"></div>

@@ -1098,6 +1098,9 @@ function cacheEls() {
     btnMin: $('#btnMin'), btnMax: $('#btnMax'), btnClose: $('#btnClose'),
     btnScroll: $('#btnScroll'),
     modelChip: $('#modelChip'), projectChip: $('#projectChip'), ctxMeter: $('#ctxMeter'),
+    updateModal: $('#updateModal'), updateModalX: $('#updateModalX'), updatePromptTitle: $('#updatePromptTitle'),
+    updatePromptBody: $('#updatePromptBody'), updatePromptYes: $('#updatePromptYes'), updatePromptNo: $('#updatePromptNo'),
+    updatePromptStatus: $('#updatePromptStatus'),
     modelPick: $('#modelPick'), mpName: $('#mpName'), modelMenu: $('#modelMenu'),
     chipAgent: $('#chipAgent'), chipThink: $('#chipThink'), chipFiles: $('#chipFiles'), fullAccessIndicator: $('#fullAccessIndicator'),
     settingsModal: $('#settingsModal'), settingsX: $('#settingsX'),
@@ -2613,6 +2616,41 @@ function renderCmdkList(q) {
 
 /* ---------------- signed update UI ---------------- */
 
+function showUpdatePrompt(result) {
+  if (!els.updateModal) return;
+  if (els.updatePromptTitle) els.updatePromptTitle.textContent = 'نسخهٔ ' + (result.latest_version || 'تازه') + ' آتریا آماده است';
+  if (els.updatePromptBody) els.updatePromptBody.textContent =
+    'نسخهٔ شما: ' + (result.current_version || '—') + ' · حجم: ' + fmtN(result.download_size || 0) + ' بایت · از Release امضاشدهٔ GitHub (Ed25519 + SHA-256) دانلود می‌شود. پس از تأیید، آتریا یک‌بار بسته می‌شود و خودکار با نسخهٔ تازه دوباره باز می‌شود.';
+  if (els.updatePromptStatus) els.updatePromptStatus.textContent = '';
+  if (els.updatePromptYes) els.updatePromptYes.disabled = false;
+  if (els.updatePromptNo) els.updatePromptNo.disabled = false;
+  openModal(els.updateModal);
+}
+function hideUpdatePrompt() {
+  if (els.updateModal) closeModal(els.updateModal);
+}
+async function performUpdateInstall() {
+  if (!window.__atria || !window.__atria.update_install) return toast('پل به‌روزرسانی آماده نیست', 'err');
+  if (els.updatePromptYes) els.updatePromptYes.disabled = true;
+  if (els.updatePromptNo) els.updatePromptNo.disabled = true;
+  if (els.updateModalX) els.updateModalX.disabled = true;
+  if (els.btnInstallUpdate) els.btnInstallUpdate.disabled = true;
+  if (els.updatePromptStatus) els.updatePromptStatus.textContent = 'در حال دریافت نسخهٔ معتبر و بررسی امضا و SHA-256…';
+  if (els.updateStatus) els.updateStatus.textContent = 'در حال دریافت و اعتبارسنجی امضا و SHA-256…';
+  try {
+    await window.__atria.update_install();
+    if (els.updatePromptStatus) els.updatePromptStatus.textContent = 'نسخهٔ معتبر آمادهٔ جایگزینی است؛ آتریا بسته می‌شود و با نسخهٔ تازه باز می‌شود.';
+    if (els.updateStatus) els.updateStatus.textContent = 'نسخهٔ معتبر آمادهٔ جایگزینی است؛ برنامه در حال بسته‌شدن است.';
+  } catch (error) {
+    const message = String(error && error.message || error);
+    if (els.updatePromptStatus) els.updatePromptStatus.textContent = 'نصب خودکار انجام نشد: ' + message;
+    if (els.updateStatus) els.updateStatus.textContent = 'نصب خودکار انجام نشد: ' + message;
+    if (els.updatePromptYes) els.updatePromptYes.disabled = false;
+    if (els.updatePromptNo) els.updatePromptNo.disabled = false;
+    if (els.updateModalX) els.updateModalX.disabled = false;
+    toast('به‌روزرسانی نصب نشد؛ از Release رسمی استفاده کن.', 'err');
+  }
+}
 async function checkForUpdate(silent = false) {
   if (!els.updateStatus || !window.__atria || !window.__atria.update_check) return;
   if (els.btnCheckUpdate) { els.btnCheckUpdate.disabled = true; els.btnCheckUpdate.textContent = 'در حال بررسی…'; }
@@ -2622,8 +2660,12 @@ async function checkForUpdate(silent = false) {
     if (result && result.available) {
       els.updateStatus.textContent = `نسخهٔ ${result.latest_version} آماده است · فایل: ${fmtN(result.download_size)} بایت · امضای معتبر`;
       if (els.btnInstallUpdate) els.btnInstallUpdate.classList.remove('hidden');
-      if (silent && els.btnSettings) { els.btnSettings.classList.add('update-available'); toast(`نسخهٔ ${result.latest_version} آماده است؛ تنظیمات ← به‌روزرسانی امن را باز کن.`, 'ok'); }
+      if (els.btnSettings) els.btnSettings.classList.add('update-available');
+      // Every launch re-checks; the user decides (explicit click) whether to
+      // download, replace and restart now. "نه، بعداً" only closes for this run.
+      showUpdatePrompt(result);
     } else {
+      hideUpdatePrompt();
       els.updateStatus.textContent = `آتریا به‌روز است (${result && result.current_version || 'نسخهٔ فعلی'}) · امضای Release بررسی شد.`;
       if (els.btnInstallUpdate) els.btnInstallUpdate.classList.add('hidden');
     }
@@ -3082,6 +3124,9 @@ async function boot() {
   };
   if (els.btnCheckUpdate) els.btnCheckUpdate.onclick = () => checkForUpdate(false);
   if (els.btnInstallUpdate) els.btnInstallUpdate.onclick = installUpdate;
+  if (els.updateModalX) els.updateModalX.onclick = hideUpdatePrompt;
+  if (els.updatePromptNo) els.updatePromptNo.onclick = hideUpdatePrompt;
+  if (els.updatePromptYes) els.updatePromptYes.onclick = () => performUpdateInstall();
   els.btnSide.onclick = () => els.frame.classList.toggle('side-hidden');
   els.btnMin.onclick = () => invokeCmd('minimize_win');
   els.btnMax.onclick = () => invokeCmd('maximize_win');
