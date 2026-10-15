@@ -246,7 +246,7 @@ function renderStorage() {
 function currentChat() { return st.chats.find((c) => c.id === st.currentId) || null; }
 function projectById(id) { return st.projects.find((p) => p.id === id) || null; }
 function activeProject() { return projectById(st.currentProjectId); }
-function projectForChat(chat) { return projectById((chat && chat.projectId) || st.currentProjectId); }
+function projectForChat(chat) { return projectById((chat && chat.projectId) || ''); }
 function setCurrentProject(id) {
   st.currentProjectId = projectById(id) ? id : '';
   localStorage.setItem(LS_CURRENT_PROJECT, st.currentProjectId);
@@ -254,10 +254,73 @@ function setCurrentProject(id) {
 }
 function renderProjectChip() {
   if (!els.projectChip) return;
-  const p = projectForChat(currentChat());
-  els.projectChip.textContent = p ? '📁 ' + p.name : '';
-  els.projectChip.title = p ? 'پروژهٔ فعال: ' + p.name : '';
-  els.projectChip.classList.toggle('hidden', !p);
+  const chat = currentChat();
+  const p = chat ? projectById(chat.projectId) : null;
+  els.projectChip.textContent = p ? '📁 ' + p.name : '📁 عادی';
+  els.projectChip.title = p
+    ? 'پروژهٔ این چت: ' + p.name + ' — برای تغییر کلیک کن'
+    : 'این چت بدون پروژه است (حالت عادی) — برای انتخاب پروژه کلیک کن';
+  els.projectChip.classList.remove('hidden');
+}
+function setChatProject(pid) {
+  const chat = currentChat();
+  if (!chat) return;
+  chat.projectId = pid ? pid : undefined;
+  saveChats(chat.id);
+  renderProjectChip();
+  const p = pid ? projectById(pid) : null;
+  toast(p ? 'پروژهٔ این چت: ' + p.name : 'این چت به حالت عادی برگشت (بدون پروژه).', 'ok');
+}
+function renderProjectMenu() {
+  const m = els.projectMenu;
+  if (!m) return;
+  m.innerHTML = '';
+  const chat = currentChat();
+  const selectedId = chat ? (chat.projectId || '') : '';
+  const mk = (label, selected, onPick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pm-option' + (selected ? ' selected' : '');
+    const mark = document.createElement('span'); mark.className = 'pm-mark'; mark.textContent = selected ? '✓' : '';
+    const copy = document.createElement('span'); copy.style.flex = '1'; copy.textContent = label;
+    b.appendChild(mark); b.appendChild(copy);
+    b.onclick = () => { closeProjectMenu(); onPick(); };
+    m.appendChild(b);
+  };
+  mk('حالت عادی (بدون پروژه)', selectedId === '', () => setChatProject(''));
+  for (const p of st.projects) {
+    mk('📁 ' + p.name, selectedId === p.id, () => setChatProject(p.id));
+  }
+  if (!st.projects.length) {
+    const empty = document.createElement('div'); empty.className = 'pm-empty';
+    empty.textContent = 'هنوز پروژه‌ای نیست — از تب «پروژه‌ها» بساز.';
+    m.appendChild(empty);
+  }
+  const hint = document.createElement('div'); hint.className = 'pm-hint';
+  hint.textContent = 'پروژه فقط زمینهٔ همین چت را عوض می‌کند؛ بقیهٔ چت‌ها دست‌نخورده می‌مانند.';
+  m.appendChild(hint);
+}
+function openProjectMenu() {
+  const m = els.projectMenu, el = els.projectChip;
+  if (!m || !el) return;
+  try {
+    if (m.parentElement !== document.body) document.body.appendChild(m);
+    renderProjectMenu();
+    m.classList.remove('hidden');
+    const r = el.getBoundingClientRect();
+    m.style.position = 'fixed';
+    m.style.zIndex = '120';
+    const w = Math.min(m.offsetWidth || 300, window.innerWidth - 16);
+    const h = Math.min(m.offsetHeight || 320, window.innerHeight - 16);
+    let left = Math.min(Math.max(8, r.right - w), Math.max(8, window.innerWidth - w - 8));
+    let top = r.bottom + 8;
+    if (top + h > window.innerHeight - 8) top = Math.min(Math.max(8, r.top - h - 8), window.innerHeight - h - 8);
+    m.style.left = left + 'px';
+    m.style.top = top + 'px';
+  } catch (err) { toast('منوی پروژه باز نشد: ' + err, 'err'); }
+}
+function closeProjectMenu() {
+  if (els.projectMenu) els.projectMenu.classList.add('hidden');
 }
 function projectContextText(project) {
   if (!project) return '';
@@ -308,9 +371,10 @@ function renderProjectManager() {
   const project = activeProject();
   if (els.projectDetail) els.projectDetail.classList.toggle('hidden', !project);
   if (!project) return;
-  if (els.projectName && els.projectName.value !== project.name) els.projectName.value = project.name;
-  if (els.projectNotes && els.projectNotes.value !== project.notes) els.projectNotes.value = project.notes;
-  if (els.projectFolder && els.projectFolder.value !== (project.folder || '')) els.projectFolder.value = project.folder || '';
+  const focusedEl = typeof document !== 'undefined' ? document.activeElement : null;
+  if (els.projectName && focusedEl !== els.projectName && els.projectName.value !== project.name) els.projectName.value = project.name;
+  if (els.projectNotes && focusedEl !== els.projectNotes && els.projectNotes.value !== project.notes) els.projectNotes.value = project.notes;
+  if (els.projectFolder && focusedEl !== els.projectFolder && els.projectFolder.value !== (project.folder || '')) els.projectFolder.value = project.folder || '';
   if (els.projectCheckpoint) {
     if (project.checkpoint && project.checkpoint.updatedAt) {
       const when = new Date(project.checkpoint.updatedAt).toLocaleString('fa-IR');
@@ -360,9 +424,12 @@ function attachCurrentChatToProject() {
 function resumeProjectInNewChat() {
   const project = activeProject();
   if (!project) return;
-  setCurrentProject(project.id);
   newChat(true);
+  const chat = currentChat();
+  if (chat) { chat.projectId = project.id; saveChats(chat.id); }
+  setCurrentProject(project.id);
   closeModal(els.projectsModal);
+  renderProjectChip();
   toast('گفتگوی تازه با زمینه و کارهای باز پروژه آماده شد', 'ok');
   els.input.focus();
 }
@@ -1023,6 +1090,7 @@ function cacheEls() {
     projectsModal: $('#projectsModal'), projectsX: $('#projectsX'), projectList: $('#projectList'), projectDetail: $('#projectDetail'),
     projectCreate: $('#projectCreate'), projectName: $('#projectName'), projectNotes: $('#projectNotes'),
     projectFolder: $('#projectFolder'), projectFolderPick: $('#projectFolderPick'), projectFolderClear: $('#projectFolderClear'),
+    projectMenu: $('#projectMenu'),
     projectCheckpoint: $('#projectCheckpoint'), projectTaskCount: $('#projectTaskCount'), projectTasks: $('#projectTasks'),
     projectTaskInput: $('#projectTaskInput'), projectTaskAdd: $('#projectTaskAdd'), projectAttach: $('#projectAttach'),
     projectCheckpointSave: $('#projectCheckpointSave'), projectResume: $('#projectResume'), projectDelete: $('#projectDelete'),
@@ -1368,7 +1436,7 @@ function renderConvList() {
 }
 
 function newChat(silent) {
-  const chat = { id: 'c' + Date.now() + Math.random().toString(36).slice(2, 6), title: 'گفتگوی جدید', createdAt: Date.now(), messages: [], projectId: projectById(st.currentProjectId) ? st.currentProjectId : undefined };
+  const chat = { id: 'c' + Date.now() + Math.random().toString(36).slice(2, 6), title: 'گفتگوی جدید', createdAt: Date.now(), messages: [], projectId: undefined };
   st.chats.unshift(chat);
   st.currentId = chat.id;
   saveChats(chat.id);
@@ -1382,8 +1450,6 @@ function newChat(silent) {
 
 function switchChat(id) {
   st.currentId = id;
-  const selectedChat = st.chats.find((c) => c.id === id);
-  setCurrentProject(selectedChat && selectedChat.projectId ? selectedChat.projectId : '');
   localStorage.setItem(LS_CURRENT, id);
   renderConvList();
   renderHistory();
@@ -1986,7 +2052,6 @@ function startTurn() {
 
   const chat = currentChat();
   const project = projectForChat(chat);
-  if (project && !chat.projectId) { chat.projectId = project.id; saveChats(chat.id); }
   const projectContext = projectContextText(project);
   const promptOverhead = roughTokens(st.settings.system || '') + roughTokens(projectContext) + (st.settings.tools_enabled ? 1600 : 0);
   const context = buildHistory(chat, promptOverhead);
@@ -2983,7 +3048,10 @@ async function boot() {
   if (els.projectsX) els.projectsX.onclick = () => closeModal(els.projectsModal);
   if (els.projectsModal) els.projectsModal.onclick = (event) => { if (event.target === els.projectsModal) closeModal(els.projectsModal); };
   if (els.projectCreate) els.projectCreate.onclick = createProject;
-  if (els.projectName) els.projectName.oninput = () => { const p = activeProject(); if (!p) return; p.name = els.projectName.value.trim() || 'پروژهٔ بی‌نام'; p.updatedAt = Date.now(); saveProjects(); renderProjectListOnly(); renderProjectChip(); };
+  if (els.projectName) {
+    els.projectName.oninput = () => { const p = activeProject(); if (!p) return; p.name = els.projectName.value; p.updatedAt = Date.now(); saveProjects(); renderProjectListOnly(); renderProjectChip(); };
+    els.projectName.onblur = () => { const p = activeProject(); if (!p) return; const v = els.projectName.value.trim(); p.name = v || 'پروژهٔ بی‌نام'; els.projectName.value = p.name; p.updatedAt = Date.now(); saveProjects(); renderProjectListOnly(); renderProjectChip(); };
+  }
   if (els.projectNotes) els.projectNotes.oninput = () => { const p = activeProject(); if (!p) return; p.notes = els.projectNotes.value; p.updatedAt = Date.now(); saveProjects(); };
   if (els.projectTaskAdd) els.projectTaskAdd.onclick = addProjectTask;
   if (els.projectTaskInput) els.projectTaskInput.onkeydown = (event) => { if (event.key === 'Enter') { event.preventDefault(); addProjectTask(); } };
@@ -3085,6 +3153,14 @@ async function boot() {
     if (els.modelMenu.classList.contains('hidden')) openModelMenuAt(els.modelPick);
     else closeModelMenu();
   };
+  if (els.projectChip) els.projectChip.onclick = (e) => {
+    e.stopPropagation();
+    openProjectMenu();
+  };
+  document.addEventListener('click', (e) => {
+    if (els.projectMenu && !els.projectMenu.classList.contains('hidden') &&
+        !els.projectMenu.contains(e.target) && !(els.projectChip && els.projectChip.contains(e.target))) closeProjectMenu();
+  });
   document.addEventListener('click', (e) => {
     if (!els.modelMenu.classList.contains('hidden') &&
         !els.modelMenu.contains(e.target) && !els.modelPick.contains(e.target)) closeModelMenu();

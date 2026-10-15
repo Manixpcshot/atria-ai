@@ -203,6 +203,7 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'cfDelete', 'cfSetActive', 'cfTestConn', 'cfTestStatus', 'storageBox', 'btnRevealAtria', 'btnAttach', 'fileInput', 'imgTray',
   'stars', 'appVer', 'tokChip']) addId(id);
 byId.connsBody.classList.add('conns-body');
+addId('projectMenu', 'div', 'project-menu hidden');
 for (const id of ['modelMenu', 'settingsModal', 'memoryModal', 'projectsModal', 'cmdk', 'tokenGuide', 'imgTray',
   'dsSearchRow', 'btnScroll', 'tokChip', 'connForm', 'btnStop', 'cfHint', 'cfTokenGuide', 'btnInstallUpdate']) byId[id].classList.add('hidden');
 for (const t of ['conn', 'behavior', 'sys']) {
@@ -232,7 +233,7 @@ let urlOpenBehavior = 'ok';
 let chatsLoadCalled = 0;
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.16.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.16.1' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -255,7 +256,7 @@ function router(cmd, args = {}) {
     case 'reject_pending_url': return Promise.resolve();
     case 'command_apply_command': return Promise.resolve('دستور اجرا شد (تأییده‌شده توسط کاربر). کد خروجی: 0\nخروجی:\nhello-atria');
     case 'command_reject_command': return Promise.resolve();
-    case 'update_check': return Promise.resolve({ current_version: '0.16.0', latest_version: '0.16.0', available: false, release_url: '', download_size: 0 });
+    case 'update_check': return Promise.resolve({ current_version: '0.16.1', latest_version: '0.16.1', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'chats_load': chatsLoadCalled++; return Promise.resolve(chatsLoadPayload);
     case 'dirs_info': return Promise.resolve({ chats: 'C:/u/.atria/chats', workspace: 'C:/u/.atria/workspace', memory: 'C:/u/.atria/memory.json' });
@@ -311,7 +312,7 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), '
   ' wipeChats, openMemory, openCmdk, retryLast, syncChips, updateModelPick, updateConnTab,' +
   ' setActiveConn, resetAttemptStream, USAGE_TOT, createProject, openProjects, addProjectTask,' +
   ' resumeProjectInNewChat, projectContextText, checkpointProject, toggleModelFavorite, modelCapabilities, saveConns,' +
-  ' fileEditActions, commandActions, githubActionActions, openUrlActions, hasPendingApproval, toolCardEl, checkForUpdate, installUpdate, setCurrentProject, activeProject };';
+  ' fileEditActions, commandActions, githubActionActions, openUrlActions, hasPendingApproval, toolCardEl, checkForUpdate, installUpdate, setCurrentProject, activeProject, setChatProject, openProjectMenu, closeProjectMenu, renderProjectChip };';
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 const T = sandbox.__T;
 
@@ -342,7 +343,7 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.16.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.16.1');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
 ok('UI می‌گوید خواندن و فهرست‌کردن فایل فقط در ورک‌اسپیس است', indexHtml.includes('خواندن و فهرست‌کردن فقط داخل ورک‌اسپیس'));
 ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس می‌ماند', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است') && indexHtml.includes('کل سیستم — مسیر مطلق (با محافظت)'));
@@ -631,25 +632,64 @@ ok('openConns → صفحهٔ تنظیمات + تب conn (بدون مودال د�
   !byId.settingsModal.classList.contains('hidden') &&
   [...doc.querySelectorAll('.stab-body')].find((b) => b.dataset.tab === 'conn').classList.contains('active'));
 
-console.log('\n=== 12) پروژه‌ها، checkpoint و ادامهٔ گفتگو ===');
+console.log('\n=== 12) پروژه‌ها، کارت پروژهٔ هر چت و checkpoint ===');
 T.createProject();
 const project = T.st.projects[0];
 ok('پروژه ساخته و فعال شد', !!project && T.st.currentProjectId === project.id);
 byId.projectName.value = 'پروژهٔ آزمایشی';
 byId.projectName.dispatch('input', { target: byId.projectName });
+ok('اسم پروژه ذخیره شد', project.name === 'پروژهٔ آزمایشی' && byId.projectName.value === 'پروژهٔ آزمایشی');
+byId.projectName.value = 'اسم تازه ';
+byId.projectName.dispatch('input', { target: byId.projectName });
+ok('باگ اسم‌گذاری: فضای حین تایپ پاک/بازنویسی نمی‌شود', byId.projectName.value === 'اسم تازه ' && project.name === 'اسم تازه ');
+byId.projectName.onblur();
+ok('blur، اسم را normalize می‌کند', project.name === 'اسم تازه' && byId.projectName.value === 'اسم تازه');
+byId.projectName.value = '   ';
+byId.projectName.onblur();
+ok('اسم خالی در blur به «پروژهٔ بی‌نام» برمی‌گردد', project.name === 'پروژهٔ بی‌نام');
+byId.projectName.value = 'پروژهٔ آزمایشی';
+byId.projectName.onblur();
 byId.projectNotes.value = 'هدف: انتشار امن';
 byId.projectNotes.dispatch('input', { target: byId.projectNotes });
 byId.projectTaskInput.value = 'تست انتشار';
 byId.projectTaskAdd.click();
 ok('یادداشت و کار پروژه ذخیره شدند', project.notes.includes('انتشار امن') && project.tasks[0].text === 'تست انتشار');
 T.newChat(true);
-ok('گفتگوی تازه به پروژه متصل شد', T.st.chats[0].projectId === project.id);
+ok('گفتگوی تازه پیش‌فرض «عادی» است (بدون پروژه)', !T.st.chats[0].projectId);
+ok('کارت پروژه حالت عادی را نشان می‌دهد', byId.projectChip.textContent === '📁 عادی' && !byId.projectChip.classList.contains('hidden'));
+byId.projectChip.click();
+ok('منوی پروژه روی کارت باز می‌شود', !byId.projectMenu.classList.contains('hidden'));
+const pOpts = byId.projectMenu.querySelectorAll('.pm-option');
+ok('منو گزینهٔ عادی + همهٔ پروژه‌ها را دارد', pOpts.length === T.st.projects.length + 1);
+pOpts.find((b) => b.textContent.includes('پروژهٔ آزمایشی')).click();
+ok('پروژه انتخاب‌شده فقط به همین چت وصل شد', T.st.chats[0].projectId === project.id && byId.projectChip.textContent === '📁 پروژهٔ آزمایشی' && byId.projectMenu.classList.contains('hidden'));
 ok('زمینهٔ پروژه در prompt آماده است', T.projectContextText(project).includes('تست انتشار') && T.projectContextText(project).includes('هدف'));
 T.st.chats[0].messages.push({ role: 'user', text: 'درخواست پروژه', plain: 'درخواست پروژه' }, { role: 'ai', text: 'خلاصهٔ پیشرفت', plain: 'خلاصهٔ پیشرفت' });
 T.checkpointProject(project, T.st.chats[0]);
 ok('checkpoint از گفتگو ثبت شد', project.checkpoint && project.checkpoint.summary.includes('خلاصهٔ پیشرفت'));
+byId.projectChip.click();
+byId.projectMenu.querySelectorAll('.pm-option').find((b) => b.textContent.includes('حالت عادی')).click();
+ok('برگشت به «عادی»: چت دیگر پروژه ندارد', !T.st.chats[0].projectId && byId.projectChip.textContent === '📁 عادی');
 T.resumeProjectInNewChat();
-ok('ادامه، گفتگوی تازه با همان پروژه می‌سازد', T.st.chats[0].projectId === project.id && T.st.currentProjectId === project.id);
+ok('ادامه از مدیر پروژه، گفتگوی تازه با همان پروژه می‌سازد', T.st.chats[0].projectId === project.id && T.st.currentProjectId === project.id);
+// payload: project context only for the chat that picked a project
+byId.input.value = 'سلام با زمینهٔ پروژه';
+T.setActiveConn('c1');
+bridgeCalls.length = 0;
+byId.btnSend.click();
+const sentP = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+ok('زمینهٔ پروژه فقط برای چتِ انتخاب‌شده به prompt می‌رود', String(sentP.system || '').includes('[PROJECT CHECKPOINT]') && String(sentP.system).includes('پروژهٔ آزمایشی'));
+emit('atria:done', { new_messages: null, final_text: 'پاسخ آزمایشی.', session_id: '', input_tokens: 2, output_tokens: 2 });
+ok('پس از جریان با پروژه، ارسال بسته شد', T.st.sending === false);
+byId.projectChip.click();
+byId.projectMenu.querySelectorAll('.pm-option').find((b) => b.textContent.includes('حالت عادی')).click();
+byId.input.value = 'حالا حالت عادی';
+bridgeCalls.length = 0;
+byId.btnSend.click();
+const sentN = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+ok('حالت عادی یعنی بدون زمینهٔ پروژه در prompt', !String(sentN.system || '').includes('[PROJECT CHECKPOINT]'));
+emit('atria:done', { new_messages: null, final_text: 'پاسخ آزمایشی.', session_id: '', input_tokens: 2, output_tokens: 2 });
+ok('پس از جریان عادی، ارسال بسته شد', T.st.sending === false);
 
 console.log('\n=== 13) پنجرهٔ تاریخچه و مدیریت context ===');
 {
