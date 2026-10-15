@@ -94,6 +94,8 @@ fn main() {
             commands::reveal_dir,
             commands::chat_send,
             commands::chat_stop,
+            commands::mcp_test_server,
+            commands::files_stash,
             commands::memory_list,
             commands::memory_clear,
             commands::app_meta,

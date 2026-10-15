@@ -94,6 +94,9 @@ pub struct ClientConfig {
     pub web_session: String,
     /// DeepSeek-web: write-back channel for the session id actually used.
     pub web_session_out: Option<Arc<std::sync::Mutex<String>>>,
+    /// MCP servers (stdio). Their tools are exposed to the model only while
+    /// Full Access is on; every call is logged in the chat like other tools.
+    pub mcp_servers: Vec<crate::mcp::McpServer>,
 }
 
 impl std::fmt::Debug for ClientConfig {
@@ -161,6 +164,7 @@ impl Default for ClientConfig {
             web_search: false,
             web_session: String::new(),
             web_session_out: None,
+            mcp_servers: Vec::new(),
         }
     }
 }

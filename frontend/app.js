@@ -71,6 +71,7 @@ const DEFAULTS = {
   full_access_profile: true,
   full_access_system: false,
   computer_tools: true,
+  mcp_servers: [],
   workspace: '',
   downloads_root: '',
   terminal_tools: true,
@@ -100,6 +101,7 @@ const st = {
   conns: [],
   activeConnId: '',
   pendingImgs: [],
+  pendingFiles: [],
 };
 let dirtyChats = new Set();
 let goneChats = new Set();
@@ -123,6 +125,7 @@ function loadSettings() {
   s.computer_tools = s.computer_tools !== false;
   s.downloads_root = typeof s.downloads_root === 'string' ? s.downloads_root : '';
   s.terminal_tools = s.terminal_tools !== false;
+  s.mcp_servers = Array.isArray(s.mcp_servers) ? s.mcp_servers : [];
   return s;
 }
 function saveSettings() {
@@ -246,7 +249,7 @@ function renderStorage() {
 function currentChat() { return st.chats.find((c) => c.id === st.currentId) || null; }
 function projectById(id) { return st.projects.find((p) => p.id === id) || null; }
 function activeProject() { return projectById(st.currentProjectId); }
-function projectForChat(chat) { return projectById((chat && chat.projectId) || st.currentProjectId); }
+function projectForChat(chat) { return projectById((chat && chat.projectId) || ''); }
 function setCurrentProject(id) {
   st.currentProjectId = projectById(id) ? id : '';
   localStorage.setItem(LS_CURRENT_PROJECT, st.currentProjectId);
@@ -254,10 +257,73 @@ function setCurrentProject(id) {
 }
 function renderProjectChip() {
   if (!els.projectChip) return;
-  const p = projectForChat(currentChat());
-  els.projectChip.textContent = p ? '📁 ' + p.name : '';
-  els.projectChip.title = p ? 'پروژهٔ فعال: ' + p.name : '';
-  els.projectChip.classList.toggle('hidden', !p);
+  const chat = currentChat();
+  const p = chat ? projectById(chat.projectId) : null;
+  els.projectChip.textContent = p ? '📁 ' + p.name : '📁 عادی';
+  els.projectChip.title = p
+    ? 'پروژهٔ این چت: ' + p.name + ' — برای تغییر کلیک کن'
+    : 'این چت بدون پروژه است (حالت عادی) — برای انتخاب پروژه کلیک کن';
+  els.projectChip.classList.remove('hidden');
+}
+function setChatProject(pid) {
+  const chat = currentChat();
+  if (!chat) return;
+  chat.projectId = pid ? pid : undefined;
+  saveChats(chat.id);
+  renderProjectChip();
+  const p = pid ? projectById(pid) : null;
+  toast(p ? 'پروژهٔ این چت: ' + p.name : 'این چت به حالت عادی برگشت (بدون پروژه).', 'ok');
+}
+function renderProjectMenu() {
+  const m = els.projectMenu;
+  if (!m) return;
+  m.innerHTML = '';
+  const chat = currentChat();
+  const selectedId = chat ? (chat.projectId || '') : '';
+  const mk = (label, selected, onPick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pm-option' + (selected ? ' selected' : '');
+    const mark = document.createElement('span'); mark.className = 'pm-mark'; mark.textContent = selected ? '✓' : '';
+    const copy = document.createElement('span'); copy.style.flex = '1'; copy.textContent = label;
+    b.appendChild(mark); b.appendChild(copy);
+    b.onclick = () => { closeProjectMenu(); onPick(); };
+    m.appendChild(b);
+  };
+  mk('حالت عادی (بدون پروژه)', selectedId === '', () => setChatProject(''));
+  for (const p of st.projects) {
+    mk('📁 ' + p.name, selectedId === p.id, () => setChatProject(p.id));
+  }
+  if (!st.projects.length) {
+    const empty = document.createElement('div'); empty.className = 'pm-empty';
+    empty.textContent = 'هنوز پروژه‌ای نیست — از تب «پروژه‌ها» بساز.';
+    m.appendChild(empty);
+  }
+  const hint = document.createElement('div'); hint.className = 'pm-hint';
+  hint.textContent = 'پروژه فقط زمینهٔ همین چت را عوض می‌کند؛ بقیهٔ چت‌ها دست‌نخورده می‌مانند.';
+  m.appendChild(hint);
+}
+function openProjectMenu() {
+  const m = els.projectMenu, el = els.projectChip;
+  if (!m || !el) return;
+  try {
+    if (m.parentElement !== document.body) document.body.appendChild(m);
+    renderProjectMenu();
+    m.classList.remove('hidden');
+    const r = el.getBoundingClientRect();
+    m.style.position = 'fixed';
+    m.style.zIndex = '120';
+    const w = Math.min(m.offsetWidth || 300, window.innerWidth - 16);
+    const h = Math.min(m.offsetHeight || 320, window.innerHeight - 16);
+    let left = Math.min(Math.max(8, r.right - w), Math.max(8, window.innerWidth - w - 8));
+    let top = r.bottom + 8;
+    if (top + h > window.innerHeight - 8) top = Math.min(Math.max(8, r.top - h - 8), window.innerHeight - h - 8);
+    m.style.left = left + 'px';
+    m.style.top = top + 'px';
+  } catch (err) { toast('منوی پروژه باز نشد: ' + err, 'err'); }
+}
+function closeProjectMenu() {
+  if (els.projectMenu) els.projectMenu.classList.add('hidden');
 }
 function projectContextText(project) {
   if (!project) return '';
@@ -308,9 +374,10 @@ function renderProjectManager() {
   const project = activeProject();
   if (els.projectDetail) els.projectDetail.classList.toggle('hidden', !project);
   if (!project) return;
-  if (els.projectName && els.projectName.value !== project.name) els.projectName.value = project.name;
-  if (els.projectNotes && els.projectNotes.value !== project.notes) els.projectNotes.value = project.notes;
-  if (els.projectFolder && els.projectFolder.value !== (project.folder || '')) els.projectFolder.value = project.folder || '';
+  const focusedEl = typeof document !== 'undefined' ? document.activeElement : null;
+  if (els.projectName && focusedEl !== els.projectName && els.projectName.value !== project.name) els.projectName.value = project.name;
+  if (els.projectNotes && focusedEl !== els.projectNotes && els.projectNotes.value !== project.notes) els.projectNotes.value = project.notes;
+  if (els.projectFolder && focusedEl !== els.projectFolder && els.projectFolder.value !== (project.folder || '')) els.projectFolder.value = project.folder || '';
   if (els.projectCheckpoint) {
     if (project.checkpoint && project.checkpoint.updatedAt) {
       const when = new Date(project.checkpoint.updatedAt).toLocaleString('fa-IR');
@@ -360,9 +427,12 @@ function attachCurrentChatToProject() {
 function resumeProjectInNewChat() {
   const project = activeProject();
   if (!project) return;
-  setCurrentProject(project.id);
   newChat(true);
+  const chat = currentChat();
+  if (chat) { chat.projectId = project.id; saveChats(chat.id); }
+  setCurrentProject(project.id);
   closeModal(els.projectsModal);
+  renderProjectChip();
   toast('گفتگوی تازه با زمینه و کارهای باز پروژه آماده شد', 'ok');
   els.input.focus();
 }
@@ -1023,6 +1093,7 @@ function cacheEls() {
     projectsModal: $('#projectsModal'), projectsX: $('#projectsX'), projectList: $('#projectList'), projectDetail: $('#projectDetail'),
     projectCreate: $('#projectCreate'), projectName: $('#projectName'), projectNotes: $('#projectNotes'),
     projectFolder: $('#projectFolder'), projectFolderPick: $('#projectFolderPick'), projectFolderClear: $('#projectFolderClear'),
+    projectMenu: $('#projectMenu'),
     projectCheckpoint: $('#projectCheckpoint'), projectTaskCount: $('#projectTaskCount'), projectTasks: $('#projectTasks'),
     projectTaskInput: $('#projectTaskInput'), projectTaskAdd: $('#projectTaskAdd'), projectAttach: $('#projectAttach'),
     projectCheckpointSave: $('#projectCheckpointSave'), projectResume: $('#projectResume'), projectDelete: $('#projectDelete'),
@@ -1030,8 +1101,12 @@ function cacheEls() {
     btnMin: $('#btnMin'), btnMax: $('#btnMax'), btnClose: $('#btnClose'),
     btnScroll: $('#btnScroll'),
     modelChip: $('#modelChip'), projectChip: $('#projectChip'), ctxMeter: $('#ctxMeter'),
+    mcpList: $('#mcpList'), mcpName: $('#mcpName'), mcpCmd: $('#mcpCmd'), mcpArgs: $('#mcpArgs'), mcpAddBtn: $('#mcpAddBtn'),
+    updateModal: $('#updateModal'), updateModalX: $('#updateModalX'), updatePromptTitle: $('#updatePromptTitle'),
+    updatePromptBody: $('#updatePromptBody'), updatePromptYes: $('#updatePromptYes'), updatePromptNo: $('#updatePromptNo'),
+    updatePromptStatus: $('#updatePromptStatus'),
     modelPick: $('#modelPick'), mpName: $('#mpName'), modelMenu: $('#modelMenu'),
-    chipAgent: $('#chipAgent'), chipThink: $('#chipThink'), chipFiles: $('#chipFiles'), fullAccessIndicator: $('#fullAccessIndicator'),
+    chipThink: $('#chipThink'), fullAccessIndicator: $('#fullAccessIndicator'),
     settingsModal: $('#settingsModal'), settingsX: $('#settingsX'),
     settingsTitle: $('#settingsTitle'), settingsSubtitle: $('#settingsSubtitle'),
     memoryModal: $('#memoryModal'), memoryX: $('#memoryX'), memoryClose: $('#memoryClose'),
@@ -1041,7 +1116,7 @@ function cacheEls() {
     tempVal: $('#tempVal'), tempOut: $('#tempOut'),
     thinkVal: $('#thinkVal'), memVal: $('#memVal'), streamVal: $('#streamVal'),
     sysVal: $('#sysVal'), maxTokVal: $('#maxTokVal'),
-    toolsVal: $('#toolsVal'), fileToolsVal: $('#fileToolsVal'), wsVal: $('#wsVal'), dlRootVal: $('#dlRootVal'), dlRootInfo: $('#dlRootInfo'),
+    wsVal: $('#wsVal'), dlRootVal: $('#dlRootVal'), dlRootInfo: $('#dlRootInfo'),
     webToolsVal: $('#webToolsVal'), githubToolsVal: $('#githubToolsVal'), autoModeVal: $('#autoModeVal'),
     fullAccessVal: $('#fullAccessVal'), fullAccessProfileVal: $('#fullAccessProfileVal'), computerToolsVal: $('#computerToolsVal'),
     terminalToolsVal: $('#terminalToolsVal'),
@@ -1208,8 +1283,6 @@ function refreshDlRootInfo() {
     .catch(() => { els.dlRootInfo.textContent = ''; });
 }
 
-  els.toolsVal.checked = !!st.settings.tools_enabled;
-  els.fileToolsVal.checked = !!st.settings.file_tools;
   els.wsVal.value = st.settings.workspace || '';
   if (els.dlRootVal) els.dlRootVal.value = st.settings.downloads_root || '';
   refreshDlRootInfo();
@@ -1224,8 +1297,6 @@ function refreshDlRootInfo() {
     els.maxTokVal.value = v;
     saveSettings();
   };
-  els.toolsVal.onchange = () => { st.settings.tools_enabled = els.toolsVal.checked; saveSettings(); syncChips(); };
-  els.fileToolsVal.onchange = () => { st.settings.file_tools = els.fileToolsVal.checked; saveSettings(); syncChips(); };
   if (els.webToolsVal) {
     els.webToolsVal.checked = st.settings.web_tools !== false;
     els.webToolsVal.onchange = () => { st.settings.web_tools = els.webToolsVal.checked; saveSettings(); };
@@ -1292,6 +1363,111 @@ function refreshDlRootInfo() {
   };
 }
 
+/* ---------------- MCP servers (external tools, Full Access only) ---------------- */
+
+function mcpServers() {
+  if (!Array.isArray(st.settings.mcp_servers)) st.settings.mcp_servers = [];
+  return st.settings.mcp_servers;
+}
+function mcpRender() {
+  if (!els.mcpList) return;
+  els.mcpList.innerHTML = '';
+  const servers = mcpServers();
+  if (!servers.length) {
+    const e = document.createElement('div');
+    e.className = 'mcp-empty';
+    e.textContent = 'هنوز سرور MCP تعریف نکرده‌ای.';
+    els.mcpList.appendChild(e);
+    return;
+  }
+  servers.forEach((sv, i) => {
+    const card = document.createElement('div');
+    card.className = 'mcp-card';
+    const head = document.createElement('div');
+    head.className = 'mcp-head';
+    const nm = document.createElement('span');
+    nm.className = 'mcp-name';
+    nm.textContent = '🔌 ' + sv.name;
+    head.appendChild(nm);
+    const test = document.createElement('button');
+    test.className = 'btn sm';
+    test.textContent = '🔍 تست';
+    test.onclick = () => mcpTestServer(i);
+    const del = document.createElement('button');
+    del.className = 'btn sm';
+    del.textContent = '🗑 حذف';
+    del.onclick = () => mcpRemoveServer(i);
+    head.appendChild(test);
+    head.appendChild(del);
+    card.appendChild(head);
+    const cmd = document.createElement('div');
+    cmd.className = 'mcp-cmd';
+    cmd.dir = 'ltr';
+    cmd.textContent = (sv.command || '') + ' ' + (Array.isArray(sv.args) ? sv.args.join(' ') : '');
+    card.appendChild(cmd);
+    if (Array.isArray(sv._tools) && sv._tools.length) {
+      const tl = document.createElement('div');
+      tl.className = 'mcp-tools';
+      tl.textContent = 'ابزارها: ' + sv._tools.map((t) => t.name).join('، ');
+      card.appendChild(tl);
+    }
+    if (sv._status) {
+      const stEl = document.createElement('div');
+      stEl.className = 'mcp-status' + (sv._ok ? ' ok' : sv._status === 'در حال تست اتصال…' ? '' : ' err');
+      stEl.textContent = sv._status;
+      card.appendChild(stEl);
+    }
+    els.mcpList.appendChild(card);
+  });
+}
+function mcpAddServer() {
+  const name = (els.mcpName && els.mcpName.value || '').trim();
+  const command = (els.mcpCmd && els.mcpCmd.value || '').trim();
+  const args = (els.mcpArgs && els.mcpArgs.value || '').trim().split(/\s+/).filter(Boolean);
+  if (!name) return toast('نام سرور MCP را بنویس', 'warn');
+  if (!command) return toast('دستور سرور MCP را بنویس', 'warn');
+  const servers = mcpServers();
+  if (servers.some((s) => String(s.name).toLowerCase() === name.toLowerCase())) return toast('سرور MCP با همین اسم هست', 'warn');
+  servers.push({ name, command, args, _ok: undefined, _status: 'در حال تست اتصال…', _tools: [] });
+  saveSettings();
+  mcpRender();
+  mcpTestServer(servers.length - 1, true);
+}
+async function mcpTestServer(i, silent) {
+  const servers = mcpServers();
+  const sv = servers[i];
+  if (!sv) return;
+  if (!window.__atria || !window.__atria.mcp_test_server) {
+    sv._ok = false;
+    sv._status = 'پل IPC آماده نیست';
+    mcpRender();
+    return;
+  }
+  sv._status = 'در حال تست اتصال…';
+  mcpRender();
+  try {
+    const res = await window.__atria.mcp_test_server({ name: sv.name, command: sv.command, args: sv.args || [] });
+    sv._ok = true;
+    sv._tools = (res && res.tools) || [];
+    sv._status = 'متصل · ' + sv._tools.length + ' ابزار';
+    if (!silent) toast('سرور MCP «' + sv.name + '» وصل شد (' + sv._tools.length + ' ابزار)', 'ok');
+  } catch (e) {
+    sv._ok = false;
+    sv._tools = [];
+    sv._status = 'غیرمتصل: ' + (e && e.message ? e.message : String(e));
+    if (!silent) toast('اتصال به سرور MCP ممکن نشد', 'err');
+  }
+  saveSettings();
+  mcpRender();
+}
+function mcpRemoveServer(i) {
+  const servers = mcpServers();
+  const sv = servers.splice(i, 1)[0];
+  saveSettings();
+  mcpRender();
+  if (sv) toast('سرور MCP «' + sv.name + '» حذف شد', 'ok');
+}
+
 function setFullAccessMode(enabled) {
   const next = enabled === true;
   if (next === (st.settings.full_access_mode === true)) {
@@ -1304,7 +1480,7 @@ function setFullAccessMode(enabled) {
     const scopeLabel = scopeVal === 'system'
       ? 'کل سیستم (مسیر مطلق، با محافظت)'
       : scopeVal === 'profile' ? 'پروفایل کاربر ویندوز (به‌جز مسیرهای محافظت‌شده)' : 'فقط ورک‌اسپیس';
-    const accepted = !window.confirm || window.confirm(`دسترسی خودکار گسترده پرخطر است: عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی، نوشتن فایل در ${scopeLabel} و اجرای دستورات ترمینال بدون تأیید تک‌به‌تک اجرا می‌شوند. ترمینال با محدودیت ۱۲۰ ثانیه و بدون ارتقاء به مدیر اجرا می‌شود و متن هر دستور و نتیجه‌اش در گفتگو ثبت می‌شود؛ با این حال محتوای نامطمئنِ وب یا فایل می‌تواند به مدل دستور مخرب را پیشنهاد کند (ریسک prompt-injection). توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ دسترسی مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`);
+    const accepted = !window.confirm || window.confirm(`دسترسی خودکار گسترده پرخطر است: حالت ایجنت، عملیات پشتیبانی‌شدهٔ GitHub، بازکردن پیوندهای عمومی، نوشتن فایل در ${scopeLabel}، ابزارهای سرورهای MCP و اجرای دستورات ترمینال بدون تأیید تک‌به‌تک اجرا می‌شوند. ترمینال با محدودیت ۱۲۰ ثانیه و بدون ارتقاء به مدیر اجرا می‌شود و متن هر دستور و نتیجه‌اش در گفتگو ثبت می‌شود؛ با این حال محتوای نامطمئنِ وب یا فایل می‌تواند به مدل دستور مخرب را پیشنهاد کند (ریسک prompt-injection). توکن GitHub فقط در محدودهٔ مجوزهای خودش عمل می‌کند؛ دسترسی مدیر، حذف مستقیم، merge، secrets و تنظیمات فعال نمی‌شوند. ادامه می‌دهی؟`);
     if (!accepted) {
       if (els.fullAccessVal) els.fullAccessVal.checked = false;
       syncChips();
@@ -1368,7 +1544,7 @@ function renderConvList() {
 }
 
 function newChat(silent) {
-  const chat = { id: 'c' + Date.now() + Math.random().toString(36).slice(2, 6), title: 'گفتگوی جدید', createdAt: Date.now(), messages: [], projectId: projectById(st.currentProjectId) ? st.currentProjectId : undefined };
+  const chat = { id: 'c' + Date.now() + Math.random().toString(36).slice(2, 6), title: 'گفتگوی جدید', createdAt: Date.now(), messages: [], projectId: undefined };
   st.chats.unshift(chat);
   st.currentId = chat.id;
   saveChats(chat.id);
@@ -1382,8 +1558,6 @@ function newChat(silent) {
 
 function switchChat(id) {
   st.currentId = id;
-  const selectedChat = st.chats.find((c) => c.id === id);
-  setCurrentProject(selectedChat && selectedChat.projectId ? selectedChat.projectId : '');
   localStorage.setItem(LS_CURRENT, id);
   renderConvList();
   renderHistory();
@@ -1732,7 +1906,7 @@ function historyPanelEl(flow) {
   return box;
 }
 
-function bubbleEl(role, text, flow, images) {
+function bubbleEl(role, text, flow, images, files) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
   wrap.appendChild(avatarEl(role));
@@ -1755,6 +1929,17 @@ function bubbleEl(role, text, flow, images) {
     }
     b.insertBefore(tray, md);
   }
+  if (files && files.length) {
+    const ftray = document.createElement('div');
+    ftray.className = 'msg-files';
+    for (const fl of files) {
+      const el = document.createElement('span');
+      el.className = 'msg-file';
+      el.textContent = (fl.kind === 'text' ? '📄 ' : '📦 ') + fl.name + (fl.size ? ' (' + fmtN(fl.size) + ' B)' : '');
+      ftray.appendChild(el);
+    }
+    b.insertBefore(ftray, md);
+  }
   if (flow && flow.length && role !== 'user') stack.appendChild(historyPanelEl(flow));
   stack.appendChild(b);
   wrap.appendChild(stack);
@@ -1771,7 +1956,7 @@ function renderHistory() {
   if (!chat) return;
   for (const m of chat.messages) {
     els.messages.appendChild(
-      bubbleEl(m.role === 'user' ? 'user' : 'ai', m.plain || m.text || '…', m.flow, m.images));
+      bubbleEl(m.role === 'user' ? 'user' : 'ai', m.plain || m.text || '…', m.flow, m.images, m.files));
   }
   scrollBottom(true);
   ensureLiveVisible(); // v0.7.0: اگر تولید در همین چت در جریان است، حباب زنده برگردد
@@ -1795,36 +1980,67 @@ function msgText(m) {
   return '';
 }
 
-/* ---------------- image attachments (vision models) ---------------- */
+/* ---------------- uploads: files + images (one card) ---------------- */
 
 const MAX_IMGS = 4;
 const MAX_IMG_BYTES = 4500 * 1024;
+const MAX_FILES = 8;
+const MAX_TEXT_FILE_BYTES = 200 * 1024;
+const MAX_BIN_FILE_BYTES = 10 * 1024 * 1024;
+const TEXT_EXT = /\.(txt|md|markdown|rs|js|cjs|mjs|ts|jsx|tsx|py|rb|go|java|kt|c|cc|cpp|h|hpp|cs|php|pl|lua|sh|bash|bat|ps1|sql|json|json5|ya?ml|toml|ini|cfg|conf|xml|html?|css|scss|csv|tsv|log|env|gitignore|dockerfile|makefile|svelte|vue|tex|r)$/i;
+function isTextFile(name, type) { return /^text\//.test(type || '') || TEXT_EXT.test(name || ''); }
 
-function addImageFiles(files) {
+function addUploadFiles(files) {
   const conn = activeConn();
   if (conn && conn.kind === 'deepseek_web') {
-    return toast('در حساب وب دیپ‌سیک فعلاً پیوست تصویر پشتیبانی نمی‌شود', 'warn');
+    return toast('در حساب وب دیپ‌سیک فعلاً پیوست فایل/تصویر پشتیبانی نمی‌شود', 'warn');
   }
   for (const f of Array.from(files || [])) {
-    if (st.pendingImgs.length >= MAX_IMGS) { toast('حداکثر ' + MAX_IMGS + ' تصویر', 'warn'); break; }
-    if (!/^image\//.test(f.type)) continue;
-    if (f.size > MAX_IMG_BYTES) { toast('حجم «' + f.name + '» زیاد است (حداکثر ۴٫۵ مگابایت)', 'warn'); continue; }
-    const r = new FileReader();
-    r.onload = () => {
-      const dataUrl = String(r.result || '');
-      const m = /^data:([^;,]+);base64,(.*)$/.exec(dataUrl);
-      if (!m) return;
-      st.pendingImgs.push({ data: m[2], media: m[1], name: f.name });
-      renderImgTray();
-    };
-    r.readAsDataURL(f);
+    const name = f.name || 'فایل';
+    const type = f.type || '';
+    const isImg = /^image\//.test(type) || /\.(png|jpe?g|webp|gif)$/i.test(name);
+    if (isImg) {
+      if (st.pendingImgs.length >= MAX_IMGS) { toast('حداکثر ' + MAX_IMGS + ' تصویر', 'warn'); continue; }
+      if (f.size > MAX_IMG_BYTES) { toast('حجم «' + name + '» زیاد است (حداکثر ۴٫۵ مگابایت)', 'warn'); continue; }
+      const r = new FileReader();
+      r.onload = () => {
+        const m = /^data:([^;,]+);base64,(.*)$/.exec(String(r.result || ''));
+        if (!m) return;
+        st.pendingImgs.push({ data: m[2], media: m[1], name });
+        renderAttachTray();
+      };
+      r.readAsDataURL(f);
+      continue;
+    }
+    if (st.pendingFiles.length >= MAX_FILES) { toast('حداکثر ' + MAX_FILES + ' فایل', 'warn'); continue; }
+    if (isTextFile(name, type) && f.size <= MAX_TEXT_FILE_BYTES && typeof f.text === 'function') {
+      f.text().then((txt) => {
+        st.pendingFiles.push({ name, size: f.size, kind: 'text', text: String(txt) });
+        renderAttachTray();
+      }).catch(() => toast('خواندن «' + name + '» ممکن نشد', 'err'));
+    } else if (f.size <= MAX_BIN_FILE_BYTES) {
+      const r2 = new FileReader();
+      r2.onload = () => {
+        const m2 = /^data:([^;,]+);base64,(.*)$/.exec(String(r2.result || ''));
+        if (!m2) return;
+        const fallback = () => { st.pendingFiles.push({ name, size: f.size, kind: 'binary' }); renderAttachTray(); };
+        if (!window.__atria || !window.__atria.files_stash) { fallback(); return; }
+        window.__atria.files_stash(name, m2[2]).then((p) => {
+          st.pendingFiles.push({ name, size: f.size, kind: 'binary', path: p });
+          renderAttachTray();
+        }).catch(fallback);
+      };
+      r2.readAsDataURL(f);
+    } else {
+      toast('حجم «' + name + '» زیاد است (حداکثر ۱۰ مگابایت)', 'warn');
+    }
   }
 }
 
-function renderImgTray() {
+function renderAttachTray() {
   if (!els.imgTray) return;
   els.imgTray.innerHTML = '';
-  els.imgTray.classList.toggle('hidden', !st.pendingImgs.length);
+  els.imgTray.classList.toggle('hidden', !(st.pendingImgs.length || st.pendingFiles.length));
   st.pendingImgs.forEach((im, i) => {
     const chip = document.createElement('div');
     chip.className = 'img-chip';
@@ -1832,16 +2048,29 @@ function renderImgTray() {
     chip.querySelector('img').src = 'data:' + im.media + ';base64,' + im.data;
     chip.querySelector('.img-x').onclick = () => {
       st.pendingImgs.splice(i, 1);
-      renderImgTray();
+      renderAttachTray();
     };
+    els.imgTray.appendChild(chip);
+  });
+  st.pendingFiles.forEach((fl, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'file-chip';
+    chip.textContent = (fl.kind === 'text' ? '📄 ' : '📦 ') + fl.name + (fl.size ? ' · ' + fmtN(fl.size) + ' B' : '');
+    const x = document.createElement('button');
+    x.className = 'img-x';
+    x.title = 'حذف';
+    x.textContent = '✕';
+    x.onclick = () => { st.pendingFiles.splice(i, 1); renderAttachTray(); };
+    chip.appendChild(x);
     els.imgTray.appendChild(chip);
   });
   autosize();
 }
 
-function clearImgs() {
+function clearAttach() {
   st.pendingImgs = [];
-  renderImgTray();
+  st.pendingFiles = [];
+  renderAttachTray();
 }
 
 /* ---------------- effective model + history window ---------------- */
@@ -1882,6 +2111,14 @@ function buildHistory(chat, extraPromptTokens = 0) {
   const all = allMessages.map((m) => {
     const content = [];
     for (const im of m.images || []) content.push({ type: 'image', data: im.data, media: im.media });
+    for (const fl of m.files || []) {
+      if (fl.kind === 'text' && typeof fl.text === 'string') {
+        content.push({ type: 'text', text: '📎 فایل «' + fl.name + '» (پیوست):\n' + fl.text });
+      } else {
+        const where = fl.path ? '؛ در مسیر «' + fl.path + '» ذخیره شده است (با ابزارهای فایل قابل خواندن است)' : '';
+        content.push({ type: 'text', text: '📎 فایل «' + fl.name + '» (' + fmtN(fl.size || 0) + ' بایت، باینری)' + where });
+      }
+    }
     const t = msgText(m);
     if (t || !content.length) content.push({ type: 'text', text: t });
     return { role: m.role === 'user' ? 'user' : 'assistant', content };
@@ -1953,16 +2190,17 @@ function send() {
   }
 
   const sendImgs = st.pendingImgs.slice();
-  chat.messages.push({ role: 'user', text, plain: text, ts: Date.now(), images: sendImgs.length ? sendImgs : undefined });
+  const sendFiles = st.pendingFiles.slice();
+  chat.messages.push({ role: 'user', text, plain: text, ts: Date.now(), images: sendImgs.length ? sendImgs : undefined, files: sendFiles.length ? sendFiles : undefined });
   if (chat.title === 'گفتگوی جدید') {
-    const t1 = (text || '[تصویر]').replace(/\s+/g, ' ').trim();
+    const t1 = (text || (sendImgs.length ? '[تصویر]' : '[فایل]')).replace(/\s+/g, ' ').trim();
     chat.title = t1.slice(0, 42) + (t1.length > 42 ? '…' : '');
     renderConvList();
   }
   saveChats(chat.id);
-  clearImgs();
+  clearAttach();
   els.empty.classList.add('hidden', 'off');
-  els.messages.appendChild(bubbleEl('user', text, null, sendImgs));
+  els.messages.appendChild(bubbleEl('user', text, null, sendImgs, sendFiles));
   els.input.value = '';
   autosize();
   scrollBottom();
@@ -1986,9 +2224,8 @@ function startTurn() {
 
   const chat = currentChat();
   const project = projectForChat(chat);
-  if (project && !chat.projectId) { chat.projectId = project.id; saveChats(chat.id); }
   const projectContext = projectContextText(project);
-  const promptOverhead = roughTokens(st.settings.system || '') + roughTokens(projectContext) + (st.settings.tools_enabled ? 1600 : 0);
+  const promptOverhead = roughTokens(st.settings.system || '') + roughTokens(projectContext) + (st.settings.full_access_mode === true ? 1600 : 0);
   const context = buildHistory(chat, promptOverhead);
   const { hist: history, dropped } = context;
   renderContextMeter(context);
@@ -2016,10 +2253,10 @@ function startTurn() {
       max_tokens: Math.min(65536, Math.max(256, Number(st.settings.max_tokens) || 8192)),
       temperature: Number(st.settings.temp),
       system: systemPrompt,
-      tools_enabled: !!st.settings.tools_enabled,
+      tools_enabled: st.settings.full_access_mode === true,
       stream: st.settings.stream !== false,
       kind: conn ? conn.kind : 'anthropic',
-      file_tools: !!st.settings.file_tools,
+      file_tools: st.settings.full_access_mode === true,
       web_tools: st.settings.web_tools !== false,
       github_tools: st.settings.github_tools !== false,
       autonomous_mode: st.settings.autonomous_mode === true,
@@ -2028,6 +2265,7 @@ function startTurn() {
       full_access_system: st.settings.full_access_system === true,
       computer_tools: st.settings.computer_tools !== false,
       terminal_tools: st.settings.terminal_tools !== false,
+      mcp_servers: mcpServers(),
       project_root: (activeProject() || {}).folder || '',
       workspace: st.settings.workspace || '',
       downloads_root: (st.settings.downloads_root || '').trim(),
@@ -2067,7 +2305,7 @@ const FA_TOOL = {
   github_list_issues: 'فهرست issueهای GitHub', github_list_pull_requests: 'فهرست pull requestها',
   github_read_file: 'خواندن فایل GitHub', github_propose_change: 'پیش‌نویس تغییر GitHub',
 };
-function faTool(name) { return FA_TOOL[name] || 'اجرای ابزار'; }
+function faTool(name) { return name && String(name).indexOf('mcp__') === 0 ? 'ابزار MCP' : (FA_TOOL[name] || 'اجرای ابزار'); }
 function fmtN(n) { return n > 999 ? (n / 1000).toFixed(1) + 'k' : String(n); }
 
 function fmtInput(input, name) {
@@ -2548,6 +2786,41 @@ function renderCmdkList(q) {
 
 /* ---------------- signed update UI ---------------- */
 
+function showUpdatePrompt(result) {
+  if (!els.updateModal) return;
+  if (els.updatePromptTitle) els.updatePromptTitle.textContent = 'نسخهٔ ' + (result.latest_version || 'تازه') + ' آتریا آماده است';
+  if (els.updatePromptBody) els.updatePromptBody.textContent =
+    'نسخهٔ شما: ' + (result.current_version || '—') + ' · حجم: ' + fmtN(result.download_size || 0) + ' بایت · از Release امضاشدهٔ GitHub (Ed25519 + SHA-256) دانلود می‌شود. پس از تأیید، آتریا یک‌بار بسته می‌شود و خودکار با نسخهٔ تازه دوباره باز می‌شود.';
+  if (els.updatePromptStatus) els.updatePromptStatus.textContent = '';
+  if (els.updatePromptYes) els.updatePromptYes.disabled = false;
+  if (els.updatePromptNo) els.updatePromptNo.disabled = false;
+  openModal(els.updateModal);
+}
+function hideUpdatePrompt() {
+  if (els.updateModal) closeModal(els.updateModal);
+}
+async function performUpdateInstall() {
+  if (!window.__atria || !window.__atria.update_install) return toast('پل به‌روزرسانی آماده نیست', 'err');
+  if (els.updatePromptYes) els.updatePromptYes.disabled = true;
+  if (els.updatePromptNo) els.updatePromptNo.disabled = true;
+  if (els.updateModalX) els.updateModalX.disabled = true;
+  if (els.btnInstallUpdate) els.btnInstallUpdate.disabled = true;
+  if (els.updatePromptStatus) els.updatePromptStatus.textContent = 'در حال دریافت نسخهٔ معتبر و بررسی امضا و SHA-256…';
+  if (els.updateStatus) els.updateStatus.textContent = 'در حال دریافت و اعتبارسنجی امضا و SHA-256…';
+  try {
+    await window.__atria.update_install();
+    if (els.updatePromptStatus) els.updatePromptStatus.textContent = 'نسخهٔ معتبر آمادهٔ جایگزینی است؛ آتریا بسته می‌شود و با نسخهٔ تازه باز می‌شود.';
+    if (els.updateStatus) els.updateStatus.textContent = 'نسخهٔ معتبر آمادهٔ جایگزینی است؛ برنامه در حال بسته‌شدن است.';
+  } catch (error) {
+    const message = String(error && error.message || error);
+    if (els.updatePromptStatus) els.updatePromptStatus.textContent = 'نصب خودکار انجام نشد: ' + message;
+    if (els.updateStatus) els.updateStatus.textContent = 'نصب خودکار انجام نشد: ' + message;
+    if (els.updatePromptYes) els.updatePromptYes.disabled = false;
+    if (els.updatePromptNo) els.updatePromptNo.disabled = false;
+    if (els.updateModalX) els.updateModalX.disabled = false;
+    toast('به‌روزرسانی نصب نشد؛ از Release رسمی استفاده کن.', 'err');
+  }
+}
 async function checkForUpdate(silent = false) {
   if (!els.updateStatus || !window.__atria || !window.__atria.update_check) return;
   if (els.btnCheckUpdate) { els.btnCheckUpdate.disabled = true; els.btnCheckUpdate.textContent = 'در حال بررسی…'; }
@@ -2557,8 +2830,12 @@ async function checkForUpdate(silent = false) {
     if (result && result.available) {
       els.updateStatus.textContent = `نسخهٔ ${result.latest_version} آماده است · فایل: ${fmtN(result.download_size)} بایت · امضای معتبر`;
       if (els.btnInstallUpdate) els.btnInstallUpdate.classList.remove('hidden');
-      if (silent && els.btnSettings) { els.btnSettings.classList.add('update-available'); toast(`نسخهٔ ${result.latest_version} آماده است؛ تنظیمات ← به‌روزرسانی امن را باز کن.`, 'ok'); }
+      if (els.btnSettings) els.btnSettings.classList.add('update-available');
+      // Every launch re-checks; the user decides (explicit click) whether to
+      // download, replace and restart now. "نه، بعداً" only closes for this run.
+      showUpdatePrompt(result);
     } else {
+      hideUpdatePrompt();
       els.updateStatus.textContent = `آتریا به‌روز است (${result && result.current_version || 'نسخهٔ فعلی'}) · امضای Release بررسی شد.`;
       if (els.btnInstallUpdate) els.btnInstallUpdate.classList.add('hidden');
     }
@@ -2945,16 +3222,14 @@ function chooseModel(model) {
 }
 
 function syncChips() {
-  els.chipAgent.classList.toggle('on', !!st.settings.tools_enabled);
   els.chipThink.classList.toggle('on', !!st.settings.thinking);
-  els.chipFiles.classList.toggle('on', !!st.settings.file_tools);
   if (els.fullAccessIndicator) {
     const active = st.settings.full_access_mode === true;
     els.fullAccessIndicator.classList.toggle('on', active);
     els.fullAccessIndicator.textContent = active ? '⚠ Full Access: روشن' : 'Full Access: خاموش';
     els.fullAccessIndicator.title = active
-      ? 'Full Access فعال است؛ کلیک کن تا خاموش شود.'
-      : 'Full Access خاموش است؛ کلیک کن تا ابزارهای مجاز بدون تأیید موردی اجرا شوند.';
+      ? 'Full Access فعال است: حالت ایجنت، ابزارهای فایل و سرورهای MCP در اختیار مدل‌اند؛ کلیک کن تا خاموش شود.'
+      : 'Full Access خاموش است: آتریا فقط پاسخ متنی می‌دهد (ایجنت/فایل/MCP غیرفعال)؛ کلیک کن تا روشن شود.';
     els.fullAccessIndicator.setAttribute('aria-pressed', String(active));
   }
 }
@@ -2983,7 +3258,10 @@ async function boot() {
   if (els.projectsX) els.projectsX.onclick = () => closeModal(els.projectsModal);
   if (els.projectsModal) els.projectsModal.onclick = (event) => { if (event.target === els.projectsModal) closeModal(els.projectsModal); };
   if (els.projectCreate) els.projectCreate.onclick = createProject;
-  if (els.projectName) els.projectName.oninput = () => { const p = activeProject(); if (!p) return; p.name = els.projectName.value.trim() || 'پروژهٔ بی‌نام'; p.updatedAt = Date.now(); saveProjects(); renderProjectListOnly(); renderProjectChip(); };
+  if (els.projectName) {
+    els.projectName.oninput = () => { const p = activeProject(); if (!p) return; p.name = els.projectName.value; p.updatedAt = Date.now(); saveProjects(); renderProjectListOnly(); renderProjectChip(); };
+    els.projectName.onblur = () => { const p = activeProject(); if (!p) return; const v = els.projectName.value.trim(); p.name = v || 'پروژهٔ بی‌نام'; els.projectName.value = p.name; p.updatedAt = Date.now(); saveProjects(); renderProjectListOnly(); renderProjectChip(); };
+  }
   if (els.projectNotes) els.projectNotes.oninput = () => { const p = activeProject(); if (!p) return; p.notes = els.projectNotes.value; p.updatedAt = Date.now(); saveProjects(); };
   if (els.projectTaskAdd) els.projectTaskAdd.onclick = addProjectTask;
   if (els.projectTaskInput) els.projectTaskInput.onkeydown = (event) => { if (event.key === 'Enter') { event.preventDefault(); addProjectTask(); } };
@@ -3014,6 +3292,9 @@ async function boot() {
   };
   if (els.btnCheckUpdate) els.btnCheckUpdate.onclick = () => checkForUpdate(false);
   if (els.btnInstallUpdate) els.btnInstallUpdate.onclick = installUpdate;
+  if (els.updateModalX) els.updateModalX.onclick = hideUpdatePrompt;
+  if (els.updatePromptNo) els.updatePromptNo.onclick = hideUpdatePrompt;
+  if (els.updatePromptYes) els.updatePromptYes.onclick = () => performUpdateInstall();
   els.btnSide.onclick = () => els.frame.classList.toggle('side-hidden');
   els.btnMin.onclick = () => invokeCmd('minimize_win');
   els.btnMax.onclick = () => invokeCmd('maximize_win');
@@ -3061,7 +3342,7 @@ async function boot() {
   if (els.btnAttach) {
     els.btnAttach.onclick = () => els.fileInput.click();
     els.fileInput.onchange = () => {
-      addImageFiles(els.fileInput.files);
+      addUploadFiles(els.fileInput.files);
       els.fileInput.value = '';
     };
   }
@@ -3085,26 +3366,25 @@ async function boot() {
     if (els.modelMenu.classList.contains('hidden')) openModelMenuAt(els.modelPick);
     else closeModelMenu();
   };
+  if (els.projectChip) els.projectChip.onclick = (e) => {
+    e.stopPropagation();
+    openProjectMenu();
+  };
+  document.addEventListener('click', (e) => {
+    if (els.projectMenu && !els.projectMenu.classList.contains('hidden') &&
+        !els.projectMenu.contains(e.target) && !(els.projectChip && els.projectChip.contains(e.target))) closeProjectMenu();
+  });
   document.addEventListener('click', (e) => {
     if (!els.modelMenu.classList.contains('hidden') &&
         !els.modelMenu.contains(e.target) && !els.modelPick.contains(e.target)) closeModelMenu();
   });
-  els.chipAgent.onclick = () => {
-    st.settings.tools_enabled = !st.settings.tools_enabled;
-    els.toolsVal.checked = st.settings.tools_enabled;
-    saveSettings(); syncChips();
-    toast(st.settings.tools_enabled ? '⚡ حالت ایجنت روشن شد' : '⚡ حالت ایجنت خاموش شد', 'ok');
-  };
   els.chipThink.onclick = () => {
     st.settings.thinking = !st.settings.thinking;
     els.thinkVal.checked = st.settings.thinking;
     saveSettings(); syncChips();
   };
-  els.chipFiles.onclick = () => {
-    st.settings.file_tools = !st.settings.file_tools;
-    els.fileToolsVal.checked = st.settings.file_tools;
-    saveSettings(); syncChips();
-  };
+  if (els.mcpAddBtn) els.mcpAddBtn.onclick = mcpAddServer;
+  mcpRender();
   els.btnScroll.onclick = () => scrollBottom();
   els.messages.addEventListener('scroll', () => {
     const far = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight > 240;

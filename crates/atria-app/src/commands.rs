@@ -1,7 +1,7 @@
 //! IPC layer between the webview UI and the `atria-core` engine.
 
 use atria_core::{
-    run_agent, AgentEvent, ApiKind, ClientConfig, CoreError, MemoryStore, Message, Note,
+    run_agent, AgentEvent, ApiKind, ClientConfig, CoreError, McpServer, MemoryStore, Message, Note,
     StreamEvent,
 };
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,9 @@ pub struct ChatPayload {
     /// DeepSeek-web: session id to reuse (keeps the site-side chat alive).
     #[serde(default)]
     pub session_id: String,
+    /// Configured MCP servers (stdio). Advertised to the model only under Full Access.
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServer>,
 }
 
 fn default_true() -> bool {
@@ -137,6 +140,7 @@ pub async fn test_connection(base: String, key: String, model: String, kind: Str
         web_search: false,
         web_session: String::new(),
         web_session_out: None,
+        mcp_servers: Vec::new(),
     };
     let messages = [Message::user_text("Reply with OK.")];
     let stop = Arc::new(AtomicBool::new(false));
@@ -260,6 +264,62 @@ pub fn secret_get(id: String, state: State<'_, AppState>) -> Result<Option<Strin
 pub fn secret_delete(id: String, state: State<'_, AppState>) -> Result<(), String> {
     let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
     crate::secrets::delete(root, &id)
+}
+
+/// Test one MCP server: handshake + `tools/list`. The result lists the tools
+/// the server would expose (they only become active while Full Access is on).
+#[tauri::command]
+pub async fn mcp_test_server(server: McpServer) -> Result<serde_json::Value, String> {
+    let tools = atria_core::mcp::list_tools(&server).await?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "name": server.name,
+        "tools": tools.iter().map(|t| serde_json::json!({
+            "name": t.name,
+            "description": t.description,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// Stash an uploaded (non-image) file into `~/.atria/uploads` so the file
+/// tools can read it. Returns the absolute path that gets mentioned in chat.
+#[tauri::command]
+pub fn files_stash(name: String, b64: String) -> Result<String, String> {
+    const MAX_BYTES: usize = 10 * 1024 * 1024;
+    let clean = {
+        let base = name
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(&name)
+            .trim()
+            .to_string();
+        let mut out = String::new();
+        for c in base.chars().take(80) {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                out.push(c);
+            } else {
+                out.push('_');
+            }
+        }
+        if out.is_empty() {
+            "upload".to_string()
+        } else {
+            out
+        }
+    };
+    let bytes = base64::engine::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        b64.trim(),
+    )
+    .map_err(|e| format!("محتوای فایل معتبر نیست: {e}"))?;
+    if bytes.len() > MAX_BYTES {
+        return Err("حجم فایل از ۱۰ مگابایت بیشتر است".into());
+    }
+    let dir = atria_root().join("uploads");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}_{clean}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 /// Abort the in-flight generation.
@@ -483,6 +543,7 @@ pub async fn chat_send(
             web_search: payload.web_search,
             web_session: payload.session_id,
             web_session_out: Some(sess_out.clone()),
+            mcp_servers: payload.mcp_servers,
         };
         let mut mem = MemoryStore::open(&mem_path);
 

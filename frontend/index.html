@@ -99,13 +99,11 @@
               <span class="ctx-meter" id="ctxMeter" title="برآورد تقریبی مصرف پنجرهٔ متن">متن: —</span>
             </div>
             <div class="mode-chips">
-              <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
-              <button class="mode-chip" id="btnAttach" title="پیوست تصویر (برای مدل‌های ویژن‌دار)">📎 تصویر</button>
-              <button class="mode-chip" id="chipAgent">⚡ ایجنت</button>
-              <button class="mode-chip full-access-mode" id="fullAccessIndicator" type="button" aria-pressed="false" title="Full Access خاموش است؛ برای خودکارشدن ابزارهای مجاز کلیک کن">Full Access: خاموش</button>
+              <input type="file" id="fileInput" multiple hidden>
+              <button class="mode-chip" id="btnAttach" title="اپلود فایل و تصویر — تصویر برای مدل‌های ویژن‌دار، فایل برای تحلیل">📎 فایل و تصویر</button>
+                            <button class="mode-chip full-access-mode" id="fullAccessIndicator" type="button" aria-pressed="false" title="Full Access خاموش است؛ برای خودکارشدن ابزارهای مجاز کلیک کن">Full Access: خاموش</button>
               <button class="mode-chip" id="chipThink">🧠 تفکر</button>
-              <button class="mode-chip" id="chipFiles">📂 فایل‌ها</button>
-            </div>
+                          </div>
           </div>
         </div>
 
@@ -264,17 +262,10 @@
           </div>
           <div class="set-row">
             <div class="set-row-text">
-              <div class="set-label">حالت ایجنت</div>
-              <div class="set-desc">ماشین‌حساب، ساعت، حافظه — مثل ایجنت‌های رسمی</div>
+              <div class="set-label">ایجنت و ابزارهای فایل</div>
+              <div class="set-desc">ماشین‌حساب، ساعت، حافظه، فایل‌ها، وب، GitHub، ترمینال و ابزارهای MCP فقط وقتی Full Access روشن باشد در اختیار مدل قرار می‌گیرند؛ در غیر این صورت آتریا صرفاً پاسخ متنی می‌دهد.</div>
             </div>
-            <label class="switch-field sm"><input type="checkbox" id="toolsVal"><span class="switch"></span></label>
-          </div>
-          <div class="set-row">
-            <div class="set-row-text">
-              <div class="set-label">دسترسی به فایل‌ها</div>
-              <div class="set-desc">خواندن و فهرست‌کردن فقط داخل ورک‌اسپیس؛ مسیرهای حساس و خارج از محدوده مسدودند. در حالت پرسش، هر نوشتن پیش‌نمایش می‌شود و با تأیید اعمال می‌شود.</div>
-            </div>
-            <label class="switch-field sm"><input type="checkbox" id="fileToolsVal"><span class="switch"></span></label>
+            <span class="fhint" style="white-space:nowrap">تابع Full Access ↓</span>
           </div>
           <div class="set-row">
             <div class="set-row-text">
@@ -304,6 +295,23 @@
               <div class="set-desc">برای ابزارهای فعالِ فایل، وب (شامل دانلود تصویر/مستند در پوشهٔ دسکتاپ) و عملیات پشتیبانی‌شدهٔ GitHub تأیید جداگانه نمی‌گیرد؛ از درخواست بعدی اعمال می‌شود و نتیجهٔ هر ابزار ثبت می‌شود. خاموش‌کردن حین اجرا، توقف پاسخ جاری را درخواست می‌کند؛ اقدامی که شروع شده ممکن است کامل شود.</div>
             </div>
             <label class="switch-field sm"><input type="checkbox" id="fullAccessVal"><span class="switch"></span></label>
+          </div>
+          <div class="set-sec-title">سرورهای MCP</div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">ابزارهای خارجی (Model Context Protocol)</div>
+              <div class="set-desc">سرور MCP با یک دستور محلی (stdio) راه‌اندازی می‌شود. ابزارهای آن فقط در حالت Full Access به مدل معرفی می‌شوند و اجرای هر ابزار MCP به‌همراه نتیجه‌اش در گفتگو ثبت می‌شود.</div>
+            </div>
+          </div>
+          <div id="mcpList"></div>
+          <div class="field">
+            <div class="mcp-add-row">
+              <input type="text" id="mcpName" placeholder="نام (مثلاً filesystem)" style="flex:0 0 140px">
+              <input type="text" id="mcpCmd" placeholder="دستور (مثلاً npx)" dir="ltr" style="flex:0 0 90px">
+              <input type="text" id="mcpArgs" placeholder="آرگومان‌ها (مثلاً -y @modelcontextprotocol/server-filesystem C:/files)" dir="ltr" style="flex:1">
+              <button class="btn" id="mcpAddBtn" type="button">➕ افزودن و تست</button>
+            </div>
+            <span class="fhint">پیش‌نمایش: هر ابزار MCP پیش از اجرا در گفتگو با برچسب «ابزار MCP» نمایش داده می‌شود. سرورهای بی‌پاسخ فقط ابزار نمی‌دهند و کار دیگر را مختل نمی‌کنند.</span>
           </div>
           <div class="field">
             <label class="flabel" for="fullAccessProfileVal">محدودهٔ نوشتن خودکار فایل</label>
@@ -512,6 +520,8 @@
       reject_pending_url: function (a) { return invoke('reject_pending_url', a); },
       command_apply_command: function (a) { return invoke('command_apply_command', a); },
       command_reject_command: function (a) { return invoke('command_reject_command', a); },
+      mcp_test_server: function (a) { return invoke('mcp_test_server', { server: a }); },
+      files_stash: function (name, b64) { return invoke('files_stash', { name, b64 }); },
       update_check: function () { return invoke('update_check'); },
       update_install: function () { return invoke('update_install'); },
       chats_load: function () { return invoke('chats_load'); },
@@ -528,6 +538,29 @@
   <script src="md.js"></script>
   <script src="app.js"></script>
 <div class="model-menu hidden" id="modelMenu"></div>
+<div class="project-menu hidden" id="projectMenu"></div>
+
+  <!-- ============ Update prompt ============ -->
+  <div class="modal-backdrop hidden" id="updateModal">
+    <div class="modal glass update-prompt" role="dialog" aria-modal="true" aria-labelledby="updatePromptTitle">
+      <div class="modal-head">
+        <h2>🚀 به‌روزرسانی آتریا</h2>
+        <button class="x" id="updateModalX" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="update-prompt-title" id="updatePromptTitle">نسخهٔ تازهٔ آتریا آماده است</p>
+        <p class="fhint" id="updatePromptBody"></p>
+        <div class="update-prompt-actions">
+          <button class="btn primary" id="updatePromptYes" type="button">✓ حالا به‌روز کنم</button>
+          <button class="btn" id="updatePromptNo" type="button">نه، بعداً</button>
+        </div>
+        <div class="update-status" id="updatePromptStatus" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+<div class="project-menu hidden" id="projectMenu"></div>
+<div class="project-menu hidden" id="projectMenu"></div>
+<div class="project-menu hidden" id="projectMenu"></div>
 
   <!-- ============ Code Work — فضای جدا مثل کلاد ============ -->
   </body>

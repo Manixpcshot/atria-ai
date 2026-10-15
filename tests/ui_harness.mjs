@@ -192,17 +192,25 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'btnSettings', 'btnMemory', 'btnProjects', 'btnSide', 'projectsModal', 'projectsX', 'projectList', 'projectDetail', 'projectCreate',
   'projectName', 'projectNotes', 'projectFolder', 'projectFolderPick', 'projectFolderClear', 'projectCheckpoint', 'projectTaskCount', 'projectTasks', 'projectTaskInput', 'projectTaskAdd',
   'projectAttach', 'projectCheckpointSave', 'projectResume', 'projectDelete', 'ctxLimitVal', 'ctxMeter', 'btnCheckUpdate', 'btnInstallUpdate', 'updateStatus', 'projectChip', 'btnMin', 'btnMax', 'btnClose', 'btnScroll',
-  'modelChip', 'modelPick', 'mpName', 'modelMenu', 'chipAgent', 'chipThink', 'chipFiles', 'fullAccessIndicator',
+  'modelChip', 'modelPick', 'mpName', 'modelMenu', 'chipThink', 'fullAccessIndicator', 'mcpList', 'mcpName', 'mcpCmd', 'mcpArgs', 'mcpAddBtn',
   'settingsModal', 'settingsX', 'settingsTitle', 'settingsSubtitle', 'memoryModal', 'memoryX', 'memoryClose',
   'memList', 'memClear', 'btnWipe', 'cmdk', 'cmdkInput', 'cmdkList', 'cmdkX', 'toasts',
   'tempVal', 'tempOut', 'thinkVal', 'memVal', 'streamVal', 'sysVal', 'maxTokVal',
-  'toolsVal', 'fileToolsVal', 'wsVal', 'dlRootVal', 'dlRootInfo', 'webToolsVal', 'githubToolsVal', 'autoModeVal', 'fullAccessVal', 'fullAccessProfileVal', 'computerToolsVal', 'terminalToolsVal', 'githubTokenInput', 'githubConnect', 'githubDisconnect', 'githubStatus', 'dsSearchRow', 'dsSearchVal',
+  'wsVal', 'dlRootVal', 'dlRootInfo', 'webToolsVal', 'githubToolsVal', 'autoModeVal', 'fullAccessVal', 'fullAccessProfileVal', 'computerToolsVal', 'terminalToolsVal', 'githubTokenInput', 'githubConnect', 'githubDisconnect', 'githubStatus', 'dsSearchRow', 'dsSearchVal',
   'tokenGuide', 'tokenGuideX', 'tokenGuideClose', 'connSummary', 'connList', 'connAdd', 'connForm', 'connsBody',
   'cfName', 'cfKind', 'cfTemplate', 'cfBase', 'cfKey', 'cfKeyEye', 'cfKeyLabel', 'cfTokenGuide', 'cfHint',
   'cfTags', 'cfModelInput', 'cfModelAdd', 'cfFetchModels', 'cfSrvWrap', 'cfSrvSearch', 'cfSrvList',
   'cfDelete', 'cfSetActive', 'cfTestConn', 'cfTestStatus', 'storageBox', 'btnRevealAtria', 'btnAttach', 'fileInput', 'imgTray',
   'stars', 'appVer', 'tokChip']) addId(id);
 byId.connsBody.classList.add('conns-body');
+addId('projectMenu', 'div', 'project-menu hidden');
+addId('updateModal', 'div', 'modal-backdrop hidden');
+addId('updateModalX', 'button', 'x');
+addId('updatePromptTitle', 'p', 'update-prompt-title');
+addId('updatePromptBody', 'p', 'fhint');
+addId('updatePromptYes', 'button', 'btn primary');
+addId('updatePromptNo', 'button', 'btn');
+addId('updatePromptStatus', 'div', 'update-status');
 for (const id of ['modelMenu', 'settingsModal', 'memoryModal', 'projectsModal', 'cmdk', 'tokenGuide', 'imgTray',
   'dsSearchRow', 'btnScroll', 'tokChip', 'connForm', 'btnStop', 'cfHint', 'cfTokenGuide', 'btnInstallUpdate']) byId[id].classList.add('hidden');
 for (const t of ['conn', 'behavior', 'sys']) {
@@ -228,11 +236,12 @@ const tauriListeners = {};
 let chatsLoadPayload = [];
 const secretStore = new Map();
 let githubApplyBehavior = 'ok';
+let updateCheckAvailable = false;
 let urlOpenBehavior = 'ok';
 let chatsLoadCalled = 0;
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.16.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.17.0' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -255,8 +264,12 @@ function router(cmd, args = {}) {
     case 'reject_pending_url': return Promise.resolve();
     case 'command_apply_command': return Promise.resolve('دستور اجرا شد (تأییده‌شده توسط کاربر). کد خروجی: 0\nخروجی:\nhello-atria');
     case 'command_reject_command': return Promise.resolve();
-    case 'update_check': return Promise.resolve({ current_version: '0.16.0', latest_version: '0.16.0', available: false, release_url: '', download_size: 0 });
+    case 'update_check':
+      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.17.0', latest_version: '0.18.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.18.0', download_size: 10485760 });
+      return Promise.resolve({ current_version: '0.17.0', latest_version: '0.17.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
+    case 'mcp_test_server': { const sv = (args && args.server) || {}; return Promise.resolve({ ok: true, name: sv.name || '', tools: [{ name: 'echo', description: 'echo the arguments' }] }); }
+    case 'files_stash': return Promise.resolve('/home/u/.atria/uploads/harness_' + ((args && args.name) || 'file'));
     case 'chats_load': chatsLoadCalled++; return Promise.resolve(chatsLoadPayload);
     case 'dirs_info': return Promise.resolve({ chats: 'C:/u/.atria/chats', workspace: 'C:/u/.atria/workspace', memory: 'C:/u/.atria/memory.json' });
     case 'downloads_root_info':
@@ -311,7 +324,7 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), '
   ' wipeChats, openMemory, openCmdk, retryLast, syncChips, updateModelPick, updateConnTab,' +
   ' setActiveConn, resetAttemptStream, USAGE_TOT, createProject, openProjects, addProjectTask,' +
   ' resumeProjectInNewChat, projectContextText, checkpointProject, toggleModelFavorite, modelCapabilities, saveConns,' +
-  ' fileEditActions, commandActions, githubActionActions, openUrlActions, hasPendingApproval, toolCardEl, checkForUpdate, installUpdate, setCurrentProject, activeProject };';
+  ' fileEditActions, commandActions, githubActionActions, openUrlActions, hasPendingApproval, toolCardEl, checkForUpdate, installUpdate, setCurrentProject, activeProject, setChatProject, openProjectMenu, closeProjectMenu, renderProjectChip, addUploadFiles, renderAttachTray, clearAttach, mcpServers, mcpRender, mcpAddServer, mcpTestServer, mcpRemoveServer };';
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 const T = sandbox.__T;
 
@@ -332,7 +345,7 @@ const bridge = win.__atria;
 ok('پل IPC همهٔ توابع لازم را دارد', needed.every((k) => typeof bridge[k] === 'function'),
   needed.filter((k) => !bridge || typeof bridge[k] !== 'function').join(','));
 ok('دکمهٔ انتخاب مدل سیم‌کشی شد', typeof byId.modelPick.onclick === 'function');
-ok('دکمهٔ ایجنت سیم‌کشی شد', typeof byId.chipAgent.onclick === 'function');
+ok('نشانگر Full Access سیم‌کشی شد', typeof byId.fullAccessIndicator.onclick === 'function');
 ok('دکمهٔ ارسال سیم‌کشی شد', typeof byId.btnSend.onclick === 'function');
 eq('listenEvents هر ۱۱ رویداد را ثبت کرد',
   Object.keys(tauriListeners).sort(),
@@ -342,9 +355,9 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.16.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.17.0');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
-ok('UI می‌گوید خواندن و فهرست‌کردن فایل فقط در ورک‌اسپیس است', indexHtml.includes('خواندن و فهرست‌کردن فقط داخل ورک‌اسپیس'));
+ok('UI می‌گوید ابزارهای فایل تابع Full Access‌اند و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس محدود است', indexHtml.includes('ایجنت و ابزارهای فایل') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است'));
 ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس می‌ماند', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است') && indexHtml.includes('کل سیستم — مسیر مطلق (با محافظت)'));
 ok('UI فایل‌های دانلودشده را به پوشهٔ دسکتاپ (Full Access) محدود می‌داند', indexHtml.includes('پوشهٔ دانلود فایل‌های وب') && indexHtml.includes('پیش‌فرض: دسکتاپ') && indexHtml.includes('فقط در Full Access'));
 ok('Full Access در UI شامل دانلود تصویر/مستند می‌شود', indexHtml.includes('دانلود تصویر/مستند در پوشهٔ دسکتاپ'));
@@ -453,20 +466,14 @@ eq('انتخاب مدل اتصال فعال را هم تغییر داد', T.st.a
 eq('مدل همان اتصال نشست', T.effModel(), 'claude-x');
 ok('منو پس از انتخاب بسته شد', byId.modelMenu.classList.contains('hidden'));
 
-console.log('\n=== 4) چیپ‌های حالت (ایجنت/تفکر/فایل) ===');
-const toolsBefore = T.st.settings.tools_enabled;
-byId.chipAgent.click();
-eq('⚡ ایجنت toggle شد', T.st.settings.tools_enabled, !toolsBefore);
-ok('کلاس on همگام شد', byId.chipAgent.classList.contains('on') === T.st.settings.tools_enabled);
-eq('چک‌باکس تنظیمات همگام شد', byId.toolsVal.checked, T.st.settings.tools_enabled);
+console.log('\n=== 4) چیپ‌های حالت (تفکر + Full Access) ===');
 const thinkBefore = T.st.settings.thinking;
 byId.chipThink.click();
 eq('🧠 تفکر toggle شد', T.st.settings.thinking, !thinkBefore);
-byId.chipFiles.click();
-ok('📂 فایل‌ها toggle شد', typeof T.st.settings.file_tools === 'boolean');
+ok('دکمهٔ ایجنت حذف شده (تابع Full Access است)', !byId.chipAgent);
+ok('دکمهٔ فایل‌ها حذف شده (تابع Full Access است)', !byId.chipFiles);
 
 console.log('\n=== 5) جریان ارسال پیام (send → رویدادها → ذخیره) ===');
-byId.chipAgent.click(); // برگرداندن حالت ایجنت
 T.setActiveConn('c1');
 T.openConns('c1');
 byId.cfTestConn.click();
@@ -631,25 +638,64 @@ ok('openConns → صفحهٔ تنظیمات + تب conn (بدون مودال د�
   !byId.settingsModal.classList.contains('hidden') &&
   [...doc.querySelectorAll('.stab-body')].find((b) => b.dataset.tab === 'conn').classList.contains('active'));
 
-console.log('\n=== 12) پروژه‌ها، checkpoint و ادامهٔ گفتگو ===');
+console.log('\n=== 12) پروژه‌ها، کارت پروژهٔ هر چت و checkpoint ===');
 T.createProject();
 const project = T.st.projects[0];
 ok('پروژه ساخته و فعال شد', !!project && T.st.currentProjectId === project.id);
 byId.projectName.value = 'پروژهٔ آزمایشی';
 byId.projectName.dispatch('input', { target: byId.projectName });
+ok('اسم پروژه ذخیره شد', project.name === 'پروژهٔ آزمایشی' && byId.projectName.value === 'پروژهٔ آزمایشی');
+byId.projectName.value = 'اسم تازه ';
+byId.projectName.dispatch('input', { target: byId.projectName });
+ok('باگ اسم‌گذاری: فضای حین تایپ پاک/بازنویسی نمی‌شود', byId.projectName.value === 'اسم تازه ' && project.name === 'اسم تازه ');
+byId.projectName.onblur();
+ok('blur، اسم را normalize می‌کند', project.name === 'اسم تازه' && byId.projectName.value === 'اسم تازه');
+byId.projectName.value = '   ';
+byId.projectName.onblur();
+ok('اسم خالی در blur به «پروژهٔ بی‌نام» برمی‌گردد', project.name === 'پروژهٔ بی‌نام');
+byId.projectName.value = 'پروژهٔ آزمایشی';
+byId.projectName.onblur();
 byId.projectNotes.value = 'هدف: انتشار امن';
 byId.projectNotes.dispatch('input', { target: byId.projectNotes });
 byId.projectTaskInput.value = 'تست انتشار';
 byId.projectTaskAdd.click();
 ok('یادداشت و کار پروژه ذخیره شدند', project.notes.includes('انتشار امن') && project.tasks[0].text === 'تست انتشار');
 T.newChat(true);
-ok('گفتگوی تازه به پروژه متصل شد', T.st.chats[0].projectId === project.id);
+ok('گفتگوی تازه پیش‌فرض «عادی» است (بدون پروژه)', !T.st.chats[0].projectId);
+ok('کارت پروژه حالت عادی را نشان می‌دهد', byId.projectChip.textContent === '📁 عادی' && !byId.projectChip.classList.contains('hidden'));
+byId.projectChip.click();
+ok('منوی پروژه روی کارت باز می‌شود', !byId.projectMenu.classList.contains('hidden'));
+const pOpts = byId.projectMenu.querySelectorAll('.pm-option');
+ok('منو گزینهٔ عادی + همهٔ پروژه‌ها را دارد', pOpts.length === T.st.projects.length + 1);
+pOpts.find((b) => b.textContent.includes('پروژهٔ آزمایشی')).click();
+ok('پروژه انتخاب‌شده فقط به همین چت وصل شد', T.st.chats[0].projectId === project.id && byId.projectChip.textContent === '📁 پروژهٔ آزمایشی' && byId.projectMenu.classList.contains('hidden'));
 ok('زمینهٔ پروژه در prompt آماده است', T.projectContextText(project).includes('تست انتشار') && T.projectContextText(project).includes('هدف'));
 T.st.chats[0].messages.push({ role: 'user', text: 'درخواست پروژه', plain: 'درخواست پروژه' }, { role: 'ai', text: 'خلاصهٔ پیشرفت', plain: 'خلاصهٔ پیشرفت' });
 T.checkpointProject(project, T.st.chats[0]);
 ok('checkpoint از گفتگو ثبت شد', project.checkpoint && project.checkpoint.summary.includes('خلاصهٔ پیشرفت'));
+byId.projectChip.click();
+byId.projectMenu.querySelectorAll('.pm-option').find((b) => b.textContent.includes('حالت عادی')).click();
+ok('برگشت به «عادی»: چت دیگر پروژه ندارد', !T.st.chats[0].projectId && byId.projectChip.textContent === '📁 عادی');
 T.resumeProjectInNewChat();
-ok('ادامه، گفتگوی تازه با همان پروژه می‌سازد', T.st.chats[0].projectId === project.id && T.st.currentProjectId === project.id);
+ok('ادامه از مدیر پروژه، گفتگوی تازه با همان پروژه می‌سازد', T.st.chats[0].projectId === project.id && T.st.currentProjectId === project.id);
+// payload: project context only for the chat that picked a project
+byId.input.value = 'سلام با زمینهٔ پروژه';
+T.setActiveConn('c1');
+bridgeCalls.length = 0;
+byId.btnSend.click();
+const sentP = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+ok('زمینهٔ پروژه فقط برای چتِ انتخاب‌شده به prompt می‌رود', String(sentP.system || '').includes('[PROJECT CHECKPOINT]') && String(sentP.system).includes('پروژهٔ آزمایشی'));
+emit('atria:done', { new_messages: null, final_text: 'پاسخ آزمایشی.', session_id: '', input_tokens: 2, output_tokens: 2 });
+ok('پس از جریان با پروژه، ارسال بسته شد', T.st.sending === false);
+byId.projectChip.click();
+byId.projectMenu.querySelectorAll('.pm-option').find((b) => b.textContent.includes('حالت عادی')).click();
+byId.input.value = 'حالا حالت عادی';
+bridgeCalls.length = 0;
+byId.btnSend.click();
+const sentN = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+ok('حالت عادی یعنی بدون زمینهٔ پروژه در prompt', !String(sentN.system || '').includes('[PROJECT CHECKPOINT]'));
+emit('atria:done', { new_messages: null, final_text: 'پاسخ آزمایشی.', session_id: '', input_tokens: 2, output_tokens: 2 });
+ok('پس از جریان عادی، ارسال بسته شد', T.st.sending === false);
 
 console.log('\n=== 13) پنجرهٔ تاریخچه و مدیریت context ===');
 {
@@ -790,11 +836,106 @@ bridgeCalls.length = 0;
 byId.btnSend.click();
 const sent2 = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
 ok('پوشهٔ پروژهٔ فعال به‌عنوان project_root رفت', sent2.project_root === 'D:/projects/tafriki');
+emit('atria:done', { new_messages: null, final_text: 'x', session_id: '', input_tokens: 1, output_tokens: 1 });
 T.setCurrentProject(prevProject || '');
 ok('دکمهٔ انتخاب پوشه بدون Tauri-dialog خطا نمی‌دهد', (() => { try { byId.projectFolderPick.click(); return true; } catch (e) { return false; } })());
 const updateBtn = byId.btnCheckUpdate;
 await T.checkForUpdate(false);
 ok('بررسی نسخهٔ امضاشده نتیجه می‌دهد', byId.updateStatus.textContent.includes('به‌روز'));
+
+console.log('\n=== 16c) بررسی خودکار هنگام راه‌اندازی + تأیید کاربر ===');
+ok('پیش از بررسی، مودال آپدیت بسته است', byId.updateModal.classList.contains('hidden'));
+updateCheckAvailable = true;
+await T.checkForUpdate(true); // همان بررسیِ خودکارِ boot (silent)
+ok('با وجود نسخهٔ تازه، مودالِ تأیید روی کاربر باز می‌شود', !byId.updateModal.classList.contains('hidden') && String(byId.updatePromptTitle.textContent).includes('0.18.0'));
+ok('متن مودال امضا و جایگزینی را توضیح می‌دهد', String(byId.updatePromptBody.textContent).includes('Ed25519') && String(byId.updatePromptBody.textContent).includes('باز می‌شود'));
+ok('قبل از تأیید، نصبی صدا زده نشده', !bridgeCalls.some((c) => c[0] === 'update_install'));
+byId.updatePromptNo.click();
+ok('«نه، بعداً» فقط مودال را می‌بندد؛ نصبی انجام نشده', byId.updateModal.classList.contains('hidden') && !bridgeCalls.some((c) => c[0] === 'update_install'));
+updateCheckAvailable = true;
+await T.checkForUpdate(true); // دوباره در این نشست (هر بار بررسی می‌شود)
+ok('در همان نشست اگر هنوز آپدیت نصب نشده باشد، دوباره پرسیده می‌شود', !byId.updateModal.classList.contains('hidden'));
+bridgeCalls.length = 0;
+byId.updatePromptYes.click();
+await sleep(10);
+ok('«حالا به‌روز کنم» دانلودِ معتبر + جایگزینی را آغاز می‌کند', bridgeCalls.some((c) => c[0] === 'update_install') && String(byId.updatePromptStatus.textContent).length > 0);
+ok('دکمه‌ها حین نصب قفل شده‌اند', byId.updatePromptYes.disabled === true && byId.updatePromptNo.disabled === true);
+updateCheckAvailable = false;
+await T.checkForUpdate(true);
+ok('وقتی به‌روز است، مودال نمی‌افتد و وضعیت «به‌روز» می‌ماند', byId.updateModal.classList.contains('hidden') && byId.updateStatus.textContent.includes('به‌روز'));
+
+console.log('\n=== 16d) کارت آپلود یکپارچه + MCP + ایجنت=Full Access ===');
+// --- ایجنت و ابزارهای فایل در payload فقط تابع Full Access هستند ---
+T.setActiveConn('c1');
+confirmResult = true;
+const faBefore = T.st.settings.full_access_mode === true;
+byId.fullAccessIndicator.click();
+ok('Full Access toggle شد', (T.st.settings.full_access_mode === true) !== faBefore);
+bridgeCalls.length = 0;
+byId.input.value = 'payload با Full Access';
+byId.btnSend.click();
+let sentFA = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+ok('ایجنت+فایل در payload با Full Access روشن', sentFA.tools_enabled === true && sentFA.file_tools === true && sentFA.full_access_mode === true);
+emit('atria:done', { new_messages: null, final_text: 'x', session_id: '', input_tokens: 1, output_tokens: 1 });
+byId.fullAccessIndicator.click();
+bridgeCalls.length = 0;
+byId.input.value = 'payload بدون Full Access';
+byId.btnSend.click();
+sentFA = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+ok('ایجنت+فایل در payload بدون Full Access خاموش', sentFA.tools_enabled === false && sentFA.file_tools === false && sentFA.full_access_mode === false);
+emit('atria:done', { new_messages: null, final_text: 'x', session_id: '', input_tokens: 1, output_tokens: 1 });
+
+// --- MCP: pass-through + مدیریت در تنظیمات ---
+T.mcpServers().push({ name: 'fs', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] });
+T.mcpRender();
+bridgeCalls.length = 0;
+byId.input.value = 'mcp payload';
+byId.btnSend.click();
+const sentM = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+ok('سرورهای MCP دست‌نخورده به payload می‌روند', Array.isArray(sentM.mcp_servers) && sentM.mcp_servers.length === 1 && sentM.mcp_servers[0].name === 'fs' && sentM.mcp_servers[0].command === 'npx');
+emit('atria:done', { new_messages: null, final_text: 'x', session_id: '', input_tokens: 1, output_tokens: 1 });
+byId.mcpList.querySelectorAll('.mcp-card')[0].querySelectorAll('.btn')[0].click(); // تست
+await sleep(10);
+ok('تست MCP با mcp_test_server انجام شد و ابزارها لیست شدند', bridgeCalls.some((c) => c[0] === 'mcp_test_server') && byId.mcpList.textContent.includes('echo') && byId.mcpList.textContent.includes('متصل'));
+byId.mcpList.querySelectorAll('.mcp-card')[0].querySelectorAll('.btn')[1].click(); // حذف
+ok('حذف سرور MCP کار می‌کند', !byId.mcpList.textContent.includes('fs') && T.mcpServers().length === 0);
+byId.mcpName.value = 'demo';
+byId.mcpCmd.value = 'node';
+byId.mcpArgs.value = '-e script';
+byId.mcpAddBtn.click();
+await sleep(10);
+ok('افزودن سرور MCP کارتی می‌سازد و خودکار تست می‌کند', byId.mcpList.textContent.includes('demo') && T.mcpServers().length === 1 && bridgeCalls.filter((c) => c[0] === 'mcp_test_server').length >= 2);
+T.mcpRemoveServer(0);
+
+// --- کارت یکپارچهٔ اپلود (فایل + تصویر) ---
+sandbox.FileReader = class {
+  constructor() { this.result = null; }
+  readAsDataURL(f) {
+    this.result = 'data:' + (f.type || 'application/octet-stream') + ';base64,' + (f._b64 || 'QUJD');
+    setTimeout(() => this.onload && this.onload(), 0);
+  }
+};
+T.addUploadFiles([
+  { name: 'notes.txt', type: 'text/plain', size: 11, text: async () => 'hello world' },
+  { name: 'pic.png', type: 'image/png', size: 100, _b64: 'QUJD' },
+  { name: 'doc.pdf', type: 'application/pdf', size: 50, _b64: 'QUJD' },
+]);
+await sleep(20);
+ok('فایل متنی با محتوا در صف پیوست است', T.st.pendingFiles.some((f) => f.name === 'notes.txt' && f.kind === 'text' && f.text === 'hello world'));
+ok('تصویر در صف پیوست است', T.st.pendingImgs.length === 1 && T.st.pendingImgs[0].data === 'QUJD' && T.st.pendingImgs[0].media === 'image/png');
+ok('فایل باینری با files_stash ذخیره شد و مسیرش ثبت شد', bridgeCalls.some((c) => c[0] === 'files_stash') && T.st.pendingFiles.some((f) => f.name === 'doc.pdf' && f.kind === 'binary' && f.path && f.path.includes('.atria/uploads')));
+ok('tray هر سه پیوست را نشان می‌دهد', byId.imgTray.classList.contains('hidden') === false && byId.imgTray.textContent.includes('notes.txt') && byId.imgTray.textContent.includes('doc.pdf'));
+bridgeCalls.length = 0;
+byId.input.value = 'این فایل‌ها را ببین';
+byId.btnSend.click();
+const sentA = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+const lastMsg = sentA.messages[sentA.messages.length - 1];
+const lastJson = JSON.stringify(lastMsg.content);
+ok('متن فایل داخل پیام درلاین شد', lastJson.includes('hello world'));
+ok('مسیر فایل باینری در پیام است', lastJson.includes('.atria/uploads'));
+ok('تصویر به‌عنوان بلوک image ارسال شد', lastMsg.content.some((b) => b.type === 'image' && b.data === 'QUJD'));
+ok('پیوست‌ها پس از ارسال پاک شدند', T.st.pendingFiles.length === 0 && T.st.pendingImgs.length === 0 && byId.imgTray.classList.contains('hidden'));
+emit('atria:done', { new_messages: null, final_text: 'x', session_id: '', input_tokens: 1, output_tokens: 1 });
 
 console.log('\n=== 17) نگهبان‌های ایمنی ===');
 ok('منو بدون toasts نمی‌میرد', (() => { const t = T.els.toasts; T.els.toasts = null; try { byId.modelPick.click(); byId.modelPick.click(); } catch { T.els.toasts = t; return false; } T.els.toasts = t; return true; })());
