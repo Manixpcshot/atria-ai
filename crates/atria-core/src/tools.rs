@@ -221,6 +221,18 @@ pub fn terminal_tool_catalog(full_access_mode: bool) -> Vec<Value> {
             },
             "required": ["command"]
         }
+    }),
+    serde_json::json!({
+        "name": "run_code",
+        "description": "Write code to a temporary script under the app data folder and run it with the matching interpreter (python, javascript/node, powershell, bat, sh). Same approval flow as run_command: in Full Access it runs immediately, otherwise the exact command line (interpreter + script path) is staged in the chat and nothing runs until the user approves it. The script path is always logged in the chat. Use for short scripts where composing a one-line command is awkward.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": { "type": "string", "description": "the source code to run" },
+                "lang": { "type": "string", "description": "language hint: python | javascript | powershell | bat | sh (default: auto-detected)" }
+            },
+            "required": ["code"]
+        }
     })]
 }
 
@@ -325,6 +337,9 @@ pub fn tool_label(name: &str) -> &'static str {
         "system_info" => "اطلاعات سیستم",
         "open_windows_settings" => "بازکردن صفحات تنظیمات",
         "run_command" => "اجرای دستور ترمینال",
+        "run_code" => "اجرای کد",
+        "multi_search" => "جست‌وجوی چندگانهٔ وب",
+        "extract_text" => "بازیافت متن از فایل",
         "web_search" => "جست‌وجوی وب",
         "open_web_page" => "خواندن صفحهٔ وب",
         "open_url" => "بازکردن در مرورگر",
@@ -541,6 +556,9 @@ pub async fn execute_async_tool(
             Ok((id, preview)) => Ok(format!("[ATRIA_PENDING_GITHUB:{id}]\n{preview}")),
             Err(error) => Err(error),
         }),
+        "run_code" => Some(run_code_tool(input, full_access_mode, command_cwd, data_root).await),
+        "multi_search" => Some(run_multi_search(input).await),
+        "extract_text" => Some(extract_text_tool(input, command_cwd, full_access_mode)),
         _ => None,
     }?;
     Some(match result {
@@ -1783,6 +1801,186 @@ pub fn reject_pending_command(id: &str, data_root: &Path) -> Result<(), String> 
     }
 }
 
+// ---------------------------------------------------------------------------
+// v0.18.0 tools: run_code (scripted interpreter runs through the same
+// staged/full-access command pipeline), multi_search (parallel web search),
+// extract_text (docx/xlsx/pdf + plain text, via the embedded archive reader).
+// ---------------------------------------------------------------------------
+
+const MAX_CODE_CHARS: usize = 40_000;
+
+fn detect_lang(code: &str) -> &'static str {
+    let c = code.trim_start();
+    if c.starts_with("#!") {
+        return "sh";
+    }
+    if c.starts_with("@echo") || c.starts_with("::") || c.starts_with("REM ") {
+        return "bat";
+    }
+    if c.starts_with("<#") || c.starts_with("$") || c.starts_with("@") {
+        return "powershell";
+    }
+    let has_py = code.lines().any(|l| {
+        let t = l.trim();
+        t.starts_with("def ") || t.starts_with("import ") || t.starts_with("from ")
+            || t == "if __name__ == \"__main__\":"
+    });
+    if has_py {
+        return "python";
+    }
+    let has_js = code.lines().any(|l| {
+        let t = l.trim();
+        t.starts_with("const ") || t.starts_with("let ") || t.starts_with("var ")
+            || t.starts_with("function ") || t.starts_with("require(") || t.starts_with("console.")
+    });
+    if has_js {
+        return "javascript";
+    }
+    "python"
+}
+
+fn code_command(lang: &str, script: &Path) -> Result<String, String> {
+    let quoted = format!("\"{}\"", script.display());
+    let command = match lang {
+        "python" => {
+            let prog = if cfg!(windows) { "python" } else { "python3" };
+            format!("{prog} {quoted}")
+        }
+        "javascript" => format!("node {quoted}"),
+        "powershell" => {
+            if !cfg!(windows) {
+                return Err("powershell فقط روی Windows در دسترس است".into());
+            }
+            format!("powershell -NoProfile -ExecutionPolicy Bypass -File {quoted}")
+        }
+        "bat" => {
+            if !cfg!(windows) {
+                return Err("اسکریپت bat فقط روی Windows در دسترس است".into());
+            }
+            quoted // run_command already wraps with cmd /C
+        }
+        "sh" => format!("sh {quoted}"),
+        other => return Err(format!("زبان \'{other}\' پشتیبانی نمی‌شود (python/javascript/powershell/bat/sh)")),
+    };
+    if command.chars().count() > MAX_COMMAND_CHARS {
+        return Err("دستورِ ساخته‌شده از سقف طول دستور عبور کرد؛ کد کوتاه‌تر شود".into());
+    }
+    Ok(command)
+}
+
+async fn run_code_tool(input: &Value, full_access_mode: bool, command_cwd: &str, data_root: &Path) -> Result<String, String> {
+    let code = input.get("code").and_then(Value::as_str).unwrap_or("").to_string();
+    if code.trim().is_empty() {
+        return Err("کد خالی است".into());
+    }
+    if code.chars().count() > MAX_CODE_CHARS {
+        return Err(format!("کد بیش از {MAX_CODE_CHARS} نویسه است"));
+    }
+    let lang = match input.get("lang").and_then(Value::as_str) {
+        Some(l) if !l.trim().is_empty() => l.trim().to_ascii_lowercase(),
+        _ => detect_lang(&code).to_string(),
+    };
+    let ext = match lang.as_str() {
+        "python" => "py",
+        "javascript" => "js",
+        "powershell" => "ps1",
+        "bat" => "bat",
+        "sh" => "sh",
+        other => return Err(format!("زبان \'{other}\' پشتیبانی نمی‌شود (python/javascript/powershell/bat/sh)")),
+    };
+    let id = new_id("code");
+    let dir = data_root.join("code");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("ساخت پوشهٔ کد موقت نشد: {e}"))?;
+    let script = dir.join(format!("{id}.{ext}"));
+    std::fs::write(&script, &code).map_err(|e| format!("ذخیرهٔ اسکریپت موقت نشد: {e}"))?;
+    let command = code_command(&lang, &script)?;
+    let note = format!("کد به‌صورت اسکریپت موقت ذخیره شد: {}\nزبان: {lang}\n", script.display());
+    let outcome = if full_access_mode {
+        let cmd_o = command.clone();
+        let cwd_o = command_cwd.to_string();
+        tokio::task::spawn_blocking(move || run_command_full_access(&cmd_o, &cwd_o, COMMAND_TIMEOUT_SECS))
+            .await
+            .map_err(|_| "کارگر اجرای کد در دسترس نبود".to_string())?
+    } else {
+        stage_command(&command, command_cwd, data_root)
+    };
+    if outcome.is_error {
+        let _ = std::fs::remove_file(&script);
+        return Err(format!("{note}{0}", outcome.output));
+    }
+    Ok(format!("{note}{0}", outcome.output))
+}
+
+/// 2–5 parallel web searches (the practical shape of \"multi-agent\": one
+/// research fan-out per turn; a full orchestrator is a later milestone).
+async fn run_multi_search(input: &Value) -> Result<String, String> {
+    let raw = input.get("queries").and_then(Value::as_array);
+    let queries: Vec<String> = raw
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::trim).filter(|x| !x.is_empty()).map(str::to_string)).collect())
+        .unwrap_or_default();
+    let queries: Vec<String> = queries.into_iter().take(5).collect();
+    if !(2..=5).contains(&queries.len()) {
+        return Err("پرسش‌ها باید آرایه‌ای با 2 تا 5 پرسشِ متفاوت باشند".into());
+    }
+    let handles: Vec<tokio::task::JoinHandle<Result<String, String>>> = queries
+        .iter()
+        .map(|q| {
+            let q2 = q.clone();
+            tokio::spawn(async move { crate::web::search(q2.as_str(), 5).await })
+        })
+        .collect();
+    let mut out = String::new();
+    for (i, h) in handles.into_iter().enumerate() {
+        out.push_str(&format!("## پرسش {}: {}\n", i + 1, queries[i]));
+        let r = match h.await {
+            Ok(r) => r,
+            Err(e) => Err(format!("کارگر جست‌وجو شکست خورد: {e}")),
+        };
+        match r {
+            Ok(t) => out.push_str(&t.chars().take(4_000).collect::<String>()),
+            Err(e) => out.push_str(&format!("(خطا: {e})")),
+        }
+        out.push('\n');
+    }
+    Ok(out.chars().take(16_000).collect())
+}
+
+/// Extract readable text from docx / xlsx / pdf / plain-text files.
+/// Non-Full-Access: paths must live inside the active workspace.
+fn extract_text_tool(input: &Value, root_str: &str, full_access_mode: bool) -> Result<String, String> {
+    const MAX_EXTRACT: u64 = 10 * 1024 * 1024;
+    let raw = input["path"].as_str().unwrap_or("").trim();
+    if raw.is_empty() {
+        return Err("مسیر فایل لازم است".into());
+    }
+    let root: &Path = if root_str.is_empty() { Path::new(".") } else { Path::new(root_str) };
+    let (root, rel) = resolve_file_target(root, raw, full_access_mode)?;
+    let scoped = resolve_scoped_path(&root, &rel, false)?;
+    let path = scoped.path;
+    let meta = std::fs::metadata(&path).map_err(|e| format!("دسترسی به فایل نشد: {e}"))?;
+    if !meta.is_file() {
+        return Err("فقط فایل‌های عادی مجاز است".into());
+    }
+    if meta.len() > MAX_EXTRACT {
+        return Err("فایل بزرگ‌تر از ۱۰ مگابایت است".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("خواندن فایل نشد: {e}"))?;
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    let text = match ext.as_str() {
+        "docx" => crate::archive::docx_text(&bytes)?,
+        "xlsx" => crate::archive::xlsx_text(&bytes)?,
+        "pdf" => crate::archive::pdf_text(&bytes)?,
+        "txt" | "md" | "csv" | "json" | "xml" | "html" | "log" | "rs" | "js" | "py" | "toml" | "yaml" | "yml" | "ini" | "cfg" => {
+            String::from_utf8_lossy(&bytes).to_string()
+        }
+        other => return Err(format!("پسوند .{other} پشتیبانی نمی‌شود (docx/xlsx/pdf و متن‌های ساده مجاز است)")),
+    };
+    if contains_credential_material(&text) {
+        return Err("احتمال مواد اعتباری (credential) در فایل؛ محتوا از مدل پنهان شد".into());
+    }
+    Ok(text.chars().take(24_000).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2444,6 +2642,92 @@ mod tests {
         )
         .await.expect("handled");
         assert!(huge.is_error, "oversize command must be rejected");
+        let _ = std::fs::remove_dir_all(&data_root);
+    }
+
+    // ---- v0.18.0: run_code / multi_search / extract_text ----
+
+    #[test]
+    fn run_code_detect_lang_and_command() {
+        assert_eq!(detect_lang("print('hi')"), "python");
+        assert_eq!(detect_lang("def f():\n    return 1"), "python");
+        assert_eq!(detect_lang("console.log(1)"), "javascript");
+        assert_eq!(detect_lang("#!/bin/sh\necho hi"), "sh");
+        assert_eq!(detect_lang("@echo off\necho hi"), "bat");
+        let p = PathBuf::from("/tmp/code/code-x.py");
+        let c = code_command("python", &p).unwrap();
+        assert!(c.starts_with(if cfg!(windows) { "python " } else { "python3 " }), "cmd: {c}");
+        let c2 = code_command("javascript", &p).unwrap();
+        assert!(c2.starts_with("node "), "cmd: {c2}");
+    }
+
+    #[tokio::test]
+    async fn run_code_stages_in_normal_mode() {
+        let data_root = terminal_temp("code-stage");
+        let got = execute_async_tool(
+            "run_code",
+            &serde_json::json!({ "code": "print(6*7)", "lang": "python" }),
+            "", false, false, "", "", &data_root,
+        )
+        .await
+        .expect("handled");
+        assert!(!got.is_error);
+        assert!(got.output.contains("[ATRIA_PENDING_COMMAND:"), "output: {}", got.output);
+        // the script must exist on disk with the code
+        let code_dir = data_root.join("code");
+        let scripts: Vec<String> = std::fs::read_dir(&code_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(scripts.iter().any(|n| n.ends_with(".py")), "scripts: {scripts:?}");
+        let _ = std::fs::remove_dir_all(&data_root);
+    }
+
+    #[tokio::test]
+    async fn run_code_rejects_empty_and_oversize() {
+        let data_root = terminal_temp("code-bad");
+        let e1 = execute_async_tool(
+            "run_code", &serde_json::json!({ "code": "   " }),
+            "", false, false, "", "", &data_root,
+        ).await.expect("handled");
+        assert!(e1.is_error);
+        let e2 = execute_async_tool(
+            "run_code",
+            &serde_json::json!({ "code": "x = ".to_string() + &"1".repeat(MAX_CODE_CHARS + 1), "lang": "python" }),
+            "", false, false, "", "", &data_root,
+        ).await.expect("handled");
+        assert!(e2.is_error);
+        let _ = std::fs::remove_dir_all(&data_root);
+    }
+
+    #[tokio::test]
+    async fn multi_search_requires_2_to_5_queries() {
+        let got = execute_async_tool(
+            "multi_search", &serde_json::json!({ "queries": ["only one"] }),
+            "", false, false, "", "", &std::path::Path::new("."),
+        )
+        .await
+        .expect("handled");
+        assert!(got.is_error);
+    }
+
+    #[tokio::test]
+    async fn extract_text_roundtrip_plain_file() {
+        let data_root = terminal_temp("extract");
+        let ws = data_root.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let file = ws.join("notes.txt");
+        std::fs::write(&file, "سلام\nخط دوم").unwrap();
+        let got = execute_async_tool(
+            "extract_text",
+            &serde_json::json!({ "path": "notes.txt" }),
+            "", false, false, "", ws.to_str().unwrap(), &data_root,
+        )
+        .await
+        .expect("handled");
+        assert!(!got.is_error);
+        assert!(got.output.contains("سلام"), "output: {}", got.output);
         let _ = std::fs::remove_dir_all(&data_root);
     }
 }

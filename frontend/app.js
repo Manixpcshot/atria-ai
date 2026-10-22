@@ -76,6 +76,8 @@ const DEFAULTS = {
   downloads_root: '',
   terminal_tools: true,
   ds_search: false,
+  auto_mem: false,
+  speech_out: true,
 };
 const LS_SETTINGS = 'atria.settings.v2';
 const LS_CHATS = 'atria.chats.v1';
@@ -126,6 +128,8 @@ function loadSettings() {
   s.downloads_root = typeof s.downloads_root === 'string' ? s.downloads_root : '';
   s.terminal_tools = s.terminal_tools !== false;
   s.mcp_servers = Array.isArray(s.mcp_servers) ? s.mcp_servers : [];
+  s.auto_mem = s.auto_mem === true;
+  s.speech_out = s.speech_out !== false;
   return s;
 }
 function saveSettings() {
@@ -378,6 +382,7 @@ function renderProjectManager() {
   if (els.projectName && focusedEl !== els.projectName && els.projectName.value !== project.name) els.projectName.value = project.name;
   if (els.projectNotes && focusedEl !== els.projectNotes && els.projectNotes.value !== project.notes) els.projectNotes.value = project.notes;
   if (els.projectFolder && focusedEl !== els.projectFolder && els.projectFolder.value !== (project.folder || '')) els.projectFolder.value = project.folder || '';
+  if (els.projectRepo && focusedEl !== els.projectRepo && els.projectRepo.value !== (project.repo || '')) els.projectRepo.value = project.repo || '';
   if (els.projectCheckpoint) {
     if (project.checkpoint && project.checkpoint.updatedAt) {
       const when = new Date(project.checkpoint.updatedAt).toLocaleString('fa-IR');
@@ -1134,6 +1139,19 @@ function cacheEls() {
     cfDelete: $('#cfDelete'), cfSetActive: $('#cfSetActive'),
     storageBox: $('#storageBox'), btnRevealAtria: $('#btnRevealAtria'),
     btnAttach: $('#btnAttach'), fileInput: $('#fileInput'), imgTray: $('#imgTray'),
+    btnClipboard: $('#btnClipboard'), btnMic: $('#btnMic'), btnChatSearch: $('#btnChatSearch'),
+    chatSearchBar: $('#chatSearchBar'), chatSearchInput: $('#chatSearchInput'), chatSearchCount: $('#chatSearchCount'),
+    chatSearchPrev: $('#chatSearchPrev'), chatSearchNext: $('#chatSearchNext'), chatSearchClose: $('#chatSearchClose'),
+    btnSchedule: $('#btnSchedule'), scheduleModal: $('#scheduleModal'), scheduleX: $('#scheduleX'),
+    schedList: $('#schedList'), schedLabel: $('#schedLabel'), schedPrompt: $('#schedPrompt'),
+    schedWhen: $('#schedWhen'), schedEvery: $('#schedEvery'), schedAdd: $('#schedAdd'), schedCancel: $('#schedCancel'),
+    schedConnPick: $('#schedConnPick'), schedConnSave: $('#schedConnSave'), schedConnClear: $('#schedConnClear'),
+    schedConnLabel: $('#schedConnLabel'), schedFormTitle: $('#schedFormTitle'),
+    snippetsManageBtn: $('#snippetsManageBtn'), snippetsModal: $('#snippetsModal'), snippetsX: $('#snippetsX'),
+    snipList: $('#snipList'), snipName: $('#snipName'), snipText: $('#snipText'), snipSave: $('#snipSave'), snipDelete: $('#snipDelete'),
+    connPresets: $('#connPresets'), mcpHub: $('#mcpHub'), mcpEnv: $('#mcpEnv'),
+    autoMemVal: $('#autoMemVal'), speechOutVal: $('#speechOutVal'),
+    projectRepo: $('#projectRepo'), projectRepoCheck: $('#projectRepoCheck'), projectRepoStatus: $('#projectRepoStatus'),
   };
 }
 
@@ -1434,11 +1452,15 @@ function mcpAddServer() {
   const name = (els.mcpName && els.mcpName.value || '').trim();
   const command = (els.mcpCmd && els.mcpCmd.value || '').trim();
   const args = (els.mcpArgs && els.mcpArgs.value || '').trim().split(/\s+/).filter(Boolean);
+  let env = [];
+  if (els.mcpEnv && String(els.mcpEnv.value || '').trim()) {
+    try { env = v18ParseEnv(els.mcpEnv.value); } catch (e) { return toast(String(e.message || e), 'warn'); }
+  }
   if (!name) return toast('نام سرور MCP را بنویس', 'warn');
   if (!command) return toast('دستور سرور MCP را بنویس', 'warn');
   const servers = mcpServers();
   if (servers.some((s) => String(s.name).toLowerCase() === name.toLowerCase())) return toast('سرور MCP با همین اسم هست', 'warn');
-  servers.push({ name, command, args, _ok: undefined, _status: 'در حال تست اتصال…', _tools: [] });
+  servers.push({ name, command, args, env, _ok: undefined, _status: 'در حال تست اتصال…', _tools: [] });
   saveSettings();
   mcpRender();
   mcpTestServer(servers.length - 1, true);
@@ -1456,7 +1478,7 @@ async function mcpTestServer(i, silent) {
   sv._status = 'در حال تست اتصال…';
   mcpRender();
   try {
-    const res = await window.__atria.mcp_test_server({ name: sv.name, command: sv.command, args: sv.args || [] });
+    const res = await window.__atria.mcp_test_server({ name: sv.name, command: sv.command, args: sv.args || [], env: sv.env || [] });
     sv._ok = true;
     sv._tools = (res && res.tools) || [];
     sv._status = 'متصل · ' + sv._tools.length + ' ابزار';
@@ -1628,6 +1650,7 @@ function fileEditActions(card, rawOutput) {
   if (!pending && !backup) return;
   const io = card.querySelector('.tool-io');
   if (!io) return;
+  v18RenderDiff(card, rawOutput);
   let actions = card.querySelector('.file-edit-actions');
   if (!actions) { actions = document.createElement('div'); actions.className = 'file-edit-actions'; io.appendChild(actions); }
   actions.innerHTML = '';
@@ -1958,11 +1981,32 @@ function bubbleEl(role, text, flow, images, files) {
     b.insertBefore(ftray, md);
   }
   if (flow && flow.length && role !== 'user') stack.appendChild(historyPanelEl(flow));
+  if (role !== 'user') stack.appendChild(bubbleActionsEl(text || ''));
   stack.appendChild(b);
   wrap.appendChild(stack);
   // render markdown into md container
   (window.md.renderAll)(md, text || '…');
   return wrap;
+}
+
+/* v0.18.0: per-bubble actions — 🔊 speak out loud, 🧠 extract memories */
+function bubbleActionsEl(text) {
+  const box = document.createElement('span');
+  box.className = 'msg-actions';
+  const t = String(text || '');
+  if (st.settings.speech_out !== false && t.trim().length > 1) {
+    const sp = document.createElement('button');
+    sp.type = 'button'; sp.className = 'msg-act'; sp.title = 'خواندن پاسخ با صدا';
+    sp.textContent = '🔊';
+    sp.onclick = () => v18Speak(t, sp);
+    box.appendChild(sp);
+  }
+  const mx = document.createElement('button');
+  mx.type = 'button'; mx.className = 'msg-act'; mx.title = 'خلاصه‌کردن نکات این پیام در حافظهٔ بلندمدت';
+  mx.textContent = '🧠';
+  mx.onclick = () => v18ExtractMemory(t, mx);
+  box.appendChild(mx);
+  return box;
 }
 
 function renderHistory(scroll = 'force') {
@@ -2183,7 +2227,8 @@ const TRANSIENT_RE = /(maxwaitms|rate.?limit|ratelimit|queue|expiration|timeout|
 /* ---------------- send flow ---------------- */
 
 function send() {
-  const text = els.input.value.trim();
+  const raw = v18ExpandSnippet();
+  const text = raw.trim();
   if (!text && !st.pendingImgs.length) return;
   if (st.sending) return toast('تولید فعلی هنوز تمام نشده — ⏹ بزن یا صبر کن', 'warn');
   const chat = currentChat();
@@ -2462,6 +2507,12 @@ function toolDesc(name, input) {
   const v = (k) => (input && input[k] != null ? String(input[k]) : '');
   switch (name) {
     case 'run_command': return 'دستور: ' + (v('command') || '—');
+    case 'run_code': return 'کد (' + (v('lang') || 'تشخیص خودکار') + '): ' + (v('code') || '').slice(0, 120) + ((v('code') || '').length > 120 ? '…' : '');
+    case 'multi_search': {
+      const qs = Array.isArray(input && input.queries) ? input.queries.join(' + ') : '—';
+      return 'جست‌وجوهای موازی: ' + (qs || '—');
+    }
+    case 'extract_text': return 'بازیافت متن از: ' + (v('path') || '—');
     case 'web_search': return 'جست‌وجو: «' + (v('query') || '—') + '»';
     case 'open_web_page': return 'صفحه: ' + (v('url') || '—');
     case 'open_url': return 'بازکردن: ' + (v('url') || '—');
@@ -2786,8 +2837,11 @@ function listenEvents() {
   t.listen('atria:done', (e) => {
     lastSession = e.payload.session_id || '';
     onUsage(e.payload.input_tokens || 0, e.payload.output_tokens || 0);
+    v18RunFinished(e.payload);
     finishRun(e.payload.new_messages, e.payload.final_text);
   });
+  t.listen('atria:schedule_result', (e) => v18OnScheduleResult(e.payload));
+  v18ListenDragDrop();
   t.listen('atria:error', (e) => failRun(e.payload.message || 'unknown'));
   t.listen('atria:stopped', () => { failRun('متوقف شد'); toast('تولید متوقف شد', 'warn'); });
 }
@@ -3348,6 +3402,10 @@ async function boot() {
     const p = activeProject();
     if (p) { p.folder = ''; p.updatedAt = Date.now(); saveProjects(); }
   };
+  if (els.projectRepo) {
+    els.projectRepo.oninput = () => { const p = activeProject(); if (!p) return; p.repo = els.projectRepo.value.trim(); p.updatedAt = Date.now(); saveProjects(); };
+    els.projectRepo.onblur = () => { els.projectRepo.value = els.projectRepo.value.trim(); const p = activeProject(); if (!p) return; p.repo = els.projectRepo.value; saveProjects(); };
+  }
   if (els.btnCheckUpdate) els.btnCheckUpdate.onclick = () => checkForUpdate(false);
   if (els.btnInstallUpdate) els.btnInstallUpdate.onclick = installUpdate;
   if (els.updateModalX) els.updateModalX.onclick = hideUpdatePrompt;
@@ -3583,3 +3641,721 @@ function cx0() {
   } catch (e) {}
 }
 document.addEventListener('DOMContentLoaded', vInit);
+
+/* =====================================================================
+ * v0.18.0 — snippets, chat search, drag-drop, clipboard, voice,
+ * scheduler, presets, MCP hub, diff preview, memory extract, repo status
+ * ===================================================================== */
+
+const LS_SNIPS = 'atria.snippets.v1';
+const SCHED_CHAT_ID = '__scheduled__';
+let v18SnipsCache = null;
+let v18SnipMenuEl = null;
+let v18SnipSel = 0;
+let v18SearchHits = [];
+let v18SearchIdx = -1;
+
+function v18Snips() {
+  if (v18SnipsCache) return v18SnipsCache;
+  try { v18SnipsCache = JSON.parse(localStorage.getItem(LS_SNIPS) || '[]'); }
+  catch { v18SnipsCache = []; }
+  if (!Array.isArray(v18SnipsCache)) v18SnipsCache = [];
+  return v18SnipsCache;
+}
+function v18SaveSnips() {
+  try { localStorage.setItem(LS_SNIPS, JSON.stringify(v18SnipsCache || [])); } catch (e) { toast('ذخیرهٔ برچسب‌ها ناموفق بود: ' + e, 'err'); }
+}
+function v18SnippetName() {
+  const val = els.input ? els.input.value : '';
+  const m = /^\s*\/([A-Za-z0-9_.-]*)/.exec(val);
+  return m ? m[1] : null;
+}
+function v18ExpandSnippet() {
+  // If the composer starts with a full snippet name, expand it on send.
+  const val = els.input.value;
+  const m = /^\s*\/([A-Za-z0-9_.-]+)\s/.exec(val);
+  if (m) {
+    const sn = v18Snips().find((x) => x.name === m[1]);
+    if (sn) return (sn.text || '') + val.slice(m[0].length);
+  }
+  return val;
+}
+function v18CloseSnipMenu() {
+  if (v18SnipMenuEl) { v18SnipMenuEl.remove(); v18SnipMenuEl = null; }
+  v18SnipSel = 0;
+}
+function v18SnipMenu() {
+  if (!els.input) return;
+  const name = v18SnippetName();
+  if (name === null) { v18CloseSnipMenu(); return; }
+  const all = v18Snips();
+  const items = all.filter((x) => !name || (x.name || '').toLowerCase().indexOf(name.toLowerCase()) === 0);
+  if (!items.length) { v18CloseSnipMenu(); return; }
+  if (!v18SnipMenuEl) {
+    v18SnipMenuEl = document.createElement('div');
+    v18SnipMenuEl.className = 'snippet-menu';
+    v18SnipMenuEl.setAttribute('dir', 'rtl');
+    (els.input.closest('.composer') || els.input.parentElement).appendChild(v18SnipMenuEl);
+  }
+  if (v18SnipSel >= items.length) v18SnipSel = 0;
+  v18SnipMenuEl.innerHTML = '';
+  items.forEach((it, i) => {
+    const row = document.createElement('div');
+    row.className = 'sm-item' + (i === v18SnipSel ? ' sel' : '');
+    const nm = document.createElement('span'); nm.className = 'sm-name'; nm.textContent = '/' + it.name;
+    const pv = document.createElement('span'); pv.className = 'sm-prev'; pv.textContent = (it.text || '').slice(0, 80);
+    row.appendChild(nm); row.appendChild(pv);
+    row.onmousedown = (e) => { e.preventDefault(); v18ApplySnip(it); };
+    v18SnipMenuEl.appendChild(row);
+  });
+  const hint = document.createElement('div');
+  hint.style.cssText = 'padding:5px 12px;font-size:10px;color:#7d87ab;border-top:1px solid rgba(140,150,200,.2)';
+  hint.textContent = '↑↓ انتخاب · Enter/Tab قرار دادن · Esc بستن';
+  v18SnipMenuEl.appendChild(hint);
+}
+function v18ApplySnip(sn) {
+  const pre = els.input.value.replace(/^\s*\/[A-Za-z0-9_.-]*\s?/, '');
+  els.input.value = (sn.text || '') + (pre ? ' ' + pre : '');
+  v18CloseSnipMenu();
+  autosize();
+  els.input.focus();
+}
+function v18WireSnips() {
+  if (!els.input) return;
+  els.input.addEventListener('input', () => { v18SnipMenu(); });
+  els.input.addEventListener('keydown', (e) => {
+    if (!v18SnipMenuEl) return;
+    const items = v18Snips().filter((x) => {
+      const name = v18SnippetName();
+      return !name || (x.name || '').toLowerCase().indexOf(name.toLowerCase()) === 0;
+    });
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); v18SnipSel = (v18SnipSel + 1) % items.length; v18SnipMenu(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); v18SnipSel = (v18SnipSel - 1 + items.length) % items.length; v18SnipMenu(); }
+    else if (e.key === 'Escape') { e.preventDefault(); v18CloseSnipMenu(); }
+    else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+      e.preventDefault();
+      if (e.key === 'Enter') v18ApplySnip(items[v18SnipSel]);
+      else v18ApplySnip(items[v18SnipSel]);
+    }
+  });
+  els.input.addEventListener('blur', () => setTimeout(v18CloseSnipMenu, 150));
+}
+function v18OpenSnippetsModal() {
+  openModal(els.snippetsModal);
+  v18RenderSnipList('');
+}
+function v18RenderSnipList(editName) {
+  const box = els.snipList;
+  if (!box) return;
+  box.innerHTML = '';
+  const items = v18Snips();
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'fhint';
+    empty.textContent = 'هنوز برچسبی ذخیره نشده است.';
+    box.appendChild(empty);
+  }
+  items.forEach((it) => {
+    const row = document.createElement('div');
+    row.className = 'snip-item' + (it.name === editName ? ' sel' : '');
+    const nm = document.createElement('div'); nm.className = 'sn-name'; nm.textContent = '/' + it.name;
+    const pv = document.createElement('div'); pv.className = 'sn-prev'; pv.textContent = (it.text || '').slice(0, 90);
+    row.appendChild(nm); row.appendChild(pv);
+    row.onclick = () => { els.snipName.value = it.name; els.snipText.value = it.text || ''; };
+    box.appendChild(row);
+  });
+  if (editName) { els.snipName.value = editName; els.snipText.value = (items.find((x) => x.name === editName) || {}).text || ''; }
+  else { els.snipName.value = ''; els.snipText.value = ''; }
+}
+function v18WireSnippetsModal() {
+  if (!els.snippetsManageBtn) return;
+  els.snippetsManageBtn.onclick = () => v18OpenSnippetsModal();
+  els.snippetsX.onclick = () => closeModal(els.snippetsModal);
+  els.snipSave.onclick = () => {
+    const name = String(els.snipName.value || '').trim().toLowerCase().replace(/^\//, '');
+    const text = String(els.snipText.value || '');
+    if (!/^[a-z0-9_.-]{1,40}$/.test(name)) return toast('نام برچسب فقط اعداد/حروف انگلیسی، - _ . باشد', 'warn');
+    if (!text.trim()) return toast('متن برچسب خالی است', 'warn');
+    const items = v18Snips();
+    const ex = items.find((x) => x.name === name);
+    if (ex) ex.text = text; else items.push({ name, text });
+    v18SaveSnips();
+    v18RenderSnipList(name);
+    toast('برچسب «/' + name + '» ذخیره شد', 'ok');
+  };
+  els.snipDelete.onclick = () => {
+    const name = String(els.snipName.value || '').trim().toLowerCase().replace(/^\//, '');
+    if (!name) return toast('برای حذف، نام برچسب را بنویس یا از فهرست انتخاب کن', 'warn');
+    const items = v18Snips();
+    const i = items.findIndex((x) => x.name === name);
+    if (i >= 0) { items.splice(i, 1); v18SaveSnips(); v18RenderSnipList(''); toast('برچسب حذف شد', 'ok'); }
+    else toast('برچسب پیدا نشد', 'warn');
+  };
+}
+
+/* ---------------- chat search ---------------- */
+function v18OpenSearch() {
+  const chat = currentChat();
+  if (!chat || !chat.messages.length) return toast('این گفتگو هنوز پیامی ندارد', 'warn');
+  els.chatSearchBar.classList.remove('hidden');
+  els.chatSearchInput.value = '';
+  v18ClearSearchMarks();
+  v18SearchHits.length = 0;
+  els.chatSearchCount.textContent = '';
+  els.chatSearchInput.focus();
+}
+function v18CloseSearch() {
+  els.chatSearchBar.classList.add('hidden');
+  v18ClearSearchMarks();
+  v18SearchHits.length = 0;
+  v18SearchIdx = -1;
+}
+function v18ClearSearchMarks() {
+  els.messages.querySelectorAll('mark.chat-hit').forEach((mk) => {
+    try {
+      if (typeof mk.replaceWith === 'function' && typeof document.createTextNode === 'function') {
+        const parent = mk.parentNode;
+        mk.replaceWith(document.createTextNode(mk.textContent));
+        if (parent && typeof parent.normalize === 'function') parent.normalize();
+      } else {
+        mk.remove();
+      }
+    } catch (e) { try { mk.remove(); } catch (e2) {} }
+  });
+  v18SearchHits.length = 0;
+}
+function v18RunSearch() {
+  v18ClearSearchMarks();
+  v18SearchHits.length = 0;
+  v18SearchIdx = -1;
+  const q = String(els.chatSearchInput.value || '').trim();
+  if (!q) { els.chatSearchCount.textContent = ''; return; }
+  const chat = currentChat();
+  if (!chat) return;
+  const lower = q.toLowerCase();
+  const bubbles = els.messages.querySelectorAll('.msg');
+  let hit = 0;
+  const canMark = typeof document.createTreeWalker === 'function' && typeof document.createTextNode === 'function';
+  chat.messages.forEach((m, mi) => {
+    const text = String(m.plain || m.text || '');
+    const low = text.toLowerCase();
+    if (low.indexOf(lower) < 0) return;
+    const bubble = bubbles[mi];
+    if (!bubble) return;
+    const md = bubble.querySelector('.md');
+    if (!md) return;
+    if (!canMark) {
+      // count-only mode (environments without a real text-node API)
+      let idx = low.indexOf(lower);
+      while (idx >= 0 && hit < 400) {
+        const ph = document.createElement('mark');
+        ph.className = 'chat-hit';
+        ph.textContent = q;
+        md.appendChild(ph);
+        v18SearchHits.push(ph);
+        hit++;
+        idx = low.indexOf(lower, idx + q.length);
+      }
+      return;
+    }
+    // mark occurrences in the rendered text nodes
+    const walker = document.createTreeWalker(md, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) nodes.push(node);
+    for (const tn of nodes) {
+      const t = tn.nodeValue;
+      const tl = t.toLowerCase();
+      let idx = tl.indexOf(lower);
+      if (idx < 0) continue;
+      let pos = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      while (idx >= 0 && hit < 400) {
+        frag.appendChild(document.createTextNode(t.slice(last, idx)));
+        const mk = document.createElement('mark');
+        mk.className = 'chat-hit';
+        mk.textContent = t.slice(idx, idx + q.length);
+        frag.appendChild(mk);
+        v18SearchHits.push(mk);
+        hit++;
+        last = idx + q.length;
+        idx = tl.indexOf(lower, last);
+      }
+      frag.appendChild(document.createTextNode(t.slice(last)));
+      tn.parentNode.replaceChild(frag, tn);
+      pos++;
+    }
+  });
+  els.chatSearchCount.textContent = hit ? hit + ' نتیجه' : 'نتیجه‌ای نیست';
+  if (hit) v18GotoSearch(0);
+}
+function v18GotoSearch(i) {
+  if (!v18SearchHits.length) return;
+  v18SearchIdx = ((i % v18SearchHits.length) + v18SearchHits.length) % v18SearchHits.length;
+  v18SearchHits.forEach((h) => h.classList.remove('cur'));
+  const cur = v18SearchHits[v18SearchIdx];
+  cur.classList.add('cur');
+  try { cur.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { cur.scrollIntoView(); }
+  els.chatSearchCount.textContent = (v18SearchIdx + 1) + ' / ' + v18SearchHits.length;
+}
+function v18WireSearch() {
+  if (!els.btnChatSearch) return;
+  els.btnChatSearch.onclick = () => {
+    if (els.chatSearchBar.classList.contains('hidden')) v18OpenSearch();
+    else v18CloseSearch();
+  };
+  els.chatSearchInput.addEventListener('input', () => { v18SearchInputDebounce(); });
+  els.chatSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); v18GotoSearch(v18SearchIdx + (e.shiftKey ? -1 : 1)); }
+    if (e.key === 'Escape') v18CloseSearch();
+  });
+  els.chatSearchNext.onclick = () => v18GotoSearch(v18SearchIdx + 1);
+  els.chatSearchPrev.onclick = () => v18GotoSearch(v18SearchIdx - 1);
+  els.chatSearchClose.onclick = () => v18CloseSearch();
+  v18SearchTimer = 0;
+}
+let v18SearchTimer = 0;
+function v18SearchInputDebounce() {
+  clearTimeout(v18SearchTimer);
+  v18SearchTimer = setTimeout(v18RunSearch, 220);
+}
+
+/* ---------------- drag & drop ---------------- */
+function v18ListenDragDrop() {
+  const t = window.__atria;
+  if (!t || !t.listen) return;
+  t.listen('tauri://drag-drop', (e) => {
+    const paths = (e.payload && e.payload.paths) || [];
+    if (!paths.length) return;
+    if (!window.__atria || !window.__atria.invoke) return;
+    window.__atria.invoke('files_read', { paths: paths }).then((outs) => {
+      (outs || []).forEach((f) => {
+        if (f.error) { toast('«' + f.name + '»: ' + f.error, 'warn'); return; }
+        if (f.kind === 'image' && f.b64) {
+          if (st.pendingImgs.length >= 4) { toast('حداکثر ۴ تصویر', 'warn'); return; }
+          st.pendingImgs.push({ name: f.name, media: 'application/octet-stream', data: f.b64 });
+        } else if (f.kind === 'text' && f.text != null) {
+          if (st.pendingFiles.length >= 6) { toast('حداکثر ۶ فایل', 'warn'); return; }
+          st.pendingFiles.push({ name: f.name, size: f.size, kind: 'text', text: f.text });
+        } else if (f.kind === 'binary' && f.b64) {
+          if (st.pendingFiles.length >= 6) { toast('حداکثر ۶ فایل', 'warn'); return; }
+          window.__atria.files_stash(f.name, f.b64).then((p) => {
+            st.pendingFiles.push({ name: f.name, size: f.size, kind: 'binary', path: p });
+            renderAttachTray();
+          }).catch((err) => toast('ذخیرهٔ فایل «' + f.name + '» نشد: ' + err, 'err'));
+          return;
+        } else {
+          st.pendingFiles.push({ name: f.name, size: f.size, kind: 'binary' });
+        }
+        renderAttachTray();
+      });
+      toast('فایل(s) اضافه شد — در کارت پیوست ببین', 'ok');
+    }).catch((err) => toast('خواندن فایل‌های رهاشده نشد: ' + err, 'err'));
+  });
+}
+
+/* ---------------- run finished: notify + auto memory ---------------- */
+function v18RunFinished(payload) {
+  let unfocused = false;
+  try { unfocused = !!(window.document && typeof window.document.hasFocus === 'function') && !window.document.hasFocus(); } catch (e) { unfocused = false; }
+  if (unfocused) {
+    try { window.__atria && window.__atria.invoke('notify_run_done', {}); } catch (e) {}
+  }
+  if (st.settings.auto_mem && payload && payload.final_text && String(payload.final_text).trim()) {
+    // Note: at atria:done time the assistant reply is not yet appended, so
+    // the last stored message is the user's own turn.
+    const chat = currentChat();
+    const userText = chat && chat.messages.length
+      ? String((chat.messages[chat.messages.length - 1] || {}).plain || (chat.messages[chat.messages.length - 1] || {}).text || '')
+      : '';
+    v18ExtractMemory(String(payload.final_text) + (userText ? '\n\nکاربر: ' + userText : ''), null, true);
+  }
+}
+function v18Speak(text, btn) {
+  if (!('speechSynthesis' in window)) return toast('این مرورگر گفتار خروجی ندارد', 'warn');
+  try {
+    if (btn && btn.classList.contains('speaking')) { window.speechSynthesis.cancel(); btn.classList.remove('speaking'); return; }
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(String(text || ''));
+    u.lang = 'fa-IR';
+    if (btn) {
+      btn.classList.add('speaking');
+      u.onend = () => btn.classList.remove('speaking');
+      u.onerror = () => btn.classList.remove('speaking');
+    }
+    window.speechSynthesis.speak(u);
+  } catch (e) { toast('خواندن با صدا ممکن نشد: ' + e, 'err'); }
+}
+function v18ExtractMemory(text, btn, silent) {
+  const conn = activeConn();
+  if (!conn) return toast('ابتدا یک اتصال فعال انتخاب کن', 'warn');
+  if (!conn.key) return toast('کلید اتصال فعال خالی است', 'warn');
+  if (btn) { btn.disabled = true; btn.title = 'در حال خلاصه‌کردن…'; }
+  const payload = {
+    text: String(text || '').slice(0, 12000),
+    api_key: conn.key,
+    base_url: conn.base || st.settings.base_url || '',
+    model: conn.model || effModel() || '',
+    kind: conn.kind || st.settings.api_kind || 'anthropic',
+    max: 5,
+  };
+  window.__atria.invoke('memory_extract', { payload }).then((facts) => {
+    if (btn) { btn.disabled = false; btn.title = 'خلاصه‌کردن نکات این پیام در حافظهٔ بلندمدت'; }
+    const n = Array.isArray(facts) ? facts.length : 0;
+    if (!n) { if (!silent) toast('نکتۀ ماندگاری در این پیام پیدا نشد', 'warn'); return; }
+    if (!silent) toast(n + ' نکته در حافظهٔ بلندمدت ذخیره شد', 'ok');
+  }).catch((e) => {
+    if (btn) { btn.disabled = false; }
+    if (!silent) toast('استخراج حافظه ناموفق بود: ' + e, 'err');
+  });
+}
+
+/* ---------------- clipboard ---------------- */
+function v18WireClipboard() {
+  if (!els.btnClipboard) return;
+  els.btnClipboard.onclick = () => {
+    window.__atria.invoke('clipboard_read', {}).then((txt) => {
+      if (!txt) return;
+      const t = String(txt);
+      els.input.value = (els.input.value ? els.input.value + '\n' : '') + t;
+      autosize();
+      els.input.focus();
+      toast('متن کلیپ‌بورد وارد شد', 'ok');
+    }).catch((e) => toast('خواندن کلیپ‌بورد نشد: ' + e, 'warn'));
+  };
+}
+
+/* ---------------- voice input ---------------- */
+function v18WireMic() {
+  if (!els.btnMic) return;
+  const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
+  if (!SR) {
+    els.btnMic.onclick = () => toast('دریافت گفتار در این مرورگر در دسترس نیست (روی Windows با WebView2 پشتیبانی می‌شود)', 'warn');
+    return;
+  }
+  let rec = null;
+  let listening = false;
+  els.btnMic.onclick = () => {
+    if (listening) { try { rec && rec.stop(); } catch (e) {} return; }
+    try {
+      rec = new SR();
+      rec.lang = 'fa-IR';
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      rec.onresult = (ev) => {
+        const t = ev.results && ev.results[0] && ev.results[0][0] ? ev.results[0][0].transcript : '';
+        if (t) {
+          els.input.value = (els.input.value ? els.input.value + ' ' : '') + t.trim();
+          autosize();
+        }
+      };
+      rec.onend = () => { listening = false; els.btnMic.classList.remove('mic-on'); };
+      rec.onerror = () => { listening = false; els.btnMic.classList.remove('mic-on'); toast('گوشیدن گفتار متوقف شد', 'warn'); };
+      listening = true;
+      els.btnMic.classList.add('mic-on');
+      rec.start();
+      els.input.focus();
+    } catch (e) {
+      listening = false;
+      els.btnMic.classList.remove('mic-on');
+      toast('شروع گفتار ممکن نشد: ' + e, 'err');
+    }
+  };
+}
+
+/* ---------------- connection presets ---------------- */
+const V18_PRESETS = [
+  { name: 'Ollama', base: 'http://127.0.0.1:11434/v1', kind: 'openai', model: 'llama3.1', hint: 'محلی — بدون کلید (خالی بگذار)' },
+  { name: 'LM Studio', base: 'http://127.0.0.1:1234/v1', kind: 'openai', model: 'local-model', hint: 'محلی — بدون کلید (خالی بگذار)' },
+  { name: 'OpenRouter', base: 'https://openrouter.ai/api/v1', kind: 'openai', model: '', hint: 'کلید openrouter.ai' },
+  { name: 'DeepSeek', base: 'https://api.deepseek.com/v1', kind: 'openai', model: 'deepseek-chat', hint: 'کلید platform.deepseek.com' },
+  { name: 'OpenAI', base: 'https://api.openai.com/v1', kind: 'openai', model: 'gpt-4o-mini', hint: 'کلید platform.openai.com' },
+  { name: 'Anthropic', base: 'https://api.anthropic.com', kind: 'anthropic', model: 'claude-sonnet-4-20250514', hint: 'کلید console.anthropic.com' },
+  { name: 'Gemini (compat)', base: 'https://generativelanguage.googleapis.com/v1beta/openai', kind: 'openai', model: 'gemini-2.0-flash', hint: 'کلید aistudio.google.com' },
+];
+function v18RenderPresets() {
+  const box = els.connPresets;
+  if (!box) return;
+  box.innerHTML = '';
+  V18_PRESETS.forEach((pr) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'preset-chip'; b.textContent = pr.name;
+    b.title = pr.base + ' — ' + pr.hint;
+    b.onclick = () => {
+      const c = normConn({ name: pr.name, kind: pr.kind, base: pr.base, key: '', lastModel: pr.model, models: pr.model ? [pr.model] : [] });
+      st.conns.unshift(c);
+      saveConns();
+      setActiveConn(c.id);
+      connEditId = c.id;
+      connSrvRequest++;
+      connSrv = [];
+      renderConnsModal();
+      toast('اتصال «' + pr.name + '» ساخته شد؛ در صورت نیاز کلید را وارد کن', 'ok');
+    };
+    box.appendChild(b);
+  });
+}
+
+/* ---------------- MCP hub + env ---------------- */
+const V18_MCP_HUB = [
+  { name: 'filesystem', command: 'npx', args: '-y @modelcontextprotocol/server-filesystem C:/files', env: '' , hint: 'دسترسی فایل‌های یک پوشه (مسیر را با پوشهٔ خودت عوض کن)' },
+  { name: 'memory', command: 'npx', args: '-y @modelcontextprotocol/server-memory', env: '', hint: 'حافظهٔ گراف‌محور MCP' },
+  { name: 'fetch', command: 'npx', args: '-y @modelcontextprotocol/server-fetch', env: '', hint: 'خواندن محتوای پیوندها' },
+  { name: 'github', command: 'npx', args: '-y @modelcontextprotocol/server-github', env: 'GITHUB_PERSONAL_ACCESS_TOKEN=', hint: 'ابزارهای GitHub — توکن را فقط در ویندوز Credential Manager نگه‌دار؛ اینجا فقط برای اجرای سرور استفاده می‌شود' },
+];
+function v18RenderMcpHub() {
+  const box = els.mcpHub;
+  if (!box) return;
+  box.innerHTML = '';
+  V18_MCP_HUB.forEach((h) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'preset-chip'; b.textContent = h.name;
+    b.title = h.hint;
+    b.onclick = () => {
+      els.mcpName.value = h.name;
+      els.mcpCmd.value = h.command;
+      els.mcpArgs.value = h.args;
+      els.mcpEnv.value = h.env;
+      toast('فرم MCP با پیش‌تنظیم «' + h.name + '» پر شد — «افزودن و تست» را بزن', 'ok');
+    };
+    box.appendChild(b);
+  });
+}
+function v18ParseEnv(text) {
+  const out = [];
+  String(text || '').split(/\s+/).forEach((tok) => {
+    if (!tok) return;
+    if (tok.indexOf('=') < 0) throw new Error('متغیر محیطی باید به شکل K=V باشد: ' + tok);
+    out.push(tok);
+  });
+  if (out.length > 16) throw new Error('حداکثر ۱۶ متغیر محیطی');
+  return out;
+}
+
+/* ---------------- diff preview ---------------- */
+function v18RenderDiff(card, rawOutput) {
+  const out = String(rawOutput || '');
+  const i = out.indexOf('--- current\n+++ proposed\n');
+  if (i < 0) return;
+  if (card.querySelector('.diff-lines')) return;
+  const lines = out.slice(i).split('\n').slice(1);
+  const pre = document.createElement('pre');
+  pre.className = 'diff-lines';
+  let shown = 0;
+  for (const ln of lines) {
+    if (shown > 600) { const more = document.createElement('div'); more.className = 'dl-head'; more.textContent = '… ادامهٔ diff در متن بالا'; pre.appendChild(more); break; }
+    const div = document.createElement('div');
+    if (ln.indexOf('+') === 0) div.className = 'dl-add';
+    else if (ln.indexOf('-') === 0) div.className = 'dl-del';
+    else if (ln.indexOf(' ') === 0) div.className = 'dl-ctx';
+    else div.className = 'dl-head';
+    div.textContent = ln;
+    pre.appendChild(div);
+    shown++;
+  }
+  const io = card.querySelector('.tool-io');
+  const toolOut = io ? io.querySelector('.tool-out') : null;
+  if (toolOut) toolOut.insertBefore(pre, toolOut.firstChild);
+  else if (io) io.appendChild(pre);
+}
+
+/* ---------------- project repo status ---------------- */
+function v18RepoCheck() {
+  const proj = activeProject();
+  if (!proj) return toast('پروژه‌ای انتخاب نشده', 'warn');
+  const raw = String(els.projectRepo.value || '').trim();
+  const m = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(raw);
+  if (!m) return toast('فرمت owner/repo کامل نیست', 'warn');
+  proj.repo = raw;
+  saveProjects();
+  els.projectRepoStatus.hidden = false;
+  els.projectRepoStatus.className = 'project-repo-status fhint';
+  els.projectRepoStatus.textContent = 'در حال بررسی…';
+  window.__atria.invoke('github_repo_info', { owner: m[1], repo: m[2] }).then((txt) => {
+    els.projectRepoStatus.textContent = String(txt || 'پاسخی دریافت نشد');
+    els.projectRepoStatus.className = 'project-repo-status fhint ok';
+  }).catch((e) => {
+    els.projectRepoStatus.textContent = 'خطا: ' + e;
+    els.projectRepoStatus.className = 'project-repo-status fhint err';
+  });
+}
+
+/* ---------------- scheduler ---------------- */
+function v18SchedChat() {
+  const ex = (st.chats || []).find((c) => c.id === SCHED_CHAT_ID);
+  if (ex) return ex;
+  const c = { id: SCHED_CHAT_ID, title: '⏰ زمان‌بندی‌ها', ts: Date.now(), messages: [] };
+  st.chats.unshift(c);
+  saveChats(SCHED_CHAT_ID);
+  renderConvList();
+  return c;
+}
+function v18AppendSchedMsg(role, text) {
+  const chat = v18SchedChat();
+  chat.messages.push({ role, text, plain: text, ts: Date.now() });
+  saveChats(chat.id);
+  if (st.currentId === chat.id) renderHistory('sticky');
+}
+function v18OnScheduleResult(r) {
+  if (!r) return;
+  const head = '⏰ ' + (r.label || r.job_id) + ' — ' + (r.ran_at || '');
+  v18AppendSchedMsg('user', head + '\n' + (r.prompt || ''));
+  v18AppendSchedMsg('assistant', (r.is_error ? '❌ ' : '✅ ') + (r.output || '(بدون خروجی)'));
+  toast('وظیفهٔ «' + (r.label || '') + '» اجرا شد', r.is_error ? 'err' : 'ok');
+}
+function v18ScheduleBootMerge() {
+  window.__atria.invoke('schedule_unprocessed', {}).then((items) => {
+    if (!Array.isArray(items) || !items.length) return;
+    let last = null;
+    items.forEach((r) => {
+      v18AppendSchedMsg('user', '⏰ ' + (r.label || r.job_id) + ' — ' + (r.ran_at || '') + (r.caught_up ? ' (زمان اجرا برنامه بسته بود)' : '') + '\n' + (r.prompt || ''));
+      v18AppendSchedMsg('assistant', (r.is_error ? '❌ ' : '✅ ') + (r.output || '(بدون خروجی)'));
+      last = r.ran_at;
+    });
+    if (last) window.__atria.invoke('schedule_ack', { ran_at: last }).catch(() => {});
+    toast(items.length + ' نتیجهٔ زمان‌بندی منتقل شد', 'ok');
+  }).catch(() => {});
+}
+function v18FmtJobWhen(iso) {
+  return String(iso || '').replace('T', ' ').replace(/Z$/, '');
+}
+function v18RenderSchedule() {
+  window.__atria.invoke('schedule_list', {}).then((jobs) => {
+    const box = els.schedList;
+    box.innerHTML = '';
+    if (!Array.isArray(jobs) || !jobs.length) {
+      const empty = document.createElement('div');
+      empty.className = 'fhint';
+      empty.textContent = 'هنوز وظیفه‌ای ثبت نشده است.';
+      box.appendChild(empty);
+    }
+    (Array.isArray(jobs) ? jobs : []).forEach((j) => {
+      const row = document.createElement('div');
+      row.className = 'sched-job';
+      const top = document.createElement('div'); top.className = 'sj-top';
+      const lb = document.createElement('span'); lb.className = 'sj-label'; lb.textContent = j.label;
+      const wh = document.createElement('span'); wh.className = 'sj-when'; wh.textContent = v18FmtJobWhen(j.next_run) + ' UTC' + (j.every_minutes ? ' · هر ' + j.every_minutes + ' دقیقه' : ' · یک‌بار');
+      top.appendChild(lb); top.appendChild(wh);
+      const pr = document.createElement('div'); pr.className = 'sj-prompt'; pr.textContent = j.prompt;
+      const ac = document.createElement('div'); ac.className = 'sj-actions';
+      const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'btn tiny'; edit.textContent = 'ویرایش';
+      edit.onclick = () => {
+        v18EditingId = j.id;
+        els.schedFormTitle.textContent = 'ویرایش: ' + j.label;
+        els.schedLabel.value = j.label;
+        els.schedPrompt.value = j.prompt;
+        const d = new Date(j.next_run);
+        if (!isNaN(d.getTime())) {
+          const pad = (x) => String(x).padStart(2, '0');
+          els.schedWhen.value = d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) + 'T' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+        }
+        els.schedEvery.value = String(j.every_minutes || 0);
+        els.schedCancel.classList.remove('hidden');
+      };
+      const del = document.createElement('button'); del.type = 'button'; del.className = 'btn tiny danger'; del.textContent = 'حذف';
+      del.onclick = () => {
+        window.__atria.invoke('schedule_delete', { id: j.id }).then(v18RenderSchedule);
+      };
+      ac.appendChild(edit); ac.appendChild(del);
+      row.appendChild(top); row.appendChild(pr); row.appendChild(ac);
+      box.appendChild(row);
+    });
+  }).catch(() => {});
+  window.__atria.invoke('schedule_has_connection', {}).then((has) => {
+    els.schedConnLabel.textContent = has ? 'ارتباط زمان‌بندی: ذخیره شده است' : 'ارتباط زمان‌بندی: ذخیره نشده است — وظایف فقط «در انتظار» ثبت می‌شوند';
+  }).catch(() => {});
+  const pick = els.schedConnPick;
+  pick.innerHTML = '';
+  (st.conns || []).forEach((c) => {
+    const o = document.createElement('option');
+    o.value = c.id; o.textContent = c.name;
+    pick.appendChild(o);
+  });
+}
+let v18EditingId = null;
+function v18OpenSchedule() {
+  openModal(els.scheduleModal);
+  v18EditingId = null;
+  els.schedFormTitle.textContent = 'وظیفهٔ جدید';
+  els.schedLabel.value = ''; els.schedPrompt.value = ''; els.schedEvery.value = '0';
+  els.schedWhen.value = '';
+  els.schedCancel.classList.add('hidden');
+  v18RenderSchedule();
+}
+function v18WireSchedule() {
+  if (!els.btnSchedule) return;
+  els.btnSchedule.onclick = () => v18OpenSchedule();
+  els.scheduleX.onclick = () => closeModal(els.scheduleModal);
+  els.schedAdd.onclick = () => {
+    const id = v18EditingId || ('job-' + Date.now().toString(36));
+    const label = String(els.schedLabel.value || '').trim();
+    const prompt = String(els.schedPrompt.value || '').trim();
+    const when = els.schedWhen.value;
+    const every = Math.max(0, Math.min(1440, Number(els.schedEvery.value) || 0));
+    if (!label) return toast('برچسب لازم است', 'warn');
+    if (!prompt) return toast('متن وظیفه لازم است', 'warn');
+    if (!when) return toast('زمان اجرا را انتخاب کن (UTC)', 'warn');
+    const next_run = when.replace('T', 'T') + ':00Z';
+    const d = new Date(next_run);
+    if (isNaN(d.getTime())) return toast('زمان معتبر نیست', 'warn');
+    const job = { id, label, next_run, every_minutes: every, prompt, conn_id: st.activeConnId || '' };
+    window.__atria.invoke('schedule_upsert', { job }).then(() => {
+      v18EditingId = null;
+      els.schedFormTitle.textContent = 'وظیفهٔ جدید';
+      els.schedLabel.value = ''; els.schedPrompt.value = ''; els.schedWhen.value = '';
+      els.schedCancel.classList.add('hidden');
+      v18RenderSchedule();
+      toast(v18EditingId ? 'وظیفه ذخیره شد' : 'وظیفهٔ جدید ثبت شد', 'ok');
+    }).catch((e) => toast('ثبت وظیفه ناموفق بود: ' + e, 'err'));
+  };
+  els.schedCancel.onclick = () => {
+    v18EditingId = null;
+    els.schedFormTitle.textContent = 'وظیفهٔ جدید';
+    els.schedLabel.value = ''; els.schedPrompt.value = ''; els.schedWhen.value = '';
+    els.schedCancel.classList.add('hidden');
+  };
+  els.schedConnSave.onclick = () => {
+    const c = (st.conns || []).find((x) => x.id === els.schedConnPick.value);
+    if (!c) return toast('اول یک اتصال انتخاب کن', 'warn');
+    window.__atria.invoke('schedule_set_connection', {
+      conn: { api_key: c.key || '', base_url: c.base || '', model: c.model || effModel() || '', kind: c.kind || 'anthropic' },
+    }).then(() => {
+      els.schedConnLabel.textContent = 'ارتباط زمان‌بندی: ذخیره شده است («' + c.name + '»)';
+      toast('ارتباط زمان‌بندی ذخیره شد', 'ok');
+    }).catch((e) => toast('ذخیرهٔ ارتباط نشد: ' + e, 'err'));
+  };
+  els.schedConnClear.onclick = () => {
+    window.__atria.invoke('schedule_clear_connection', {}).then(() => {
+      els.schedConnLabel.textContent = 'ارتباط زمان‌بندی: ذخیره نشده است';
+      toast('ارتباط زمان‌بندی حذف شد', 'ok');
+    }).catch(() => {});
+  };
+}
+
+/* ---------------- settings wiring (v18 bits) ---------------- */
+function v18WireSettingsBits() {
+  if (els.autoMemVal) {
+    els.autoMemVal.checked = st.settings.auto_mem === true;
+    els.autoMemVal.onchange = () => { st.settings.auto_mem = els.autoMemVal.checked; saveSettings(); };
+  }
+  if (els.speechOutVal) {
+    els.speechOutVal.checked = st.settings.speech_out !== false;
+    els.speechOutVal.onchange = () => { st.settings.speech_out = els.speechOutVal.checked; saveSettings(); };
+  }
+  if (els.projectRepoCheck) els.projectRepoCheck.onclick = () => v18RepoCheck();
+}
+function v18Init() {
+  try { v18WireSnips(); } catch (e) { console.warn('v18 snips', e); }
+  try { v18WireSnippetsModal(); } catch (e) { console.warn('v18 snippets modal', e); }
+  try { v18WireSearch(); } catch (e) { console.warn('v18 search', e); }
+  try { v18WireClipboard(); } catch (e) { console.warn('v18 clipboard', e); }
+  try { v18WireMic(); } catch (e) { console.warn('v18 mic', e); }
+  try { v18WireSchedule(); } catch (e) { console.warn('v18 schedule', e); }
+  try { v18WireSettingsBits(); } catch (e) { console.warn('v18 settings bits', e); }
+  try { v18RenderPresets(); } catch (e) { console.warn('v18 presets', e); }
+  try { v18RenderMcpHub(); } catch (e) { console.warn('v18 mcp hub', e); }
+  try { if (window.__atria && window.__atria.invoke) v18ScheduleBootMerge(); } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', v18Init);

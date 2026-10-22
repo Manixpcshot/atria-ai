@@ -109,3 +109,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+
+/// Extract short, explicit user facts from a text block using the active
+/// connection. Returns at most `max` (title, content) pairs. Powers the
+/// explicit memory button (and the opt-in auto-memory).
+pub async fn extract_memory_facts(
+    cfg: &crate::client::ClientConfig,
+    text: &str,
+    max: usize,
+) -> Result<Vec<(String, String)>, String> {
+    use crate::types::{Block, Message, Role};
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    let prompt = format!(
+        "You are the memory extractor inside the Atria desktop app. From the message below, extract at most {max} facts that the USER explicitly stated about themselves or their own setup (names, roles, projects, preferences, deadlines, technical choices). Ignore hypothetical, third-party, or general-knowledge statements. Respond with ONLY a JSON array of objects \"title\": short Persian title, \"content\": the fact — no prose, no markdown, no extra text. If nothing is worth remembering, respond with [].
+
+---
+{text}"
+    );
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![Block::Text { text: prompt }],
+    }];
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let turn = crate::client::send(cfg, &messages, &[], |_| {}, stop)
+        .await
+        .map_err(|e| format!("استخراج حافظه ناکام بود: {e}"))?;
+    let raw = turn.message.plain_text();
+    let Some(start) = raw.find('[') else {
+        return Ok(Vec::new());
+    };
+    let Some(end) = raw.rfind(']') else {
+        return Ok(Vec::new());
+    };
+    if end < start {
+        return Ok(Vec::new());
+    }
+    let items: Vec<serde_json::Value> =
+        serde_json::from_str(&raw[start..=end]).map_err(|e| format!("پاسخ مدل JSON معتبر نبود: {e}"))?;
+    let mut out = Vec::new();
+    for it in items.into_iter().take(max.max(1)) {
+        let title = it.get("title").and_then(serde_json::Value::as_str).map(str::trim).unwrap_or("");
+        let content = it.get("content").and_then(serde_json::Value::as_str).map(str::trim).unwrap_or("");
+        if title.is_empty() || content.is_empty() {
+            continue;
+        }
+        out.push((title.to_string(), content.to_string()));
+    }
+    Ok(out)
+}

@@ -78,10 +78,11 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "atria-app"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "atria-core",
  "base64 0.22.1",
+ "chrono",
  "reqwest 0.12.28",
  "ring",
  "serde",
@@ -93,11 +94,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "atria-cli"
+version = "0.18.0"
+dependencies = [
+ "atria-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "atria-core"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "flate2",
  "futures",
  "libc",
  "reqwest 0.12.28",

@@ -29,6 +29,10 @@ pub struct McpServer {
     pub command: String,
     /// Arguments for the executable (e.g. `["-y", "@modelcontextprotocol/server-filesystem", "C:/files"]`).
     pub args: Vec<String>,
+    /// Extra environment variables as `K=V` strings (MCP presets / API keys).
+    /// Atria reads them at spawn time; nothing is written to disk by the engine.
+    #[serde(default)]
+    pub env: Vec<String>,
 }
 
 impl McpServer {
@@ -62,7 +66,30 @@ impl McpServer {
         if self.args.iter().any(|a| a.chars().count() > MAX_ARG_LEN) {
             return Err(format!("هر آرگومان حداکثر {MAX_ARG_LEN} کاراکتر"));
         }
+        if self.env.len() > 16 {
+            return Err("حداکثر 16 متغیر محیطی مجاز است".into());
+        }
+        for e in &self.env {
+            if e.chars().count() > 512 {
+                return Err("هر متغیر محیطی حداکثر 512 کاراکتر (K=V)".into());
+            }
+            let (k, _v) = e.split_once('=').ok_or("متغیر محیطی باید به شکل K=V باشد")?;
+            if k.is_empty() || k != k.trim() || k.chars().any(|c| c.is_whitespace()) {
+                return Err("نام متغیر محیطی نامعتبر است".into());
+            }
+        }
         Ok(())
+    }
+
+    /// Parsed `K=V` pairs (validate() guarantees the shape).
+    pub fn env_pairs(&self) -> Vec<(String, String)> {
+        self.env
+            .iter()
+            .filter_map(|e| {
+                let (k, v) = e.split_once('=')?;
+                Some((k.to_string(), v.to_string()))
+            })
+            .collect()
     }
 
     pub fn command_desc(&self) -> String {
@@ -117,9 +144,10 @@ struct Rpc {
 }
 
 impl Rpc {
-    async fn spawn(command: &str, args: &[String]) -> Result<Self, String> {
+    async fn spawn(command: &str, args: &[String], env: &[(String, String)]) -> Result<Self, String> {
         let mut child = tokio::process::Command::new(command)
             .args(args)
+            .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
@@ -189,7 +217,7 @@ impl Rpc {
 /// `tools/list` — the tools a server advertises.
 pub async fn list_tools(server: &McpServer) -> Result<Vec<McpTool>, String> {
     server.validate()?;
-    let mut rpc = Rpc::spawn(server.command.trim(), &server.args).await?;
+    let mut rpc = Rpc::spawn(server.command.trim(), &server.args, &server.env_pairs()).await?;
     let res = (async {
         rpc.send(&serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -232,7 +260,7 @@ pub async fn call_tool(server: &McpServer, tool: &str, args: &serde_json::Value)
 
 async fn call_tool_impl(server: &McpServer, tool: &str, args: &serde_json::Value) -> Result<String, String> {
     server.validate()?;
-    let mut rpc = Rpc::spawn(server.command.trim(), &server.args).await?;
+    let mut rpc = Rpc::spawn(server.command.trim(), &server.args, &server.env_pairs()).await?;
     let res = (async {
         rpc.send(&serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -367,6 +395,7 @@ rl.on('line', (line) => {
             name: "fake".into(),
             command: node().unwrap_or_else(|| "node".into()),
             args: vec!["-e".into(), FAKE_SERVER_JS.to_string()],
+            env: vec![],
         }
     }
 
@@ -416,7 +445,7 @@ rl.on('line', (line) => {
 
     #[tokio::test]
     async fn missing_command_is_a_clean_error() {
-        let s = McpServer { name: "x".into(), command: "definitely-not-a-command-12345".into(), args: vec![] };
+        let s = McpServer { name: "x".into(), command: "definitely-not-a-command-12345".into(), args: vec![], env: vec![] };
         let res = list_tools(&s).await;
         assert!(res.is_err());
     }
@@ -434,11 +463,11 @@ rl.on('line', (line) => {
 
     #[test]
     fn validation_rejects_empty_or_huge() {
-        let s = McpServer { name: "".into(), command: "node".into(), args: vec![] };
+        let s = McpServer { name: "".into(), command: "node".into(), args: vec![], env: vec![] };
         assert!(s.validate().is_err());
-        let s = McpServer { name: "a".into(), command: "".into(), args: vec![] };
+        let s = McpServer { name: "a".into(), command: "".into(), args: vec![], env: vec![] };
         assert!(s.validate().is_err());
-        let mut s = McpServer { name: "a".into(), command: "node".into(), args: (0..20).map(|i| i.to_string()).collect() };
+        let mut s = McpServer { name: "a".into(), command: "node".into(), args: (0..20).map(|i| i.to_string()).collect(), env: vec![] };
         assert!(s.validate().is_err());
         s.args = vec!["x".repeat(5000)];
         assert!(s.validate().is_err());

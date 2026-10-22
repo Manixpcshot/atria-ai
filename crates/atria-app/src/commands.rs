@@ -646,3 +646,252 @@ fn emit_agent_event(app: &AppHandle, ev: AgentEvent) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// v0.18.0: clipboard, run-finished notification, GitHub repo status,
+// memory extraction, drag-drop file reading, and the task scheduler.
+// ---------------------------------------------------------------------------
+
+/// Read the system clipboard (Windows only; elsewhere a friendly error).
+#[tauri::command]
+pub fn clipboard_read() -> Result<String, String> {
+    crate::winos::clipboard_text()
+}
+
+/// Flash the taskbar icon + information beep (run finished while unfocused).
+#[tauri::command]
+pub fn notify_run_done(app: AppHandle) {
+    #[cfg(windows)]
+    {
+        use tauri::Manager;
+        let hwnd = app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize);
+        crate::winos::flash_and_beep(hwnd);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+    }
+}
+
+/// One-line GitHub repository status for the project "repo" card.
+#[tauri::command]
+pub async fn github_repo_info(owner: String, repo: String, state: State<'_, AppState>) -> Result<String, String> {
+    let owner = owner.trim().to_string();
+    let repo = repo.trim().to_string();
+    if owner.is_empty() || repo.is_empty() {
+        return Err("فرمت owner/repo کامل نیست".into());
+    }
+    let root = state.mem_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let token = crate::secrets::get(root, "github-api-token").ok().flatten().unwrap_or_default();
+    atria_core::github::repository(&owner, &repo, &token).await
+}
+
+/// Explicit memory extraction (🧠 button / auto-memory): a small direct
+/// model call returns JSON facts, which are then saved to the memory store.
+#[tauri::command]
+pub async fn memory_extract(payload: serde_json::Value, state: State<'_, AppState>) -> Result<Vec<Note>, String> {
+    let text = payload["text"].as_str().unwrap_or("").to_string();
+    let api_key = payload["api_key"].as_str().unwrap_or("").to_string();
+    let base_url = payload["base_url"].as_str().unwrap_or("").to_string();
+    let model = payload["model"].as_str().unwrap_or("").to_string();
+    let kind = payload["kind"].as_str().unwrap_or("anthropic").to_string();
+    let max = payload["max"].as_u64().unwrap_or(5) as usize;
+    if text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mem_root = state.mem_path.clone();
+    let cfg = ClientConfig {
+        api_key,
+        base_url,
+        model,
+        max_tokens: 1024,
+        temperature: 0.1,
+        system: String::new(),
+        stream: false,
+        tools: false,
+        tool_use_enabled: false,
+        kind: ApiKind::parse(&kind),
+        file_tools: false,
+        workspace: mem_root.parent().unwrap_or_else(|| std::path::Path::new(".")).join("workspace").to_string_lossy().to_string(),
+        app_data: mem_root.parent().unwrap_or_else(|| std::path::Path::new(".")).to_string_lossy().to_string(),
+        web_tools: false,
+        github_tools: false,
+        github_token: String::new(),
+        autonomous_mode: false,
+        full_access_mode: false,
+        full_access_profile: false,
+        full_access_system: false,
+        computer_tools: false,
+        terminal_tools: false,
+        project_root: String::new(),
+        downloads_root: String::new(),
+        web_thinking: false,
+        web_search: false,
+        web_session: String::new(),
+        web_session_out: None,
+        mcp_servers: Vec::new(),
+    };
+    let facts = atria_core::extract_memory_facts(&cfg, &text, max).await?;
+    let mut saved: Vec<Note> = Vec::new();
+    if !facts.is_empty() {
+        let mut mem = MemoryStore::open(&state.mem_path);
+        let before = mem.notes().len();
+        for (title, content) in facts {
+            mem.add(title, content);
+        }
+        saved = mem.notes().to_vec().into_iter().skip(before).collect();
+    }
+    Ok(saved)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FileReadOut {
+    pub name: String,
+    pub size: u64,
+    /// "text" | "binary" | "image"
+    pub kind: String,
+    /// Inline UTF-8 text for small text files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Base64 for images and small binaries (uploaded as attachments).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub b64: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+const MAX_DROP_TEXT: u64 = 200 * 1024;
+const MAX_DROP_BINARY: u64 = 10 * 1024 * 1024;
+
+/// Read files dropped onto the window (paths arrive via the drag-drop event).
+#[tauri::command]
+pub fn files_read(paths: Vec<String>) -> Vec<FileReadOut> {
+    paths.into_iter().take(10).map(|raw| {
+        let p = std::path::PathBuf::from(&raw);
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| raw.clone());
+        let out = match std::fs::metadata(&p) {
+            Ok(meta) if meta.is_file() => {
+                let size = meta.len();
+                let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+                let is_image = ["png", "jpg", "jpeg", "gif", "webp", "bmp"].contains(&ext.as_str());
+                if is_image {
+                    if size > MAX_DROP_BINARY {
+                        FileReadOut { name, size, kind: "image".into(), text: None, b64: None, error: Some("تصویر بزرگ‌تر از ۱۰ مگابایت است".into()) }
+                    } else {
+                        match std::fs::read(&p) {
+                            Ok(bytes) => FileReadOut {
+                                name,
+                                size,
+                                kind: "image".into(),
+                                text: None,
+                                b64: Some(base64::engine::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)),
+                                error: None,
+                            },
+                            Err(e) => FileReadOut { name, size, kind: "image".into(), text: None, b64: None, error: Some(format!("خواندن تصویر نشد: {e}")) },
+                        }
+                    }
+                } else if size <= MAX_DROP_TEXT {
+                    match std::fs::read(&p) {
+                        Ok(bytes) => match std::str::from_utf8(&bytes) {
+                            Ok(t) => FileReadOut { name, size, kind: "text".into(), text: Some(t.to_string()), b64: None, error: None },
+                            Err(_) => FileReadOut {
+                                name,
+                                size,
+                                kind: "binary".into(),
+                                text: None,
+                                b64: Some(base64::engine::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)),
+                                error: None,
+                            },
+                        },
+                        Err(e) => FileReadOut { name, size, kind: "binary".into(), text: None, b64: None, error: Some(format!("خواندن فایل نشد: {e}")) },
+                    }
+                } else {
+                    FileReadOut { name, size, kind: "binary".into(), text: None, b64: None, error: Some("فایل بزرگ‌تر از ۱۰ مگابایت است؛ برای متن‌های بزرگ extract_text را در چت بخواه".into()) }
+                }
+            }
+            Ok(_) => FileReadOut { name, size: 0, kind: "binary".into(), text: None, b64: None, error: Some("فقط فایل‌های عادی مجاز است".into()) },
+            Err(e) => FileReadOut { name, size: 0, kind: "binary".into(), text: None, b64: None, error: Some(format!("دسترسی به فایل نشد: {e}")) },
+        };
+        out
+    }).collect()
+}
+
+// ---- Scheduler commands ---------------------------------------------------
+
+#[tauri::command]
+pub fn schedule_list() -> Vec<crate::scheduler::ScheduledJob> {
+    crate::scheduler::load_jobs(&crate::commands::atria_root())
+}
+
+#[tauri::command]
+pub fn schedule_upsert(job: crate::scheduler::ScheduledJob) -> Result<Vec<crate::scheduler::ScheduledJob>, String> {
+    let id_ok = !job.id.is_empty() && job.id.len() <= 96 && job.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if !id_ok {
+        return Err("شناسهٔ وظیفه نامعتبر است".into());
+    }
+    if job.label.trim().is_empty() || job.label.chars().count() > 200 {
+        return Err("برچسب وظیفه خالی یا بیش‌ازحد بلند است".into());
+    }
+    if job.prompt.trim().is_empty() || job.prompt.chars().count() > 4_000 {
+        return Err("متن وظیفه خالی یا بیش‌ازحد بلند است".into());
+    }
+    if crate::scheduler::next_run_epoch(&job).is_none() {
+        return Err("زمان اجرا باید به صورت ISO-8601 باشد (مثلاً 2026-10-23T09:30:00Z)".into());
+    }
+    let root = crate::commands::atria_root();
+    let mut jobs = crate::scheduler::load_jobs(&root);
+    match jobs.iter_mut().find(|j| j.id == job.id) {
+        Some(j) => *j = job,
+        None => jobs.push(job),
+    }
+    if jobs.len() > 32 {
+        return Err("حداکثر 32 وظیفهٔ زمان‌بندی مجاز است".into());
+    }
+    crate::scheduler::save_jobs(&root, &jobs)?;
+    Ok(jobs)
+}
+
+#[tauri::command]
+pub fn schedule_delete(id: String) -> Vec<crate::scheduler::ScheduledJob> {
+    let root = crate::commands::atria_root();
+    let mut jobs = crate::scheduler::load_jobs(&root);
+    jobs.retain(|j| j.id != id);
+    let _ = crate::scheduler::save_jobs(&root, &jobs);
+    jobs
+}
+
+#[tauri::command]
+pub fn schedule_set_connection(conn: crate::scheduler::SchedulerConn) -> Result<(), String> {
+    if conn.base_url.trim().is_empty() || conn.model.trim().is_empty() {
+        return Err("پایگاه و مدل ارتباط زمان‌بندی لازم است".into());
+    }
+    crate::scheduler::save_conn(&crate::commands::atria_root(), &conn)
+}
+
+#[tauri::command]
+pub fn schedule_clear_connection() {
+    crate::scheduler::clear_conn(&crate::commands::atria_root());
+}
+
+#[tauri::command]
+pub fn schedule_has_connection() -> bool {
+    crate::scheduler::load_conn(&crate::commands::atria_root()).is_some()
+}
+
+/// Result lines not yet mirrored into the ⏰ chat (app was closed at fire time).
+#[tauri::command]
+pub fn schedule_unprocessed() -> Vec<crate::scheduler::ScheduleResult> {
+    crate::scheduler::read_log(&crate::commands::atria_root())
+}
+
+/// Mark log entries up to (and including) `ran_at` as mirrored.
+#[tauri::command]
+pub fn schedule_ack(ran_at: String) -> usize {
+    crate::scheduler::ack_log(&crate::commands::atria_root(), &ran_at)
+}

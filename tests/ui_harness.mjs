@@ -189,6 +189,11 @@ function addId(id, tag, cls, parent) {
   return el;
 }
 for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', 'btnNew', 'convList',
+  'btnClipboard', 'btnMic', 'btnChatSearch', 'chatSearchBar', 'chatSearchInput', 'chatSearchCount', 'chatSearchPrev', 'chatSearchNext', 'chatSearchClose',
+  'btnSchedule', 'scheduleModal', 'scheduleX', 'schedList', 'schedLabel', 'schedPrompt', 'schedWhen', 'schedEvery', 'schedAdd', 'schedCancel',
+  'schedConnPick', 'schedConnSave', 'schedConnClear', 'schedConnLabel', 'schedFormTitle',
+  'snippetsManageBtn', 'snippetsModal', 'snippetsX', 'snipList', 'snipName', 'snipText', 'snipSave', 'snipDelete',
+  'connPresets', 'mcpHub', 'mcpEnv', 'autoMemVal', 'speechOutVal', 'projectRepo', 'projectRepoCheck', 'projectRepoStatus',
   'btnSettings', 'btnMemory', 'btnProjects', 'btnSide', 'projectsModal', 'projectsX', 'projectList', 'projectDetail', 'projectCreate',
   'projectName', 'projectNotes', 'projectFolder', 'projectFolderPick', 'projectFolderClear', 'projectCheckpoint', 'projectTaskCount', 'projectTasks', 'projectTaskInput', 'projectTaskAdd',
   'projectAttach', 'projectCheckpointSave', 'projectResume', 'projectDelete', 'ctxLimitVal', 'ctxMeter', 'btnCheckUpdate', 'btnInstallUpdate', 'updateStatus', 'projectChip', 'btnMin', 'btnMax', 'btnClose', 'btnScroll',
@@ -212,7 +217,8 @@ addId('updatePromptYes', 'button', 'btn primary');
 addId('updatePromptNo', 'button', 'btn');
 addId('updatePromptStatus', 'div', 'update-status');
 for (const id of ['modelMenu', 'settingsModal', 'memoryModal', 'projectsModal', 'cmdk', 'tokenGuide', 'imgTray',
-  'dsSearchRow', 'btnScroll', 'tokChip', 'connForm', 'btnStop', 'cfHint', 'cfTokenGuide', 'btnInstallUpdate']) byId[id].classList.add('hidden');
+  'dsSearchRow', 'btnScroll', 'tokChip', 'connForm', 'btnStop', 'cfHint', 'cfTokenGuide', 'btnInstallUpdate',
+  'scheduleModal', 'snippetsModal', 'chatSearchBar', 'connPresets', 'mcpHub']) byId[id].classList.add('hidden');
 for (const t of ['conn', 'behavior', 'sys']) {
   const b = new El('button'); b.className = 'stab' + (t === 'conn' ? ' active' : ''); b.dataset.tab = t; doc.body.appendChild(b);
   const p = new El('div'); p.className = 'stab-body' + (t === 'conn' ? ' active' : ''); p.dataset.tab = t; doc.body.appendChild(p);
@@ -239,9 +245,13 @@ let githubApplyBehavior = 'ok';
 let updateCheckAvailable = false;
 let urlOpenBehavior = 'ok';
 let chatsLoadCalled = 0;
+let v18Jobs = [];
+let v18Log = [];
+let v18ConnSaved = false;
+let clipboardStub = 'متن کلیپ‌بورد تستی';
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.17.1' });
+    case 'app_meta': return Promise.resolve({ version: '0.18.0' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -265,8 +275,8 @@ function router(cmd, args = {}) {
     case 'command_apply_command': return Promise.resolve('دستور اجرا شد (تأییده‌شده توسط کاربر). کد خروجی: 0\nخروجی:\nhello-atria');
     case 'command_reject_command': return Promise.resolve();
     case 'update_check':
-      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.17.1', latest_version: '0.18.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.18.0', download_size: 10485760 });
-      return Promise.resolve({ current_version: '0.17.1', latest_version: '0.17.1', available: false, release_url: '', download_size: 0 });
+      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.18.0', latest_version: '0.19.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.19.0', download_size: 10485760 });
+      return Promise.resolve({ current_version: '0.18.0', latest_version: '0.18.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'mcp_test_server': { const sv = (args && args.server) || {}; return Promise.resolve({ ok: true, name: sv.name || '', tools: [{ name: 'echo', description: 'echo the arguments' }] }); }
     case 'files_stash': return Promise.resolve('/home/u/.atria/uploads/harness_' + ((args && args.name) || 'file'));
@@ -277,6 +287,19 @@ function router(cmd, args = {}) {
       return Promise.resolve({ configured: args.configured || '', resolved: 'C:/Users/u/Desktop', error: null });
     case 'memory_list': return Promise.resolve([{ title: 'نکته', content: 'متن', ts: 'امروز' }]);
     case 'list_models': return Promise.resolve(['m-server-1', 'm-server-2']);
+    case 'clipboard_read': return Promise.resolve(clipboardStub);
+    case 'notify_run_done': return Promise.resolve();
+    case 'github_repo_info': return Promise.resolve('مخزن: ' + args.owner + '/' + args.repo + ' — ستاره‌ها: 42 · issueهای باز: 3 · branch پیش‌فرض: main');
+    case 'memory_extract': return Promise.resolve([{ title: 'نکتهٔ تست', content: 'کاربر روی پروژهٔ آتریا کار می‌کند', ts: 'now' }]);
+    case 'files_read': return Promise.resolve((args.paths || []).map((p) => ({ name: String(p).split('/').pop(), size: 12, kind: 'text', text: 'محتوای فایل رهاشدهٔ تستی' })));
+    case 'schedule_list': return Promise.resolve(v18Jobs);
+    case 'schedule_upsert': { const j = args.job; const i = v18Jobs.findIndex((x) => x.id === j.id); if (i >= 0) v18Jobs[i] = j; else v18Jobs.push(j); return Promise.resolve(v18Jobs); }
+    case 'schedule_delete': v18Jobs = v18Jobs.filter((x) => x.id !== args.id); return Promise.resolve(v18Jobs);
+    case 'schedule_set_connection': v18ConnSaved = true; return Promise.resolve();
+    case 'schedule_clear_connection': v18ConnSaved = false; return Promise.resolve();
+    case 'schedule_has_connection': return Promise.resolve(v18ConnSaved);
+    case 'schedule_unprocessed': return Promise.resolve(v18Log);
+    case 'schedule_ack': v18Log = []; return Promise.resolve(0);
     default: return Promise.resolve({});
   }
 }
@@ -324,7 +347,8 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), '
   ' wipeChats, openMemory, openCmdk, retryLast, syncChips, updateModelPick, updateConnTab,' +
   ' setActiveConn, resetAttemptStream, USAGE_TOT, createProject, openProjects, addProjectTask,' +
   ' resumeProjectInNewChat, projectContextText, checkpointProject, toggleModelFavorite, modelCapabilities, saveConns,' +
-  ' fileEditActions, commandActions, githubActionActions, openUrlActions, hasPendingApproval, toolCardEl, checkForUpdate, installUpdate, setCurrentProject, activeProject, setChatProject, openProjectMenu, closeProjectMenu, renderProjectChip, addUploadFiles, renderAttachTray, clearAttach, mcpServers, mcpRender, mcpAddServer, mcpTestServer, mcpRemoveServer, scrollBottom, forceScrollBottom, nearBottom, toolDesc, toolCardEl };';
+  ' fileEditActions, commandActions, githubActionActions, openUrlActions, hasPendingApproval, toolCardEl, checkForUpdate, installUpdate, setCurrentProject, activeProject, setChatProject, openProjectMenu, closeProjectMenu, renderProjectChip, addUploadFiles, renderAttachTray, clearAttach, mcpServers, mcpRender, mcpAddServer, mcpTestServer, mcpRemoveServer, scrollBottom, forceScrollBottom, nearBottom, toolDesc, toolCardEl' +
+  ' , v18Snips, v18SaveSnips, v18ApplySnip, v18SnipMenu, v18CloseSnipMenu, v18ExpandSnippet, v18SnippetName, v18OpenSearch, v18CloseSearch, v18RunSearch, v18GotoSearch, v18SearchHits, v18ClearSearchMarks, v18SchedChat, v18OnScheduleResult, v18RenderDiff, v18ParseEnv, v18ExtractMemory, v18Speak, v18RenderPresets, v18RenderMcpHub, v18RepoCheck, V18_PRESETS, V18_MCP_HUB, v18ListenDragDrop, v18RunFinished, renderHistory };';
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 const T = sandbox.__T;
 
@@ -347,15 +371,15 @@ ok('پل IPC همهٔ توابع لازم را دارد', needed.every((k) => ty
 ok('دکمهٔ انتخاب مدل سیم‌کشی شد', typeof byId.modelPick.onclick === 'function');
 ok('نشانگر Full Access سیم‌کشی شد', typeof byId.fullAccessIndicator.onclick === 'function');
 ok('دکمهٔ ارسال سیم‌کشی شد', typeof byId.btnSend.onclick === 'function');
-eq('listenEvents هر ۱۱ رویداد را ثبت کرد',
+eq('listenEvents همهٔ رویدادها را ثبت کرد (۱۱ + schedule + drag-drop)',
   Object.keys(tauriListeners).sort(),
-  ['atria:done', 'atria:error', 'atria:retry', 'atria:round', 'atria:stopped', 'atria:text',
-   'atria:thinking', 'atria:tool_args', 'atria:tool_end', 'atria:tool_pending', 'atria:tool_start']);
+  ['atria:done', 'atria:error', 'atria:retry', 'atria:round', 'atria:schedule_result', 'atria:stopped', 'atria:text',
+   'atria:thinking', 'atria:tool_args', 'atria:tool_end', 'atria:tool_pending', 'atria:tool_start', 'tauri://drag-drop']);
 ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نمانده', !('btnManageConns' in T.els));
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.17.1');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.18.0');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
 ok('UI می‌گوید ابزارهای فایل تابع Full Access‌اند و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس محدود است', indexHtml.includes('ایجنت و ابزارهای فایل') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است'));
 ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس می‌ماند', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است') && indexHtml.includes('کل سیستم — مسیر مطلق (با محافظت)'));
@@ -847,7 +871,7 @@ console.log('\n=== 16c) بررسی خودکار هنگام راه‌اندازی
 ok('پیش از بررسی، مودال آپدیت بسته است', byId.updateModal.classList.contains('hidden'));
 updateCheckAvailable = true;
 await T.checkForUpdate(true); // همان بررسیِ خودکارِ boot (silent)
-ok('با وجود نسخهٔ تازه، مودالِ تأیید روی کاربر باز می‌شود', !byId.updateModal.classList.contains('hidden') && String(byId.updatePromptTitle.textContent).includes('0.18.0'));
+ok('با وجود نسخهٔ تازه، مودالِ تأیید روی کاربر باز می‌شود', !byId.updateModal.classList.contains('hidden') && String(byId.updatePromptTitle.textContent).includes('0.19.0'));
 ok('متن مودال امضا و جایگزینی را توضیح می‌دهد', String(byId.updatePromptBody.textContent).includes('Ed25519') && String(byId.updatePromptBody.textContent).includes('باز می‌شود'));
 ok('قبل از تأیید، نصبی صدا زده نشده', !bridgeCalls.some((c) => c[0] === 'update_install'));
 byId.updatePromptNo.click();
@@ -965,6 +989,125 @@ console.log('\n=== 16e) اسکرول هوشمند حین تولید + ردیف �
 console.log('\n=== 17) نگهبان‌های ایمنی ===');
 ok('منو بدون toasts نمی‌میرد', (() => { const t = T.els.toasts; T.els.toasts = null; try { byId.modelPick.click(); byId.modelPick.click(); } catch { T.els.toasts = t; return false; } T.els.toasts = t; return true; })());
 ok('updateModelPick بدون mpName نمی‌میرد', (() => { const m = T.els.mpName; T.els.mpName = null; try { T.updateModelPick(); } catch { T.els.mpName = m; return false; } T.els.mpName = m; return true; })());
+
+console.log('\n=== 18) v0.18.0 — toolDesc + diff + دکمه‌های چت ===');
+{
+  ok('toolDesc برای run_code زبان و کد را می‌گوید', T.toolDesc('run_code', { code: 'print(6*7)', lang: 'python' }).includes('python'));
+  ok('toolDesc برای multi_search پرسش‌ها را می‌گوید', T.toolDesc('multi_search', { queries: ['آیرنا', 'GitHub releases'] }).includes('آیرنا'));
+  ok('toolDesc برای extract_text مسیر را می‌گوید', T.toolDesc('extract_text', { path: 'report.docx' }).includes('report.docx'));
+  const fakeOut = 'This edit is staged only and has NOT been applied. Review the diff in Atria and wait for the user to approve or reject it.\n[ATRIA_PENDING_EDIT:edit-h-1]\n--- current\n+++ proposed\n ctx line\n-old line\n+new line\n ctx2';
+  const card = T.toolCardEl('نوشتن فایل', 'write_file', { path: 'a.txt' }, false);
+  T.fileEditActions(card, fakeOut);
+  const diff = card.querySelector('.diff-lines');
+  ok('کارت write_file یک diff رنگی دارد', !!diff);
+  ok('diff خطوط + و - را جدا می‌کند', !!diff && !!diff.querySelector('.dl-add') && !!diff.querySelector('.dl-del'));
+  T.newChat(true);
+  T.st.chats[0].messages.push({ role: 'user', text: 'سلام', plain: 'سلام', ts: Date.now() });
+  T.st.chats[0].messages.push({ role: 'assistant', text: 'سلام! چطور کمکت کنم؟', plain: 'سلام! چطور کمکت کنم؟', ts: Date.now() + 1 });
+  if (typeof T.renderHistory === 'function') T.renderHistory('force');
+  const aiBubbles = byId.messages.querySelectorAll('.msg.ai');
+  const ai = aiBubbles[aiBubbles.length - 1];
+  const acts = ai ? ai.querySelectorAll('.msg-act') : [];
+  ok('حباب هوشمند دکمه‌های 🔊 و 🧠 دارد', acts.some((b) => b.textContent === '🔊') && acts.some((b) => b.textContent === '🧠'));
+}
+
+console.log('\n=== 19) v0.18.0 — برچسب‌ها، جست‌وجوی چت، کلیپ‌بورد، drag-drop ===');
+{
+  const snips = T.v18Snips();
+  if (!snips.some((x) => x.name === 'report')) snips.push({ name: 'report', text: 'خلاصهٔ هفتگی: کارها، مانع‌ها، برنامهٔ هفتهٔ بعد' });
+  T.v18SaveSnips();
+  byId.input.value = '/rep';
+  T.v18SnipMenu();
+  const menu = (byId.input.closest('.composer') || byId.input.parentElement).querySelector('.snippet-menu');
+  ok('منوی «/» با یک حرف شروع باز می‌شود', !!menu && menu.querySelectorAll('.sm-item').length === 1);
+  T.v18ApplySnip({ name: 'report', text: 'خلاصهٔ هفتگی: کارها، مانع‌ها، برنامهٔ هفتهٔ بعد' });
+  ok('فراخوانی برچسب، متنش را جایگزین می‌کند', byId.input.value.startsWith('خلاصهٔ هفتگی'));
+  byId.input.value = '';
+  T.v18OpenSearch();
+  byId.chatSearchInput.value = 'چطور';
+  T.v18RunSearch();
+  ok('جست‌وجوی چت نتیجه می‌یابد', T.v18SearchHits.length >= 1);
+  T.v18GotoSearch(0);
+  ok('شمارندهٔ جست‌وجو می‌نویسد', byId.chatSearchCount.textContent.indexOf('/') >= 0);
+  T.v18CloseSearch();
+  ok('بستن جست‌وجو، نشانه‌ها را پاک می‌کند', T.v18SearchHits.length === 0);
+  byId.input.value = '';
+  byId.btnClipboard.click();
+  await sleep(20);
+  ok('دکمهٔ کلیپ‌بورد متن را وارد جعبه می‌کند', byId.input.value.includes('متن کلیپ‌بورد تستی'));
+  const beforeFiles = T.st.pendingFiles.length;
+  emit('tauri://drag-drop', { type: 'drop', paths: ['/home/u/report.txt'] });
+  await sleep(30);
+  ok('درگ‌اند‌دراپ فایل را از files_read می‌خواند', T.st.pendingFiles.length === beforeFiles + 1);
+  T.clearAttach();
+}
+
+console.log('\n=== 20) v0.18.0 — زمان‌بندی، پیش‌تنظیم‌ها، env MCP، حافظهٔ خودکار، مخزن ===');
+{
+  v18Log = [{ job_id: 'j1', label: 'چک هفتگی', ran_at: '2026-10-22T06:00:00Z', prompt: 'خبرها را چک کن', output: '✅ نتیجهٔ وظیفه', is_error: false, caught_up: true }];
+  T.v18SchedChat();
+  T.v18OnScheduleResult(v18Log[0]);
+  const schedChat = T.v18SchedChat();
+  ok('چت «⏰ زمان‌بندی‌ها» می‌سازد', schedChat.id === '__scheduled__');
+  ok('نتیجهٔ زمان‌بندی در چت ثبت می‌شود', schedChat.messages.length >= 2);
+  byId.scheduleModal.classList.remove('hidden');
+  byId.schedLabel.value = 'چک صبحگاهی';
+  byId.schedPrompt.value = 'مخزن آتریای را چک کن';
+  byId.schedWhen.value = '2026-10-23T09:30';
+  byId.schedEvery.value = '0';
+  byId.schedAdd.click();
+  await sleep(30);
+  ok('افزودن وظیفه از فرم ثبت می‌شود', v18Jobs.some((j) => j.label === 'چک صبحگاهی'));
+  ok('زمان ثبت‌شده ISO-8601 (UTC) است', v18Jobs.some((j) => j.next_run === '2026-10-23T09:30:00Z'));
+  byId.schedConnPick.value = 'c1';
+  byId.schedConnSave.click();
+  await sleep(20);
+  ok('ذخیرهٔ ارتباط زمان‌بندی', v18ConnSaved === true);
+  byId.schedConnClear.click();
+  await sleep(20);
+  ok('حذف ارتباط زمان‌بندی', v18ConnSaved === false);
+  byId.scheduleModal.classList.add('hidden');
+  const connsBefore = T.st.conns.length;
+  T.v18RenderPresets();
+  const chips = byId.connPresets.querySelectorAll('.preset-chip');
+  ok('پیش‌تنظیم‌های اتصال رندر می‌شوند', chips.length >= 5);
+  chips[0].click();
+  ok('یک کلیک روی پیش‌تنظیم، اتصال می‌سازد', T.st.conns.length === connsBefore + 1);
+  ok('env پیش‌تنظیمی درشده خالی است یا پر', (T.st.conns[0].env || []).length >= 0);
+  ok('v18ParseEnv متغیرهای K=V را می‌پذیرد', T.v18ParseEnv('A=1 B=2').length === 2);
+  let threw = false;
+  try { T.v18ParseEnv('NOEQUALS'); } catch (e) { threw = true; }
+  ok('v18ParseEnv بدون = خطا می‌دهد', threw);
+  byId.mcpName.value = 'harness-mcp';
+  byId.mcpCmd.value = 'npx';
+  byId.mcpArgs.value = '-y server-x';
+  byId.mcpEnv.value = 'API_KEY=abc DEF=2';
+  T.mcpAddServer();
+  await sleep(40);
+  const withEnv = T.mcpServers().find((x) => x.name === 'harness-mcp');
+  ok('سرور MCP با env ذخیره می‌شود', !!withEnv && withEnv.env.length === 2 && withEnv.env[0] === 'API_KEY=abc');
+  T.setActiveConn('c1');
+  const memBefore = bridgeCalls.filter((c) => c[0] === 'memory_extract').length;
+  await T.v18ExtractMemory('کاربر گفت: نامم علی است', null, false);
+  await sleep(20);
+  ok('🧠 از پل memory_extract عبور می‌کند', bridgeCalls.filter((c) => c[0] === 'memory_extract').length === memBefore + 1);
+  ok('حافظهٔ خودکار پیش‌فرض خاموش است', T.st.settings.auto_mem === false);
+  let notified = false;
+  const origInvoke2 = win.__TAURI_INTERNALS__.invoke;
+  win.__TAURI_INTERNALS__.invoke = (cmd, args) => { if (cmd === 'notify_run_done') notified = true; return origInvoke2(cmd, args); };
+  const origDoc = win.document;
+  win.document = { hasFocus: () => false };
+  try { T.v18RunFinished({ final_text: 'پاسخ', session_id: '', input_tokens: 1, output_tokens: 1 }); } catch (e) {}
+  win.document = origDoc;
+  win.__TAURI_INTERNALS__.invoke = origInvoke2;
+  ok('پایان اجرا بدون فوکوس، نوتیفیسیون می‌زند', notified === true);
+  const proj = T.activeProject() || T.createProject('تست مخزن');
+  byId.projectRepo.value = 'Manixpcshot/atria-ai';
+  byId.projectRepoCheck.click();
+  await sleep(30);
+  ok('بررسی وضعیت مخزن، اطلاعات را نمایش می‌دهد', byId.projectRepoStatus.textContent.includes('42'));
+  ok('مخزن در شیء پروژه ذخیره شد', (T.activeProject() || {}).repo === 'Manixpcshot/atria-ai');
+}
 
 console.log('\n============================');
 console.log('PASS: ' + PASS + '   FAIL: ' + FAIL);

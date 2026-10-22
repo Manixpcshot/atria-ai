@@ -3,8 +3,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod scheduler;
 mod secrets;
 mod updates;
+mod winos;
 
 use commands::AppState;
 use std::sync::atomic::AtomicBool;
@@ -65,6 +67,10 @@ fn main() {
             .focused(true)
             .build()?;
 
+            // v0.18.0: scheduler thread + global hotkey (Ctrl+Alt+A).
+            scheduler::spawn(app.handle().clone());
+            let _ = winos::start_hotkey(app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -102,6 +108,19 @@ fn main() {
             commands::close_win,
             commands::minimize_win,
             commands::maximize_win,
+            commands::clipboard_read,
+            commands::notify_run_done,
+            commands::github_repo_info,
+            commands::memory_extract,
+            commands::files_read,
+            commands::schedule_list,
+            commands::schedule_upsert,
+            commands::schedule_delete,
+            commands::schedule_set_connection,
+            commands::schedule_clear_connection,
+            commands::schedule_has_connection,
+            commands::schedule_unprocessed,
+            commands::schedule_ack,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Atria app");

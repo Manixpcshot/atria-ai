@@ -55,6 +55,7 @@
         <nav class="conv-list" id="convList"></nav>
         <div class="side-footer">
           <button class="side-btn" id="btnProjects">📁&nbsp; پروژه‌ها و ادامهٔ کار</button>
+          <button class="side-btn" id="btnSchedule">⏰&nbsp; زمان‌بندی‌ها</button>
           <button class="side-btn" id="btnSettings">⚙︎&nbsp; تنظیمات</button>
           <button class="side-btn" id="btnMemory">🧠&nbsp; حافظهٔ بلندمدت</button>
           <div class="engine-note"><span class="dot-live"></span> Rust engine · Tauri v2</div>
@@ -63,6 +64,13 @@
 
       <section class="chat">
         <div class="messages" id="messages"></div>
+        <div class="chat-search hidden" id="chatSearchBar">
+          <input type="text" id="chatSearchInput" placeholder="جست‌وجو در این گفتگو…" dir="auto">
+          <span class="cs-count" id="chatSearchCount"></span>
+          <button class="cs-nav" id="chatSearchPrev" type="button" title="نتیجهٔ قبلی">↑</button>
+          <button class="cs-nav" id="chatSearchNext" type="button" title="نتیجهٔ بعدی">↓</button>
+          <button class="cs-nav" id="chatSearchClose" type="button" title="بستن">✕</button>
+        </div>
 
         <div class="empty" id="empty">
           <div class="orb"><img src="logo.svg" alt=""></div>
@@ -101,6 +109,9 @@
             <div class="mode-chips">
               <input type="file" id="fileInput" multiple hidden>
               <button class="mode-chip" id="btnAttach" title="اپلود فایل و تصویر — تصویر برای مدل‌های ویژن‌دار، فایل برای تحلیل">📎 فایل و تصویر</button>
+              <button class="mode-chip" id="btnClipboard" type="button" title="ورود متن کلیپ‌بورد به جعبهٔ نوشتن (Windows)">📋 کلیپ‌بورد</button>
+              <button class="mode-chip" id="btnMic" type="button" title="ورودی گفتاری (فارسی) — روی Windows با مرورگر داخلی">🎤 گفتار</button>
+              <button class="mode-chip" id="btnChatSearch" type="button" title="جست‌وجو در این گفتگو">🔍 جست‌وجو</button>
                             <button class="mode-chip full-access-mode" id="fullAccessIndicator" type="button" aria-pressed="false" title="Full Access خاموش است؛ برای خودکارشدن ابزارهای مجاز کلیک کن">Full Access: خاموش</button>
               <button class="mode-chip" id="chipThink">🧠 تفکر</button>
                           </div>
@@ -147,6 +158,10 @@
           <div class="conns-body">
             <aside class="conn-list-col">
               <button class="btn primary full" id="connAdd">＋ اتصال جدید</button>
+              <div class="conn-presets">
+                <span class="cp-label">اتصال‌های آماده — یک کلیک:</span>
+                <div class="conn-preset-row" id="connPresets"></div>
+              </div>
               <div class="conn-list" id="connList"></div>
             </aside>
           <section class="conn-form-col hidden" id="connForm">
@@ -240,6 +255,27 @@
             </div>
             <label class="switch-field sm"><input type="checkbox" id="streamVal"><span class="switch"></span></label>
           </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">🧠 حافظهٔ خودکار</div>
+              <div class="set-desc">پس از هر پاسخ، نکات صریحِ دربارهٔ خودت با یک فراخوانی کوچک ذخیره شوند. <b>پیش‌فرض خاموش</b> — روشن‌کردن آن یعنی هر پاسخ یک بار به مدل می‌رود.</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="autoMemVal"><span class="switch"></span></label>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">🔊 خروجی گفتاری</div>
+              <div class="set-desc">دکمهٔ «گوینده» کنار پاسخ‌ها؛ متن را با صدای مرورگر می‌خواند</div>
+            </div>
+            <label class="switch-field sm"><input type="checkbox" id="speechOutVal" checked><span class="switch"></span></label>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-label">📝 برچسب‌های شخصی (Snippets)</div>
+              <div class="set-desc">با «/» در جعبهٔ نوشتن، متن‌های ذخیره‌شده‌ات را به‌سرعت فراخوانی کن</div>
+            </div>
+            <button class="btn tiny" id="snippetsManageBtn" type="button">مدیریت…</button>
+          </div>
           <div class="set-row hidden" id="dsSearchRow">
             <div class="set-row-text">
               <div class="set-label">🔎 جست‌وجوی وب دیپ‌سیک</div>
@@ -305,10 +341,15 @@
           </div>
           <div id="mcpList"></div>
           <div class="field">
+            <div class="mcp-hub">
+              <span class="cp-label">Atria Hub — پیش‌تنظیم‌های آمادهٔ MCP:</span>
+              <div class="mcp-hub-row" id="mcpHub"></div>
+            </div>
             <div class="mcp-add-row">
               <input type="text" id="mcpName" placeholder="نام (مثلاً filesystem)" style="flex:0 0 140px">
               <input type="text" id="mcpCmd" placeholder="دستور (مثلاً npx)" dir="ltr" style="flex:0 0 90px">
               <input type="text" id="mcpArgs" placeholder="آرگومان‌ها (مثلاً -y @modelcontextprotocol/server-filesystem C:/files)" dir="ltr" style="flex:1">
+              <input type="text" id="mcpEnv" placeholder="متغیرهای محیطی (اختیاری: K=V K2=V2)" dir="ltr" style="flex:1">
               <button class="btn" id="mcpAddBtn" type="button">➕ افزودن و تست</button>
             </div>
             <span class="fhint">پیش‌نمایش: هر ابزار MCP پیش از اجرا در گفتگو با برچسب «ابزار MCP» نمایش داده می‌شود. سرورهای بی‌پاسخ فقط ابزار نمی‌دهند و کار دیگر را مختل نمی‌کنند.</span>
@@ -404,6 +445,13 @@
               <button class="btn tiny" id="projectFolderClear" type="button">پاک کردن</button>
             </div>
             <span class="fhint">وقتی پوشه تعیین است، همهٔ کارِ این پروژه — خواندن/نوشتن فایل، دانلودهای وب و دستورات ترمینال — در همان پوشه انجام می‌شود. کاملاً اختیاری است؛ بدون پوشه، رفتار امروز (ورک‌اسپیس) حفظ می‌شود.</span>
+          </div>
+          <div class="field"><label class="flabel" for="projectRepo">مخزن GitHub (اختیاری، owner/repo)</label>
+            <div class="project-folder-row">
+              <input id="projectRepo" type="text" dir="ltr" placeholder="مثل Manixpcshot/atria-ai">
+              <button class="btn tiny" id="projectRepoCheck" type="button">بررسی وضعیت…</button>
+            </div>
+            <div class="project-repo-status fhint" id="projectRepoStatus" hidden></div>
           </div>
           <div class="field"><label class="flabel" for="projectNotes">یادداشت و زمینهٔ ماندگار</label><textarea id="projectNotes" rows="4" dir="auto" placeholder="هدف، تصمیم‌ها، محدودیت‌ها…"></textarea></div>
           <div class="project-checkpoint" id="projectCheckpoint">هنوز نقطهٔ ذخیره‌ای ثبت نشده است.</div>
@@ -561,6 +609,61 @@
 <div class="project-menu hidden" id="projectMenu"></div>
 <div class="project-menu hidden" id="projectMenu"></div>
 <div class="project-menu hidden" id="projectMenu"></div>
+
+  <!-- ============ v0.18.0: Scheduler (⏰) ============ -->
+  <div class="modal-backdrop hidden" id="scheduleModal">
+    <section class="project-modal glass" role="dialog" aria-modal="true" aria-labelledby="scheduleTitle">
+      <div class="modal-head">
+        <div><h2 id="scheduleTitle">⏰ زمان‌بندی‌ها</h2><p class="project-intro">وظایف هر ۳۰ ثانیه بررسی می‌شوند؛ نتیجهٔ هر اجرا در چت «⏰ زمان‌بندی‌ها» ثبت می‌شود. اگر برنامهٔ آتریا در لحظهٔ اجرا بسته باشد، نتیجه به‌صورت «در انتظار» ذخیره شده و در اولین بازگشایی به چت منتقل می‌شود.</p></div>
+        <button class="x" id="scheduleX" type="button">✕</button>
+      </div>
+      <div class="sched-body">
+        <div class="sched-conn" id="schedConn">
+          <span class="fhint" id="schedConnLabel">ارتباط زمان‌بندی: ذخیره نشده است</span>
+          <div class="sched-conn-actions">
+            <select id="schedConnPick"></select>
+            <button class="btn tiny" id="schedConnSave" type="button">ذخیرهٔ ارتباط</button>
+            <button class="btn tiny danger" id="schedConnClear" type="button">حذف</button>
+          </div>
+        </div>
+        <div class="sched-list" id="schedList"></div>
+        <div class="sched-form">
+          <div class="sched-form-title" id="schedFormTitle">وظیفهٔ جدید</div>
+          <div class="sched-form-grid">
+            <label class="flabel">برچسب <input type="text" id="schedLabel" dir="auto" maxlength="120" placeholder="مثلاً چک اخبار GitHub"></label>
+            <label class="flabel">متن وظیفه (پیامی که به مدل داده می‌شود) <textarea id="schedPrompt" rows="2" dir="auto" placeholder="مثلاً: مخزن Manixpcshot/atria-ai را چک کن و اگر issue باز جدید است خلاصه کن"></textarea></label>
+            <label class="flabel">زمان اجرا (UTC) <input type="datetime-local" id="schedWhen" dir="ltr" step="60"></label>
+            <label class="flabel">تکرار هر (دقیقه؛ ۰ = یک‌بار) <input type="number" id="schedEvery" min="0" max="1440" step="1" dir="ltr" value="0"></label>
+          </div>
+          <div class="sched-form-actions">
+            <button class="btn primary tiny" id="schedAdd" type="button">＋ افزودن / ذخیره</button>
+            <button class="btn tiny hidden" id="schedCancel" type="button">لغو ویرایش</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============ v0.18.0: Snippets manager ============ -->
+  <div class="modal-backdrop hidden" id="snippetsModal">
+    <section class="project-modal glass" role="dialog" aria-modal="true" aria-labelledby="snippetsTitle">
+      <div class="modal-head">
+        <div><h2 id="snippetsTitle">📝 برچسب‌های شخصی</h2><p class="project-intro">هر برچسب با «/نام» در جعبهٔ نوشتن فراخوانی می‌شود و متنش جایگزین می‌گردد. فقط روی دستگاه تو ذخیره می‌شوند.</p></div>
+        <button class="x" id="snippetsX" type="button">✕</button>
+      </div>
+      <div class="snip-body">
+        <div class="snip-list" id="snipList"></div>
+        <div class="snip-form">
+          <label class="flabel">نام برچسب (بدون «/») <input type="text" id="snipName" dir="ltr" maxlength="40" placeholder="report"></label>
+          <label class="flabel">متن <textarea id="snipText" rows="3" dir="auto" placeholder="متنی که جایگزین می‌شود…"></textarea></label>
+          <div class="sched-form-actions">
+            <button class="btn primary tiny" id="snipSave" type="button">ذخیره</button>
+            <button class="btn tiny" id="snipDelete" type="button">حذف</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
 
   <!-- ============ Code Work — فضای جدا مثل کلاد ============ -->
   </body>
