@@ -71,8 +71,9 @@ pub fn flash_and_beep(hwnd: Option<isize>) {
         const FLASHW_ALL: u32 = 0x3;
         const MB_ICONINFORMATION: u32 = 0x40;
         extern "system" {
-            fn FlashWindowExW(p: *mut Fwex) -> i32;
             fn MessageBeep(u: u32) -> i32;
+            fn GetModuleHandleW(name: *const u16) -> isize;
+            fn GetProcAddress(module: isize, name: *const u8) -> *mut std::os::raw::c_void;
         }
         unsafe {
             if let Some(h) = hwnd {
@@ -82,7 +83,17 @@ pub fn flash_and_beep(hwnd: Option<isize>) {
                     flags: FLASHW_ALL,
                     count: 5,
                 };
-                let _ = FlashWindowExW(&mut f);
+                // FlashWindowExW is not in the import surface of the linked
+                // `windows` static lib, so resolve it from the always-loaded
+                // kernel32/user32 at runtime (no link-time dependency).
+                let modh = GetModuleHandleW(std::ptr::null());
+                if modh != 0 {
+                    let p = GetProcAddress(modh, b"FlashWindowExW\0".as_ptr() as *const u8);
+                    if !p.is_null() {
+                        let flash = std::mem::transmute::<usize, unsafe extern "system" fn(*mut Fwex) -> i32>(p as usize);
+                        let _ = flash(&mut f);
+                    }
+                }
             }
             let _ = MessageBeep(MB_ICONINFORMATION);
         }
