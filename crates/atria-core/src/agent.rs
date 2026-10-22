@@ -97,6 +97,13 @@ pub async fn run_agent(
     let mut out = AgentOutput::default();
     let mut stripped_retry = false;
     let mut output_continuations = 0u32;
+    // MCP servers run local commands, so their tools are only advertised under
+    // the explicit Full Access opt-in. The catalog is resolved once per turn.
+    let mcp_tools = if cfg.full_access_mode && !cfg.mcp_servers.is_empty() {
+        crate::mcp::catalog(&cfg.mcp_servers).await
+    } else {
+        Vec::new()
+    };
 
     loop {
         if out.rounds >= MAX_ROUNDS {
@@ -132,6 +139,9 @@ pub async fn run_agent(
             // Staged for approval in ask/autonomous modes; direct (with full
             // chat logging) only under the explicit Full Access opt-in.
             tools.extend(terminal_tool_catalog(cfg.full_access_mode));
+        }
+        if !mcp_tools.is_empty() {
+            tools.extend(mcp_tools.iter().cloned());
         }
         let mut request_cfg = cfg.clone();
         request_cfg.tool_use_enabled = !tools.is_empty();
@@ -245,10 +255,17 @@ pub async fn run_agent(
                     return Err(CoreError::Stopped);
                 }
                 if let Block::ToolUse { id, name, input } = block {
+                    let is_mcp = crate::mcp::parse_tool_name(name).is_some();
+                    let label = if is_mcp {
+                        let l = name.strip_prefix("mcp__").unwrap_or(name).replace("__", " / ");
+                        format!("MCP tool ({l})")
+                    } else {
+                        tool_label(name).to_string()
+                    };
                     emit(AgentEvent::ToolStart {
                         id: id.clone(),
                         name: name.clone(),
-                        label: tool_label(name).to_string(),
+                        label: label.clone(),
                         input: input.clone(),
                     });
                     let tool_enabled = tool_is_enabled(&tools, &name);
@@ -256,6 +273,14 @@ pub async fn run_agent(
                         crate::tools::ToolOutcome {
                             output: format!("tool {name:?} is disabled in the current settings"),
                             is_error: true,
+                        }
+                    } else if let Some((server_name, tool_name)) = crate::mcp::parse_tool_name(name) {
+                        match cfg.mcp_servers.iter().find(|s| s.name == server_name) {
+                            Some(server) => crate::mcp::call_tool(server, tool_name, input).await,
+                            None => crate::tools::ToolOutcome {
+                                output: format!("MCP server {server_name:?} is no longer configured"),
+                                is_error: true,
+                            },
                         }
                     } else if name == "write_file" && cfg.full_access_mode {
                         auto_file_write_full_access(input, root, cfg.full_access_profile, cfg.full_access_system, data_root)
@@ -278,7 +303,7 @@ pub async fn run_agent(
                     emit(AgentEvent::ToolEnd {
                         id: id.clone(),
                         name: name.clone(),
-                        label: tool_label(name).to_string(),
+                        label,
                         ok: !res.is_error,
                         output: res.output.clone(),
                     });
