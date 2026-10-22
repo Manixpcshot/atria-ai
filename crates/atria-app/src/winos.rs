@@ -27,7 +27,7 @@ pub fn clipboard_text() -> Result<String, String> {
                 return Err("براشدن کلیپ‌بورد ممکن نبود".into());
             }
             let data = GetClipboardData(CF_UNICODETEXT);
-            let res = if data.is_null() {
+            let res: Result<String, String> = if data.is_null() {
                 CloseClipboard();
                 Err("کلیپ‌بورد حاوی متن نیست".into())
             } else {
