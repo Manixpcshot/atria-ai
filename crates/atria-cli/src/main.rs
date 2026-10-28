@@ -10,6 +10,7 @@
 //!   atria-cli --init                  write a starter ~/.atria/cli.json
 //!   atria-cli --config PATH           use an alternate config file
 //!   atria-cli --model NAME            override the configured model
+//!   atria-cli --provider NAME         openai|anthropic|deepseek|groq|openrouter|gemini|ollama|deepseekweb
 //!   atria-cli --tools | --no-tools    force the tool loop on/off
 //!
 //! The API key is read from the ATRIA_API_KEY environment variable only —
@@ -37,6 +38,7 @@ struct Args {
     init: bool,
     config: PathBuf,
     model: Option<String>,
+    provider: Option<String>,
     help: bool,
 }
 
@@ -47,6 +49,7 @@ fn parse_args(args: &[String]) -> Args {
         init: false,
         config: default_cfg_path(),
         model: None,
+        provider: None,
         help: false,
     };
     let mut i = 0;
@@ -56,6 +59,12 @@ fn parse_args(args: &[String]) -> Args {
             "--no-tools" => out.tools = Some(false),
             "--init" => out.init = true,
             "--help" | "-h" => out.help = true,
+            "--provider" | "--prov" => {
+                i += 1;
+                if i < args.len() {
+                    out.provider = Some(args[i].clone());
+                }
+            }
             "--config" => {
                 i += 1;
                 if i < args.len() {
@@ -89,6 +98,7 @@ enum Cmd {
     Help,
     Clear,
     Model(Option<String>),
+    Provider(Option<String>),
     Key(Option<String>),
     Unknown(String),
     /// A plain user message (no leading slash).
@@ -109,6 +119,7 @@ fn parse_slash(line: &str) -> Cmd {
         "help" | "?" => Cmd::Help,
         "clear" | "reset" => Cmd::Clear,
         "model" => Cmd::Model(arg),
+        "provider" | "prov" | "api" => Cmd::Provider(arg),
         "key" => Cmd::Key(arg),
         other => Cmd::Unknown(other.to_string()),
     }
@@ -232,6 +243,57 @@ fn first_line(s: &str) -> String {
     s.lines().next().map(str::to_string).unwrap_or_default()
 }
 
+/* ---------------- provider catalog ---------------- */
+
+/// (friendly name, ApiKind string, default base_url, human note)
+fn provider_catalog() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
+    vec![
+        ("openai", "openai", "https://api.openai.com/v1",
+         "OpenAI, or any OpenAI-compatible endpoint"),
+        ("anthropic", "anthropic", "https://api.anthropic.com",
+         "Claude — Anthropic Messages API"),
+        ("deepseek", "openai", "https://api.deepseek.com/v1",
+         "DeepSeek API (OpenAI-compatible)"),
+        ("groq", "openai", "https://api.groq.com/openai/v1", "Groq"),
+        ("openrouter", "openai", "https://openrouter.ai/api/v1",
+         "OpenRouter — hundreds of models, one key"),
+        ("gemini", "openai", "https://generativelanguage.googleapis.com/v1beta/openai",
+         "Google Gemini (OpenAI-compat endpoint)"),
+        ("ollama", "openai", "http://localhost:11434/v1",
+         "Ollama — local models, no API key needed"),
+        ("deepseekweb", "deepseekweb", "https://chat.deepseek.com",
+         "DeepSeek web — key = signed-in userToken from the browser"),
+    ]
+}
+
+fn provider_names() -> String {
+    provider_catalog()
+        .iter()
+        .map(|(n, _, _, _)| *n)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Friendly name (or alias) -> (canonical name, kind, default base_url).
+fn resolve_provider(name: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    let n = name.trim().to_ascii_lowercase();
+    if n.is_empty() {
+        return None;
+    }
+    let aliases: [(&str, &str); 12] = [
+        ("oai", "openai"), ("chatgpt", "openai"), ("openai-compat", "openai"),
+        ("claude", "anthropic"), ("ds", "deepseek"), ("google", "gemini"),
+        ("gem", "gemini"), ("open-router", "openrouter"), ("local", "ollama"),
+        ("dsweb", "deepseekweb"), ("deepseek-web", "deepseekweb"),
+        ("web", "deepseekweb"),
+    ];
+    let canon = aliases.iter().find(|(a, _)| *a == n).map(|(_, c)| *c).unwrap_or(&n);
+    provider_catalog()
+        .iter()
+        .find(|(nm, _, _, _)| *nm == canon)
+        .map(|(nm, kind, url, _)| (*nm, *kind, *url))
+}
+
 /// Run one agent turn. Streams text to stdout, tool activity to stderr.
 /// On Ctrl+C during generation the turn is cancelled and the user message
 /// stays in history (the model saw it); on error the caller drops it.
@@ -301,7 +363,8 @@ fn run_turn(
 fn print_banner(s: &Session, cfg_path: &Path) {
     let date = chrono::Local::now().format("%Y-%m-%d %H:%M");
     println!("Atria \u{2014} terminal agent  v{}", env!("CARGO_PKG_VERSION"));
-    println!("model: {} @ {}", s.model, s.base_url);
+    println!("provider: {}  ({})", s.kind, s.base_url);
+    println!("model: {}", s.model);
     println!("config: {}", cfg_path.display());
     println!(
         "date: {}  \u{b7}  tools: {}",
@@ -323,17 +386,20 @@ Usage:
   atria-cli --init                 write a starter ~/.atria/cli.json
   atria-cli --config PATH          alternate config file
   atria-cli --model NAME           override the configured model
+  atria-cli --provider NAME        openai|anthropic|deepseek|groq|openrouter|gemini|ollama|deepseekweb
   atria-cli --tools | --no-tools   force the tool loop on/off
 
 Session commands:
   /help                 this help
   /clear                clear the conversation (long-term memory is kept)
   /model [NAME]         show or change the model (session only)
+  /provider [NAME] [URL]  show or switch provider (session only); an optional
+                          custom base_url can follow the name
   /key [VALUE]          show key status or set the key (session only)
   /exit                 quit (Ctrl+D also works)
 
 Config (~/.atria/cli.json):
-  {{ \"base_url\": \"...\", \"model\": \"...\", \"kind\": \"openai|anthropic\" }}
+  {{ \"base_url\": \"...\", \"model\": \"...\", \"kind\": \"openai|anthropic|deepseekweb\" }}
 
 The API key comes from the ATRIA_API_KEY environment variable and is never
 written to disk. File tools are scoped to ~/.atria/workspace; shell
@@ -382,7 +448,7 @@ fn main() {
     }
     let interactive = prompt.trim().is_empty();
 
-    let cfg = match load_config(&args.config) {
+    let mut cfg = match load_config(&args.config) {
         Ok(c) => c,
         Err(e) => {
             if !args.config.exists() {
@@ -408,6 +474,19 @@ fn main() {
             }
         }
     };
+    if let Some(p) = &args.provider {
+        match resolve_provider(p) {
+            Some((nm, kind, url)) => {
+                cfg.kind = kind.to_string();
+                cfg.base_url = url.to_string();
+                eprintln!("provider: {nm}  ({url})");
+            }
+            None => {
+                eprintln!("unknown provider: {p} — try: {}", provider_names());
+                fail(2);
+            }
+        }
+    }
     let api_key = std::env::var("ATRIA_API_KEY").unwrap_or_default();
     if api_key.trim().is_empty() {
         eprintln!("ATRIA_API_KEY is not set. Export it — the key is never written to disk.");
@@ -506,6 +585,30 @@ fn run_repl(
                 eprintln!("model set to: {}", session.model);
             }
             Cmd::Model(None) => eprintln!("model: {}", session.model),
+            Cmd::Provider(Some(spec)) => {
+                let mut parts = spec.splitn(2, char::is_whitespace);
+                let name = parts.next().unwrap_or("");
+                let custom_url = parts.next().map(str::trim).filter(|u| !u.is_empty());
+                match resolve_provider(name) {
+                    Some((nm, kind, url)) => {
+                        session.kind = kind.to_string();
+                        let target = custom_url.unwrap_or(url);
+                        session.base_url = target.to_string();
+                        eprintln!(
+                            "provider set to: {nm}  (base_url: {})  — /model to pick a model",
+                            session.base_url
+                        );
+                    }
+                    None => eprintln!(
+                        "unknown provider: {name} — try: {}",
+                        provider_names()
+                    ),
+                }
+            }
+            Cmd::Provider(None) => {
+                eprintln!("provider: {}  (base_url: {})", session.kind, session.base_url);
+                eprintln!("known providers: {}", provider_names());
+            }
             Cmd::Key(Some(value)) => {
                 session.api_key = value;
                 eprintln!("api key updated for this session (not saved to disk)");
@@ -590,6 +693,32 @@ mod tests {
         assert_eq!(truncate_chars("ab", 5), "ab");
         assert_eq!(truncate_chars("سلام دنیا", 3), "سلا…");
         assert_eq!(truncate_chars("", 3), "");
+    }
+
+    #[test]
+    fn provider_catalog_resolves_names_and_aliases() {
+        assert_eq!(resolve_provider("openai"), Some(("openai", "openai", "https://api.openai.com/v1")));
+        assert_eq!(resolve_provider("anthropic"), Some(("anthropic", "anthropic", "https://api.anthropic.com")));
+        assert_eq!(resolve_provider("claude").unwrap().1, "anthropic");
+        assert_eq!(resolve_provider("DS").unwrap().1, "openai");
+        assert_eq!(resolve_provider("deepseek").unwrap().2, "https://api.deepseek.com/v1");
+        assert_eq!(resolve_provider("ollama").unwrap().2, "http://localhost:11434/v1");
+        assert_eq!(resolve_provider("deepseekweb").unwrap().1, "deepseekweb");
+        assert_eq!(resolve_provider("nope"), None);
+        assert_eq!(resolve_provider(""), None);
+    }
+
+    #[test]
+    fn provider_slash_and_flag_parse() {
+        assert_eq!(parse_slash("/provider anthropic"), Cmd::Provider(Some("anthropic".into())));
+        assert_eq!(parse_slash("/prov"), Cmd::Provider(None));
+        assert_eq!(
+            parse_slash("/provider openai http://myproxy:8080/v1"),
+            Cmd::Provider(Some("openai http://myproxy:8080/v1".into()))
+        );
+        let a = parse_args(&s(&["--provider", "groq", "hi"]));
+        assert_eq!(a.provider.as_deref(), Some("groq"));
+        assert_eq!(a.prompt.as_deref(), Some("hi"));
     }
 
     #[test]
