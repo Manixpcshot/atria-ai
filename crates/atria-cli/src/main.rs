@@ -121,6 +121,23 @@ fn home() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 
+/// Windows double-click users need the console to stay open while they read
+/// the error — wait for a keypress before the process (and its window) dies.
+fn pause_if_tty() {
+    if std::io::stderr().is_terminal() || std::io::stdout().is_terminal() {
+        eprint!("\nPress Enter to exit...");
+        let _ = std::io::stderr().flush();
+        let mut b = [0u8; 1];
+        let _ = std::io::stdin().read(&mut b);
+    }
+}
+
+/// Error exit that never flashes the window closed.
+fn fail(code: i32) -> ! {
+    pause_if_tty();
+    std::process::exit(code);
+}
+
 fn default_cfg_path() -> PathBuf {
     home().join(".atria").join("cli.json")
 }
@@ -281,10 +298,11 @@ fn run_turn(
 
 /* ---------------- output ---------------- */
 
-fn print_banner(s: &Session) {
+fn print_banner(s: &Session, cfg_path: &Path) {
     let date = chrono::Local::now().format("%Y-%m-%d %H:%M");
     println!("Atria \u{2014} terminal agent  v{}", env!("CARGO_PKG_VERSION"));
     println!("model: {} @ {}", s.model, s.base_url);
+    println!("config: {}", cfg_path.display());
     println!(
         "date: {}  \u{b7}  tools: {}",
         date,
@@ -326,6 +344,20 @@ execution belongs to the desktop app."
 /* ---------------- main ---------------- */
 
 fn main() {
+    // A crash must never flash the console window closed either.
+    std::panic::set_hook(Box::new(|info| {
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic".to_string()
+        };
+        eprintln!("\natria-cli hit an unexpected error: {msg}");
+        eprintln!("Re-run with RUST_BACKTRACE=1 for details, and report this to Atria.");
+        pause_if_tty();
+    }));
+
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let args = parse_args(&raw);
     if args.help {
@@ -353,32 +385,51 @@ fn main() {
     let cfg = match load_config(&args.config) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{e}");
-            eprintln!("run `atria-cli --init` to create a config file.");
-            std::process::exit(2);
+            if !args.config.exists() {
+                // First run: create the starter config and keep going so the
+                // window never flashes closed on a double-click.
+                eprintln!("first run: creating a starter config at {}", args.config.display());
+                write_starter(&args.config);
+                match load_config(&args.config) {
+                    Ok(c) => {
+                        eprintln!("edit that file to set your provider/model, then start chatting.");
+                        eprintln!();
+                        c
+                    }
+                    Err(e2) => {
+                        eprintln!("{e2}");
+                        fail(2)
+                    }
+                }
+            } else {
+                eprintln!("{e}");
+                eprintln!("run `atria-cli --init` to create a config file.");
+                fail(2)
+            }
         }
     };
     let api_key = std::env::var("ATRIA_API_KEY").unwrap_or_default();
     if api_key.trim().is_empty() {
         eprintln!("ATRIA_API_KEY is not set. Export it — the key is never written to disk.");
         if interactive {
-            eprintln!("(or run atria-cli and use /key <value> inside the session)");
+            eprintln!("(you can also type /key <value> inside the session)");
             eprint!("API key: ");
             let _ = std::io::stdout().flush();
             let mut k = String::new();
             let _ = std::io::stdin().read_line(&mut k);
             let k = k.trim().to_string();
             if k.is_empty() {
-                std::process::exit(2);
+                eprintln!("no key given — exiting. Set ATRIA_API_KEY or paste one when asked.");
+                fail(2);
             }
-            run_repl(cfg, k, args.tools, args.model);
+            run_repl(cfg, &args.config, k, args.tools, args.model);
             return;
         }
-        std::process::exit(2);
+        fail(2);
     }
 
     if interactive {
-        run_repl(cfg, api_key, args.tools, args.model);
+        run_repl(cfg, &args.config, api_key, args.tools, args.model);
         return;
     }
 
@@ -401,12 +452,18 @@ fn main() {
         Ok(_) => {}
         Err(e) => {
             eprintln!("error: {e}");
-            std::process::exit(1);
+            fail(1);
         }
     }
 }
 
-fn run_repl(cfg: CliConfig, api_key: String, tools_flag: Option<bool>, model_flag: Option<String>) {
+fn run_repl(
+    cfg: CliConfig,
+    cfg_path: &Path,
+    api_key: String,
+    tools_flag: Option<bool>,
+    model_flag: Option<String>,
+) {
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("runtime");
     let mut session = Session {
         base_url: cfg.base_url,
@@ -416,7 +473,7 @@ fn run_repl(cfg: CliConfig, api_key: String, tools_flag: Option<bool>, model_fla
         tools: tools_flag.unwrap_or(true),
     };
     let mut history: Vec<atria_core::Message> = Vec::new();
-    print_banner(&session);
+    print_banner(&session, cfg_path);
 
     loop {
         eprint!("\u{276f} ");
