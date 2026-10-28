@@ -198,7 +198,7 @@ fn enable_windows_vt() {
     };
     unsafe {
         for handle in [GetStdHandle(STD_OUTPUT_HANDLE), GetStdHandle(STD_ERROR_HANDLE)] {
-            if handle != 0 && handle != -1 {
+            if !handle.is_null() && handle as isize != -1 {
                 let mut mode = 0u32;
                 if GetConsoleMode(handle, &mut mode) != 0 {
                     let _ = SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
@@ -712,6 +712,7 @@ fn run_update(rt: &tokio::runtime::Runtime) -> ! {
             eprintln!("{} cannot write updater script: {e}", c("✗", "31"));
             fail(1);
         }
+        use std::os::windows::process::CommandExt;
         use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
         if std::process::Command::new("cmd")
             .args(["/C", bat.to_str().unwrap_or("")] )
