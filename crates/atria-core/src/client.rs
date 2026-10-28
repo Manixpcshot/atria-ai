@@ -628,6 +628,23 @@ pub async fn list_models(base: &str, key: &str) -> Result<Vec<String>, CoreError
     Ok(ids)
 }
 
+/// Plain HTTP GET that returns the body bytes (the CLI self-updater uses
+/// this to pull release assets; no provider auth involved).
+pub async fn http_get_bytes(url: &str, timeout_secs: u64) -> Result<Vec<u8>, CoreError> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(timeout_secs.min(15)))
+        .timeout(std::time::Duration::from_secs(timeout_secs.max(10)))
+        .build()?;
+    let resp = client.get(url).send().await?;
+    let status = resp.status().as_u16();
+    let bytes = resp.bytes().await?;
+    if !(200..300).contains(&status) {
+        let snippet: String = String::from_utf8_lossy(&bytes).chars().take(200).collect();
+        return Err(CoreError::Api { status, message: format!("{snippet} [{url}]") });
+    }
+    Ok(bytes.to_vec())
+}
+
 /// Remove thinking blocks from history (fallback when a gateway rejects them).
 pub fn strip_thinking(messages: &mut [Message]) {
     for m in messages.iter_mut() {

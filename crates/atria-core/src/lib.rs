@@ -28,7 +28,7 @@ pub mod types;
 pub mod web;
 
 pub use agent::{run_agent, AgentEvent, AgentOutput, MAX_ROUNDS};
-pub use client::{send, ApiKind, AtriaClient, ClientConfig, CoreError, StreamEvent, Turn};
+pub use client::{http_get_bytes, list_models, send, ApiKind, AtriaClient, ClientConfig, CoreError, StreamEvent, Turn};
 pub use memory::{extract_memory_facts, MemoryStore, Note};
 pub use mcp::{call_tool, catalog as mcp_catalog, list_tools as mcp_list_tools, parse_tool_name as mcp_parse_tool_name, McpServer, McpTool};
 pub use tools::{execute, file_tool_catalog, terminal_tool_catalog, tool_catalog, tool_label};
