@@ -71,6 +71,10 @@ pub struct ChatPayload {
     /// DeepSeek-web: DeepThink toggle (default on).
     #[serde(default = "default_true")]
     pub thinking: bool,
+    /// Codex mode (programming section) — the UI already appends the mode's
+    /// system block; kept here so the backend can observe/extend it.
+    #[serde(default)]
+    pub codex_mode: bool,
     /// DeepSeek-web: web-search toggle.
     #[serde(default)]
     pub web_search: bool,

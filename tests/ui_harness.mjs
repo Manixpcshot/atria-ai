@@ -198,7 +198,7 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'btnSettings', 'btnMemory', 'btnProjects', 'btnSide', 'projectsModal', 'projectsX', 'projectList', 'projectDetail', 'projectCreate',
   'projectName', 'projectNotes', 'projectFolder', 'projectFolderPick', 'projectFolderClear', 'projectCheckpoint', 'projectTaskCount', 'projectTasks', 'projectTaskInput', 'projectTaskAdd',
   'projectAttach', 'projectCheckpointSave', 'projectResume', 'projectDelete', 'ctxLimitVal', 'ctxMeter', 'btnCheckUpdate', 'btnInstallUpdate', 'updateStatus', 'projectChip', 'btnMin', 'btnMax', 'btnClose', 'btnScroll',
-  'modelChip', 'modelPick', 'mpName', 'modelMenu', 'chipThink', 'fullAccessIndicator', 'mcpList', 'mcpName', 'mcpCmd', 'mcpArgs', 'mcpAddBtn',
+  'modelChip', 'modelPick', 'mpName', 'modelMenu', 'chipThink', 'fullAccessIndicator', 'codexSwitch', 'codexChatBtn', 'codexCodeBtn', 'mcpList', 'mcpName', 'mcpCmd', 'mcpArgs', 'mcpAddBtn',
   'settingsModal', 'settingsX', 'settingsTitle', 'settingsSubtitle', 'memoryModal', 'memoryX', 'memoryClose',
   'memList', 'memClear', 'btnWipe', 'cmdk', 'cmdkInput', 'cmdkList', 'cmdkX', 'toasts',
   'tempVal', 'tempOut', 'thinkVal', 'memVal', 'streamVal', 'sysVal', 'maxTokVal',
@@ -261,7 +261,7 @@ let v18ConnSaved = false;
 let clipboardStub = 'متن کلیپ‌بورد تستی';
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.20.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.21.0' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -285,8 +285,8 @@ function router(cmd, args = {}) {
     case 'command_apply_command': return Promise.resolve('دستور اجرا شد (تأییده‌شده توسط کاربر). کد خروجی: 0\nخروجی:\nhello-atria');
     case 'command_reject_command': return Promise.resolve();
     case 'update_check':
-      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.20.0', latest_version: '0.21.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.21.0', download_size: 10485760 });
-      return Promise.resolve({ current_version: '0.20.0', latest_version: '0.20.0', available: false, release_url: '', download_size: 0 });
+      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.21.0', latest_version: '0.22.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.22.0', download_size: 10485760 });
+      return Promise.resolve({ current_version: '0.21.0', latest_version: '0.21.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'mcp_test_server': { const sv = (args && args.server) || {}; return Promise.resolve({ ok: true, name: sv.name || '', tools: [{ name: 'echo', description: 'echo the arguments' }] }); }
     case 'files_stash': return Promise.resolve('/home/u/.atria/uploads/harness_' + ((args && args.name) || 'file'));
@@ -389,7 +389,7 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.20.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.21.0');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
 ok('UI می‌گوید ابزارهای فایل تابع Full Access‌اند و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس محدود است', indexHtml.includes('ایجنت و ابزارهای فایل') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است'));
 ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس می‌ماند', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است') && indexHtml.includes('کل سیستم — مسیر مطلق (با محافظت)'));
@@ -881,7 +881,7 @@ console.log('\n=== 16c) بررسی خودکار هنگام راه‌اندازی
 ok('پیش از بررسی، مودال آپدیت بسته است', byId.updateModal.classList.contains('hidden'));
 updateCheckAvailable = true;
 await T.checkForUpdate(true); // همان بررسیِ خودکارِ boot (silent)
-ok('با وجود نسخهٔ تازه، مودالِ تأیید روی کاربر باز می‌شود', !byId.updateModal.classList.contains('hidden') && String(byId.updatePromptTitle.textContent).includes('0.21.0'));
+ok('با وجود نسخهٔ تازه، مودالِ تأیید روی کاربر باز می‌شود', !byId.updateModal.classList.contains('hidden') && String(byId.updatePromptTitle.textContent).includes('0.22.0'));
 ok('متن مودال امضا و جایگزینی را توضیح می‌دهد', String(byId.updatePromptBody.textContent).includes('Ed25519') && String(byId.updatePromptBody.textContent).includes('باز می‌شود'));
 ok('قبل از تأیید، نصبی صدا زده نشده', !bridgeCalls.some((c) => c[0] === 'update_install'));
 byId.updatePromptNo.click();
@@ -1161,6 +1161,44 @@ console.log('\n=== 21) v0.19.0 — منوی ⋯ کامپوزر + انگلیسی 
   // the 508 error text now carries the new cap
   const coreSrc = fs.readFileSync(path.join(__dirname, '..', 'crates', 'atria-core', 'src', 'agent.rs'), 'utf8');
   ok('سقف ایمنی دور‌ها به ۶۴ رسیده', coreSrc.includes('pub const MAX_ROUNDS: u32 = 64;'));
+}
+
+console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نویسی به سبک ChatGPT) ===');
+{
+  const htmlSrc = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+  const cssSrc = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'styles.css'), 'utf8');
+  ok('تگ‌سوئیچ «گفتگو / کدکس» در index.html نوار کامپوزر است', !!byId.codexSwitch && !!byId.codexChatBtn && !!byId.codexCodeBtn && htmlSrc.includes('id="codexSwitch"') && htmlSrc.indexOf('codexSwitch') < htmlSrc.indexOf('composer-bar') + 1200);
+  ok('سبک‌بندی pill دو‌تکه در CSS تعریف شده', cssSrc.includes('.codex-switch') && cssSrc.includes('.cs-btn.on') && cssSrc.includes('.codex-switch.codex-on'));
+  ok('حالت پیش‌فرض «گفتگو» است (وضعیت + aria + بدون ذخیرهٔ کدکس)', T.st.settings.codex !== true && byId.codexChatBtn.classList.contains('on') && byId.codexChatBtn.getAttribute('aria-pressed') === 'true' && byId.codexCodeBtn.getAttribute('aria-pressed') === 'false' && !byId.codexSwitch.classList.contains('codex-on'));
+
+  // روشن‌کردن کدکس (جعبهٔ نوشتن خالی است تا placeholder به‌روز شود)
+  byId.input.value = '';
+  byId.codexCodeBtn.click();
+  await sleep(15);
+  ok('یک کلیک کدکس را روشن می‌کند و ذخیره می‌شود', T.st.settings.codex === true && byId.codexCodeBtn.classList.contains('on') && byId.codexCodeBtn.getAttribute('aria-pressed') === 'true' && byId.codexChatBtn.getAttribute('aria-pressed') === 'false' && byId.codexSwitch.classList.contains('codex-on') && JSON.parse(localStorage.getItem('atria.settings.v2')).codex === true);
+  ok('جای‌نگه‌دار جعبهٔ نوشتن در کدکس عوض می‌شود', String(byId.input.placeholder).includes('کدکس'));
+
+  byId.input.value = 'این تابع را refactor کن';
+  bridgeCalls.length = 0;
+  byId.btnSend.click();
+  const sentC = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+  ok('payloadِ chat_send در کدکس codex_mode=true دارد', sentC.codex_mode === true);
+  ok('بلوک سیستم‌پرامپت کدکس به prompt اضافه می‌شود', String(sentC.system || '').includes('[CODEX MODE'));
+  emit('atria:done', { new_messages: null, final_text: 'انجام شد.', session_id: '', input_tokens: 2, output_tokens: 2 });
+  ok('جریان کدکس به درستی بسته می‌شود', T.st.sending === false);
+
+  // بازگشت به گفتگو
+  byId.codexChatBtn.click();
+  await sleep(15);
+  ok('کلیک «گفتگو» حالت را برمی‌گرداند', T.st.settings.codex !== true && byId.codexChatBtn.getAttribute('aria-pressed') === 'true' && byId.codexCodeBtn.getAttribute('aria-pressed') === 'false' && !byId.codexSwitch.classList.contains('codex-on'));
+  byId.input.value = 'یک سوال عادی';
+  bridgeCalls.length = 0;
+  byId.btnSend.click();
+  const sentN = bridgeCalls.find((c) => c[0] === 'chat_send')[1].payload;
+  ok('در حالت گفتگو codex_mode=false است', sentN.codex_mode === false);
+  ok('در حالت گفتگو بلوک کدکس در prompt نیست', !String(sentN.system || '').includes('[CODEX MODE'));
+  emit('atria:done', { new_messages: null, final_text: 'باشه.', session_id: '', input_tokens: 2, output_tokens: 2 });
+  ok('جریان گفتگو بسته شد', T.st.sending === false);
 }
 
 console.log('\n============================');

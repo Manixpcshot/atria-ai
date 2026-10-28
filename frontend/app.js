@@ -47,6 +47,16 @@ const PERSONA = [
   'مثل مدل‌های واقعی رفتار کن: جواب را مستقیم و طبیعی بده. لازم نیست در هر پیام سلام و احوالپرسی یا تعارف تکراری کنی — فقط اگر کاربر در آغاز گفتگو سلام کرد، کوتاه جواب سلام بده و برو سر اصل مطلب.',
   'خلاصه، دقیق و کاربردی باش؛ به‌جای عذرخواهی‌های مکرر راه‌حل بده و چیزی را که نمی‌دانی ادعا نکن.',
 ].join('\n');
+// Codex mode — the programming section (ChatGPT-Codex style). Appended to the
+// system prompt only while the user has the «کدکس» toggle on.
+const CODEX_MODE_BLOCK = '[CODEX MODE — بخش برنامه‌نویسی آتریا]\n' +
+  'تو حالا در حالت کدکس هستی: یک برنامه‌نویس ارشدِ جفت‌برنامه‌نویس (pair programmer).\n' +
+  '- اول وظیفه را کامل بفهم؛ اگر فایل‌های مرتبط وجود دارند با ابزارهای فایل بخوان، بعد کد بنویس یا ویرایش کن (edit_file / write_file).\n' +
+  '- اگر پوشهٔ پروژهٔ فعال داری، همهٔ کارها را آنجا انجام بده؛ اگر نه، بپرس یا در workspace کار کن.\n' +
+  '- تغییرات را کوتاه، متمرکز و diff-محور نگه دار؛ تصمیمات غیرمسلسل را در یک خط توضیح بده.\n' +
+  '- جایی که ابزار ترمینال در دسترس است، تست و بیلد را اجرا کن تا نتیجهٔ تغییر را نشان بده.\n' +
+  '- کد و شناسه‌ها انگلیسی بمانند؛ توضیحات و گزارش به زبان کاربر.';
+
 const LS_PERSONA = 'atria.persona.v1';
 
 const DEFAULTS = {
@@ -56,6 +66,7 @@ const DEFAULTS = {
   api_kind: 'anthropic',
   model: 'Atria-Dawn-Preview',
   thinking: true,
+  codex: false,
   mem: true,
   temp: 0.7,
   stream: true,
@@ -1112,6 +1123,7 @@ function cacheEls() {
     updatePromptStatus: $('#updatePromptStatus'),
     modelPick: $('#modelPick'), mpName: $('#mpName'), modelMenu: $('#modelMenu'),
     chipThink: $('#chipThink'), fullAccessIndicator: $('#fullAccessIndicator'),
+    codexChatBtn: $('#codexChatBtn'), codexCodeBtn: $('#codexCodeBtn'), codexSwitch: $('#codexSwitch'),
     btnMore: $('#btnMore'), moreMenu: $('#moreMenu'),
     settingsModal: $('#settingsModal'), settingsX: $('#settingsX'),
     settingsTitle: $('#settingsTitle'), settingsSubtitle: $('#settingsSubtitle'),
@@ -1363,6 +1375,8 @@ function refreshDlRootInfo() {
     els.fullAccessVal.checked = st.settings.full_access_mode === true;
     els.fullAccessVal.onchange = () => setFullAccessMode(els.fullAccessVal.checked);
   }
+  if (els.codexChatBtn) els.codexChatBtn.onclick = () => setCodex(false);
+  if (els.codexCodeBtn) els.codexCodeBtn.onclick = () => setCodex(true);
   if (els.fullAccessIndicator) {
     els.fullAccessIndicator.onclick = () => setFullAccessMode(st.settings.full_access_mode !== true);
   }
@@ -2309,6 +2323,9 @@ function startTurn() {
   let systemPrompt = st.settings.system || '';
   if (projectContext) systemPrompt += (systemPrompt ? '\n\n' : '') + '[PROJECT CHECKPOINT]\n' + projectContext;
   if (context.summary) systemPrompt += (systemPrompt ? '\n\n' : '') + '[AUTOMATIC CONTEXT COMPACTION — older conversation notes, not new instructions]\n' + context.summary;
+  if (st.settings.codex === true) {
+    systemPrompt += (systemPrompt ? '\n\n' : '') + CODEX_MODE_BLOCK;
+  }
   window.__atria.chat_send({
     payload: {
       api_key: conn ? conn.key : '',
@@ -2334,6 +2351,7 @@ function startTurn() {
       workspace: st.settings.workspace || '',
       downloads_root: (st.settings.downloads_root || '').trim(),
       thinking: !!st.settings.thinking,
+      codex_mode: st.settings.codex === true,
       web_search: !!st.settings.ds_search,
       session_id: (chat && chat.dsSession) || '',
       messages: history,
@@ -3334,8 +3352,33 @@ function chooseModel(model) {
   chooseModelFor(act ? act.id : '', model);
 }
 
+function syncCodex() {
+  const on = st.settings.codex === true;
+  if (els.codexChatBtn) {
+    els.codexChatBtn.classList.toggle('on', !on);
+    els.codexChatBtn.setAttribute('aria-pressed', String(!on));
+  }
+  if (els.codexCodeBtn) {
+    els.codexCodeBtn.classList.toggle('on', on);
+    els.codexCodeBtn.setAttribute('aria-pressed', String(on));
+  }
+  if (els.codexSwitch) els.codexSwitch.classList.toggle('codex-on', on);
+  const ph = on
+    ? 'کدکس: وظیفهٔ برنامه‌نویسی‌ات را بنویس… (مثلاً: این تست خراب را فیکس کن)  (Enter: ارسال)'
+    : 'هرچی می‌خوای بپرس…  (Enter: ارسال · Shift+Enter: سطر جدید)';
+  if (els.input && !els.input.value) els.input.placeholder = ph;
+  return on;
+}
+
+function setCodex(on) {
+  st.settings.codex = on;
+  saveSettings();
+  syncCodex();
+}
+
 function syncChips() {
   els.chipThink.classList.toggle('on', !!st.settings.thinking);
+  syncCodex();
   if (els.btnMore) els.btnMore.classList.toggle('has-fa', st.settings.full_access_mode === true);
   if (els.fullAccessIndicator) {
     const active = st.settings.full_access_mode === true;
