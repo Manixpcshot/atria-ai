@@ -108,13 +108,18 @@
             </div>
             <div class="mode-chips">
               <input type="file" id="fileInput" multiple hidden>
-              <button class="mode-chip" id="btnAttach" title="اپلود فایل و تصویر — تصویر برای مدل‌های ویژن‌دار، فایل برای تحلیل">📎 فایل و تصویر</button>
-              <button class="mode-chip" id="btnClipboard" type="button" title="ورود متن کلیپ‌بورد به جعبهٔ نوشتن (Windows)">📋 کلیپ‌بورد</button>
-              <button class="mode-chip" id="btnMic" type="button" title="ورودی گفتاری (فارسی) — روی Windows با مرورگر داخلی">🎤 گفتار</button>
-              <button class="mode-chip" id="btnChatSearch" type="button" title="جست‌وجو در این گفتگو">🔍 جست‌وجو</button>
-                            <button class="mode-chip full-access-mode" id="fullAccessIndicator" type="button" aria-pressed="false" title="Full Access خاموش است؛ برای خودکارشدن ابزارهای مجاز کلیک کن">Full Access: خاموش</button>
-              <button class="mode-chip" id="chipThink">🧠 تفکر</button>
-                          </div>
+              <div class="more-wrap">
+                <button class="more-btn" id="btnMore" type="button" title="ابزارها و حالت‌ها" aria-haspopup="true" aria-expanded="false">⋯</button>
+                <div class="more-menu hidden" id="moreMenu" role="menu">
+                  <button class="mode-chip" id="btnAttach" title="اپلود فایل و تصویر — تصویر برای مدل‌های ویژن‌دار، فایل برای تحلیل">📎 فایل و تصویر</button>
+                  <button class="mode-chip" id="btnClipboard" type="button" title="ورود متن کلیپ‌بورد به جعبهٔ نوشتن (Windows)">📋 کلیپ‌بورد</button>
+                  <button class="mode-chip" id="btnMic" type="button" title="ورودی گفتاری (فارسی) — روی Windows با مرورگر داخلی">🎤 گفتار</button>
+                  <button class="mode-chip" id="btnChatSearch" type="button" title="جست‌وجو در این گفتگو">🔍 جست‌وجو</button>
+                  <button class="mode-chip full-access-mode" id="fullAccessIndicator" type="button" aria-pressed="false" title="Full Access خاموش است؛ برای خودکارشدن ابزارهای مجاز کلیک کن">Full Access: خاموش</button>
+                  <button class="mode-chip" id="chipThink">🧠 تفکر</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

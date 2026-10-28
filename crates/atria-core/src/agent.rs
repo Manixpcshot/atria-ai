@@ -14,7 +14,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// Safety cap on model⇄tool round-trips per user message.
-pub const MAX_ROUNDS: u32 = 16;
+/// 64 rounds covers long multi-step tasks (each round is one model call plus
+/// its tool executions); the cap still bounds runaway loops.
+pub const MAX_ROUNDS: u32 = 64;
 /// Automatically request more output when the provider reports an output-token cap.
 const MAX_OUTPUT_CONTINUATIONS: u32 = 3;
 const CONTINUATION_PROMPT: &str = "Continue exactly from where the previous assistant message stopped at the output limit. Do not repeat already generated text. Finish the user's original request and preserve its format.";
@@ -417,7 +419,7 @@ mod tests {
 
     #[test]
     fn agent_round_cap_is_extended_and_output_continuation_is_bounded() {
-        assert_eq!(MAX_ROUNDS, 16);
+        assert_eq!(MAX_ROUNDS, 64);
         assert_eq!(MAX_OUTPUT_CONTINUATIONS, 3);
     }
 

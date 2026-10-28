@@ -189,6 +189,7 @@ function addId(id, tag, cls, parent) {
   return el;
 }
 for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', 'btnNew', 'convList',
+  'btnMore', 'moreMenu',
   'btnClipboard', 'btnMic', 'btnChatSearch', 'chatSearchBar', 'chatSearchInput', 'chatSearchCount', 'chatSearchPrev', 'chatSearchNext', 'chatSearchClose',
   'btnSchedule', 'scheduleModal', 'scheduleX', 'schedList', 'schedLabel', 'schedPrompt', 'schedWhen', 'schedEvery', 'schedAdd', 'schedCancel',
   'schedConnPick', 'schedConnSave', 'schedConnClear', 'schedConnLabel', 'schedFormTitle',
@@ -208,6 +209,15 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'cfDelete', 'cfSetActive', 'cfTestConn', 'cfTestStatus', 'storageBox', 'btnRevealAtria', 'btnAttach', 'fileInput', 'imgTray',
   'stars', 'appVer', 'tokChip']) addId(id);
 byId.connsBody.classList.add('conns-body');
+// mirror the real DOM: ⋯ button + menu live in a .more-wrap that is a sibling
+// of .messages (not an ancestor of it), so outside-click detection works
+{
+  const moreWrap = new El('div');
+  moreWrap.className = 'more-wrap';
+  moreWrap.appendChild(byId.btnMore);
+  moreWrap.appendChild(byId.moreMenu);
+  doc.body.appendChild(moreWrap);
+}
 addId('projectMenu', 'div', 'project-menu hidden');
 addId('updateModal', 'div', 'modal-backdrop hidden');
 addId('updateModalX', 'button', 'x');
@@ -218,7 +228,7 @@ addId('updatePromptNo', 'button', 'btn');
 addId('updatePromptStatus', 'div', 'update-status');
 for (const id of ['modelMenu', 'settingsModal', 'memoryModal', 'projectsModal', 'cmdk', 'tokenGuide', 'imgTray',
   'dsSearchRow', 'btnScroll', 'tokChip', 'connForm', 'btnStop', 'cfHint', 'cfTokenGuide', 'btnInstallUpdate',
-  'scheduleModal', 'snippetsModal', 'chatSearchBar', 'connPresets', 'mcpHub']) byId[id].classList.add('hidden');
+  'scheduleModal', 'snippetsModal', 'chatSearchBar', 'connPresets', 'mcpHub', 'moreMenu']) byId[id].classList.add('hidden');
 for (const t of ['conn', 'behavior', 'sys']) {
   const b = new El('button'); b.className = 'stab' + (t === 'conn' ? ' active' : ''); b.dataset.tab = t; doc.body.appendChild(b);
   const p = new El('div'); p.className = 'stab-body' + (t === 'conn' ? ' active' : ''); p.dataset.tab = t; doc.body.appendChild(p);
@@ -251,7 +261,7 @@ let v18ConnSaved = false;
 let clipboardStub = 'متن کلیپ‌بورد تستی';
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.18.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.19.0' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -275,8 +285,8 @@ function router(cmd, args = {}) {
     case 'command_apply_command': return Promise.resolve('دستور اجرا شد (تأییده‌شده توسط کاربر). کد خروجی: 0\nخروجی:\nhello-atria');
     case 'command_reject_command': return Promise.resolve();
     case 'update_check':
-      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.18.0', latest_version: '0.19.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.19.0', download_size: 10485760 });
-      return Promise.resolve({ current_version: '0.18.0', latest_version: '0.18.0', available: false, release_url: '', download_size: 0 });
+      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.19.0', latest_version: '0.20.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.20.0', download_size: 10485760 });
+      return Promise.resolve({ current_version: '0.19.0', latest_version: '0.19.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'mcp_test_server': { const sv = (args && args.server) || {}; return Promise.resolve({ ok: true, name: sv.name || '', tools: [{ name: 'echo', description: 'echo the arguments' }] }); }
     case 'files_stash': return Promise.resolve('/home/u/.atria/uploads/harness_' + ((args && args.name) || 'file'));
@@ -379,7 +389,7 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.18.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.19.0');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
 ok('UI می‌گوید ابزارهای فایل تابع Full Access‌اند و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس محدود است', indexHtml.includes('ایجنت و ابزارهای فایل') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است'));
 ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس می‌ماند', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است') && indexHtml.includes('کل سیستم — مسیر مطلق (با محافظت)'));
@@ -871,7 +881,7 @@ console.log('\n=== 16c) بررسی خودکار هنگام راه‌اندازی
 ok('پیش از بررسی، مودال آپدیت بسته است', byId.updateModal.classList.contains('hidden'));
 updateCheckAvailable = true;
 await T.checkForUpdate(true); // همان بررسیِ خودکارِ boot (silent)
-ok('با وجود نسخهٔ تازه، مودالِ تأیید روی کاربر باز می‌شود', !byId.updateModal.classList.contains('hidden') && String(byId.updatePromptTitle.textContent).includes('0.19.0'));
+ok('با وجود نسخهٔ تازه، مودالِ تأیید روی کاربر باز می‌شود', !byId.updateModal.classList.contains('hidden') && String(byId.updatePromptTitle.textContent).includes('0.20.0'));
 ok('متن مودال امضا و جایگزینی را توضیح می‌دهد', String(byId.updatePromptBody.textContent).includes('Ed25519') && String(byId.updatePromptBody.textContent).includes('باز می‌شود'));
 ok('قبل از تأیید، نصبی صدا زده نشده', !bridgeCalls.some((c) => c[0] === 'update_install'));
 byId.updatePromptNo.click();
@@ -1107,6 +1117,50 @@ console.log('\n=== 20) v0.18.0 — زمان‌بندی، پیش‌تنظیم‌�
   await sleep(30);
   ok('بررسی وضعیت مخزن، اطلاعات را نمایش می‌دهد', byId.projectRepoStatus.textContent.includes('42'));
   ok('مخزن در شیء پروژه ذخیره شد', (T.activeProject() || {}).repo === 'Manixpcshot/atria-ai');
+}
+
+console.log('\n=== 21) v0.19.0 — منوی ⋯ کامپوزر + انگلیسی چپ‌چین + سقف دور ===');
+{
+  // structure: all six mode-chips live inside the ⋯ menu now
+  ok('دکمهٔ ⋯ در نوار کامپوزر هست', !!byId.btnMore);
+  ok('منوی ⋯ ابتدا بسته است', byId.moreMenu.classList.contains('hidden'));
+  // the harness DOM is synthetic (all addId at body level), so assert on the REAL index.html
+  const htmlSrc = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+  const menuBlock = /<div class="more-menu[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/.exec(htmlSrc);
+  ok('هر شش چیپ داخل بلوک more-menu در index.html‌اند', !!menuBlock && ['btnAttach', 'btnClipboard', 'btnMic', 'btnChatSearch', 'fullAccessIndicator', 'chipThink'].every((id) => menuBlock[0].includes('id="' + id + '"')));
+  // open / close
+  byId.btnMore.click();
+  ok('یک کلیک، منو را باز می‌کند', !byId.moreMenu.classList.contains('hidden') && byId.btnMore.getAttribute('aria-expanded') === 'true');
+  byId.btnMore.click();
+  ok('کلیک دوم، منو را می‌بندد', byId.moreMenu.classList.contains('hidden'));
+  // action chip closes the menu after use
+  byId.btnMore.click();
+  byId.btnChatSearch.click();
+  ok('استفاده از چیپِ «اقدام» منو را می‌بندد', byId.moreMenu.classList.contains('hidden'));
+  ok('جست‌وجوی چت باز شد', !byId.chatSearchBar.classList.contains('hidden'));
+  T.v18CloseSearch();
+  // outside click closes (the mini-DOM has no bubbling, so dispatch on document)
+  byId.btnMore.click();
+  ok('منو دوباره باز شد', !byId.moreMenu.classList.contains('hidden'));
+  doc.dispatch('click', { target: byId.messages });
+  ok('کلیک بیرون، منو را می‌بندد', byId.moreMenu.classList.contains('hidden'));
+  // Full Access dot on the ⋯ button (indicator is now hidden inside the menu)
+  byId.fullAccessIndicator.click();
+  await sleep(15);
+  ok('با روشن شدن Full Access، نقطهٔ قرمز روی ⋯ می‌آید', byId.btnMore.classList.contains('has-fa'));
+  byId.fullAccessIndicator.click();
+  await sleep(15);
+  ok('با خاموش شدن Full Access، نقطه حذف می‌شود', !byId.btnMore.classList.contains('has-fa'));
+  // English-left: the markdown contract puts dir="auto" on prose blocks.
+  // The harness md-stub doesn't build real DOM text, so assert the renderer source.
+  const mdSrc = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'md.js'), 'utf8');
+  const autoCount = (mdSrc.match(/setAttribute\('dir', 'auto'\)/g) || []).length;
+  ok('md.js بلوک‌های متن (p/li/h/blockquote) را dir=auto می‌زند', autoCount >= 4);
+  const cssSrc = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'styles.css'), 'utf8');
+  ok('CSS لیست‌ها و blockquote با margin/border منطقی (RTL/LTR) کار می‌کنند', cssSrc.includes('margin-inline-start: 24px') && cssSrc.includes('border-inline-start: 3px'));
+  // the 508 error text now carries the new cap
+  const coreSrc = fs.readFileSync(path.join(__dirname, '..', 'crates', 'atria-core', 'src', 'agent.rs'), 'utf8');
+  ok('سقف ایمنی دور‌ها به ۶۴ رسیده', coreSrc.includes('pub const MAX_ROUNDS: u32 = 64;'));
 }
 
 console.log('\n============================');

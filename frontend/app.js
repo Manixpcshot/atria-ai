@@ -1112,6 +1112,7 @@ function cacheEls() {
     updatePromptStatus: $('#updatePromptStatus'),
     modelPick: $('#modelPick'), mpName: $('#mpName'), modelMenu: $('#modelMenu'),
     chipThink: $('#chipThink'), fullAccessIndicator: $('#fullAccessIndicator'),
+    btnMore: $('#btnMore'), moreMenu: $('#moreMenu'),
     settingsModal: $('#settingsModal'), settingsX: $('#settingsX'),
     settingsTitle: $('#settingsTitle'), settingsSubtitle: $('#settingsSubtitle'),
     memoryModal: $('#memoryModal'), memoryX: $('#memoryX'), memoryClose: $('#memoryClose'),
@@ -3335,6 +3336,7 @@ function chooseModel(model) {
 
 function syncChips() {
   els.chipThink.classList.toggle('on', !!st.settings.thinking);
+  if (els.btnMore) els.btnMore.classList.toggle('has-fa', st.settings.full_access_mode === true);
   if (els.fullAccessIndicator) {
     const active = st.settings.full_access_mode === true;
     els.fullAccessIndicator.classList.toggle('on', active);
@@ -4359,3 +4361,51 @@ function v18Init() {
   try { if (window.__atria && window.__atria.invoke) v18ScheduleBootMerge(); } catch (e) {}
 }
 document.addEventListener('DOMContentLoaded', v18Init);
+
+/* ================================================================
+ * v0.19.0 — composer overflow menu (⋯): the mode-chips moved into a
+ * corner popover so the bar stays clean.
+ * ================================================================ */
+
+function v19CloseMoreMenu() {
+  if (!els.moreMenu || !els.btnMore) return;
+  els.moreMenu.classList.add('hidden');
+  els.btnMore.classList.remove('open');
+  els.btnMore.setAttribute('aria-expanded', 'false');
+}
+
+function v19OpenMoreMenu() {
+  if (!els.moreMenu || !els.btnMore) return;
+  els.moreMenu.classList.remove('hidden');
+  els.btnMore.classList.add('open');
+  els.btnMore.setAttribute('aria-expanded', 'true');
+}
+
+function v19MoreToggle() {
+  if (!els.moreMenu || !els.btnMore) return;
+  if (els.moreMenu.classList.contains('hidden')) v19OpenMoreMenu();
+  else v19CloseMoreMenu();
+}
+
+function v19WireMoreMenu() {
+  if (!els.btnMore || !els.moreMenu) return;
+  els.btnMore.onclick = (e) => { if (e) e.stopPropagation(); v19MoreToggle(); };
+  // action chips close the menu after use; toggles keep it open so the
+  // state change stays visible. A plain listener (not .onclick) is used so
+  // the chips' own handlers still run.
+  for (const id of ['btnAttach', 'btnClipboard', 'btnMic', 'btnChatSearch']) {
+    const chip = els[id] || document.getElementById(id);
+    if (chip) chip.addEventListener('click', () => v19CloseMoreMenu());
+  }
+  document.addEventListener('click', (e) => {
+    if (els.moreMenu.classList.contains('hidden')) return;
+    const wrap = els.btnMore.parentElement;
+    if (wrap && e && e.target && wrap.contains(e.target)) return;
+    v19CloseMoreMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e && e.key === 'Escape' && !els.moreMenu.classList.contains('hidden')) v19CloseMoreMenu();
+  });
+}
+
+document.addEventListener('DOMContentLoaded', v19WireMoreMenu);

@@ -194,12 +194,14 @@
       if (/^#{1,6}\s/.test(t)) {
         const level = Math.min(6, (t.match(/^#+/) || ['#'])[0].length);
         const h = document.createElement('h' + level);
+        h.setAttribute('dir', 'auto');
         h.innerHTML = renderInline(t.replace(/^#+\s*/, ''));
         el.appendChild(h);
         continue;
       }
       if (/^>\s?/.test(t)) {
         const q = document.createElement('blockquote');
+        q.setAttribute('dir', 'auto');
         q.innerHTML = renderInline(t.replace(/^>\s?/gm, ''));
         el.appendChild(q);
         continue;
@@ -213,6 +215,7 @@
           const m = l.match(/^\s*(?:[-*+]|\d+[.)])\s+(.*)$/);
           if (m) {
             const li = document.createElement('li');
+            li.setAttribute('dir', 'auto');
             li.innerHTML = renderInline(m[1]);
             ul.appendChild(li);
           }
@@ -221,6 +224,7 @@
         continue;
       }
       const p = document.createElement('p');
+      p.setAttribute('dir', 'auto');
       p.innerHTML = renderInline(t).replace(/\n/g, '<br>');
       el.appendChild(p);
     }
