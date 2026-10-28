@@ -6,11 +6,12 @@ license.workspace = true
 description = "Atria CLI: run the Atria engine from the terminal (same core, same ~/.atria data)"
 
 [[bin]]
-name = "atria"
+name = "atria-cli"
 path = "src/main.rs"
 
 [dependencies]
 atria-core = { path = "../atria-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+chrono = "0.4"

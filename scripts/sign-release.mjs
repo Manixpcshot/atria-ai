@@ -35,6 +35,19 @@ const key = crypto.createPrivateKey(privatePem);
 const signature = crypto.sign(null, bytes, key).toString('hex');
 fs.writeFileSync('update-manifest.json', bytes);
 fs.writeFileSync('update-manifest.sig', `${signature}\n`, { mode: 0o644 });
+// atria-cli.exe is a release asset but NOT part of the updater manifest —
+// only its checksum joins the sums file.
+const cliFile = path.resolve('target/release/atria-cli.exe');
+if (fs.existsSync(cliFile)) {
+  const cliBytes = fs.readFileSync(cliFile);
+  assets.push({
+    name: 'atria-cli.exe',
+    url: `https://github.com/${repository}/releases/download/${tag}/atria-cli.exe`,
+    sha256: crypto.createHash('sha256').update(cliBytes).digest('hex'),
+    size: cliBytes.byteLength,
+    _sumsOnly: true,
+  });
+}
 const sums = assets.map((asset) => `${asset.sha256}  ${asset.name}`).join('\n') + '\n';
 fs.writeFileSync('SHA256SUMS.txt', sums);
 console.log(`Signed ${tag} update manifest; assets: ${assets.map((a) => a.name).join(', ')}`);
