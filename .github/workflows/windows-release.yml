@@ -115,7 +115,9 @@ jobs:
         run: cargo build --release --locked -p atria-cli
 
       - name: Build Atria (universal .dmg)
-        run: cargo tauri build --bundles dmg --target universal-apple-darwin
+        run: |
+          export PATH="$(npm prefix -g)/bin:$PATH"
+          tauri build --bundles dmg --target universal-apple-darwin
         working-directory: crates/atria-app
 
       - name: Stage dmg
