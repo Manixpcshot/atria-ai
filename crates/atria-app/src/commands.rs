@@ -240,7 +240,7 @@ pub async fn command_apply_command(id: String, state: State<'_, AppState>) -> Re
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
         .to_path_buf();
-    tokio::task::spawn_blocking(move || atria_core::tools::apply_pending_command(&id, &root, 120))
+    tokio::task::spawn_blocking(move || atria_core::tools::apply_pending_command(&id, &root, atria_core::tools::COMMAND_TIMEOUT_SECS))
         .await
         .map_err(|e| e.to_string())?
 }

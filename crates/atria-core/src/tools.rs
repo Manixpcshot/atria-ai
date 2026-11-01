@@ -207,7 +207,7 @@ pub fn github_tool_catalog() -> Vec<Value> {
 /// a capped output tail.
 pub fn terminal_tool_catalog(full_access_mode: bool) -> Vec<Value> {
     let description = if full_access_mode {
-        "Run a terminal command on this computer (Windows cmd /C, POSIX sh -c). Runs immediately in Full Access without a separate approval; the command, working folder, exit code and an output tail are always logged in the chat. Working folder: the active project folder when set, otherwise the workspace. No admin escalation. Commands are limited to 120 seconds and output is truncated to the last 16KB. Use for builds, installs, git, scripts and system tasks the file tools cannot do."
+        "Run a terminal command on this computer (Windows cmd /C, POSIX sh -c). Runs immediately in Full Access without a separate approval; the command, working folder, exit code and an output tail are always logged in the chat. Working folder: the active project folder when set, otherwise the workspace. No admin escalation. Commands are limited to 10 minutes (long builds are fine) and output is truncated to the last 64KB. Use for builds, installs, git, scripts and system tasks the file tools cannot do."
     } else {
         "Run a terminal command on this computer (Windows cmd /C, POSIX sh -c). Staged: the exact command line is shown in the chat and NOTHING runs until the user approves it there. Working folder: the active project folder when set, otherwise the workspace. No admin escalation. Use for builds, installs, git, scripts and system tasks the file tools cannot do."
     };
@@ -1586,8 +1586,8 @@ fn open_windows_settings(input: &Value) -> ToolOutcome {
 // ---------------------------------------------------------------------------
 
 const MAX_COMMAND_CHARS: usize = 4_000;
-const COMMAND_TIMEOUT_SECS: u64 = 120;
-const COMMAND_OUTPUT_CAP: usize = 16_000;
+pub const COMMAND_TIMEOUT_SECS: u64 = 600;
+const COMMAND_OUTPUT_CAP: usize = 64_000;
 
 #[derive(Serialize, Deserialize)]
 struct PendingCommand {
@@ -2503,9 +2503,9 @@ mod tests {
         // Large output is capped to the 16KB tail (pure cap logic is tested
         // above; here we only assert the runner returns capped output).
         let big = if cfg!(windows) {
-            "for /L %i in (1,1,6000) do @echo line-%i"
+            "for /L %i in (1,1,30000) do @echo line-%i"
         } else {
-            "seq 1 6000"
+            "seq 1 30000"
         };
         let (exit, out) = run_command_capped(big, None, std::time::Duration::from_secs(30))
             .expect("big command must run");

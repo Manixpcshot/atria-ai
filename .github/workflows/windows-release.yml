@@ -1,4 +1,4 @@
-name: Windows Build
+name: Release (Windows + macOS)
 
 on:
   release:
@@ -35,6 +35,9 @@ jobs:
       - name: Build Atria (release)
         run: cargo build --release --locked -p atria-app
 
+      - name: Build atria-cli (release)
+        run: cargo build --release --locked -p atria-cli
+
       - name: Test atria-core
         run: cargo test --release --locked -p atria-core
       - name: Test atria-app
@@ -63,6 +66,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path release-assets | Out-Null
           Copy-Item target/release/atria.exe release-assets/atria.exe
+          Copy-Item target/release/atria-cli.exe release-assets/atria-cli.exe
           Copy-Item Atria-Dawn-win64.zip release-assets/
           Copy-Item SHA256SUMS.txt release-assets/
           Copy-Item update-manifest.json release-assets/
@@ -74,6 +78,7 @@ jobs:
         with:
           files: |
             release-assets/atria.exe
+            release-assets/atria-cli.exe
             release-assets/Atria-Dawn-win64.zip
             release-assets/SHA256SUMS.txt
             release-assets/update-manifest.json
@@ -83,3 +88,52 @@ jobs:
           draft: ${{ github.event_name == 'workflow_dispatch' }}
           overwrite_files: true
           fail_on_unmatched_files: true
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust (stable + universal target)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add universal-apple-darwin
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install Tauri CLI v2
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: Build atria-cli (macOS)
+        run: cargo build --release --locked -p atria-cli
+
+      - name: Build Atria (universal .dmg)
+        run: cargo tauri build --bundles dmg --target universal-apple-darwin
+        working-directory: crates/atria-app
+
+      - name: Stage dmg
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+        run: |
+          mkdir -p release-assets
+          cp target/release/bundle/dmg/*.dmg release-assets/Atria-Dawn-macos.dmg
+          cp target/release/atria-cli release-assets/atria-cli
+          ls -la release-assets
+
+      - name: Upload macOS assets to the release
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/Atria-Dawn-macos.dmg
+            release-assets/atria-cli
+          tag_name: ${{ github.event_release.tag_name || github.ref_name }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          overwrite_files: true
+          fail_on_unmatched_files: false

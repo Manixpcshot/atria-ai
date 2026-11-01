@@ -12,6 +12,7 @@
 //!   atria-cli --model NAME            override the configured model
 //!   atria-cli --provider NAME         openai|anthropic|deepseek|groq|openrouter|gemini|ollama|deepseekweb
 //!   atria-cli --full                  Claude-Code style: terminal + computer + files in the current directory
+//!   atria-cli --fa | --en             Persian/RTL UI (right-to-left) | English UI (default)
 //!   atria-cli --update                self-update from the latest GitHub release (SHA-256 verified)
 //!   atria-cli --tools | --no-tools    force the tool loop on/off
 //!   atria-cli --version               print version and build time
@@ -33,6 +34,55 @@ struct CliConfig {
     model: String,
     #[serde(default)]
     kind: String,
+    /// Persian/RTL UI mode. English is the default; persisted in cli.json.
+    #[serde(default)]
+    fa: bool,
+}
+
+/* ---------------- language (English default; --fa / /fa switches to Persian/RTL) ---------------- */
+
+static FA_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn fa() -> bool {
+    FA_MODE.load(Ordering::Relaxed)
+}
+
+fn set_fa(b: bool) {
+    FA_MODE.store(b, Ordering::Relaxed);
+}
+
+/// Persian lines are prefixed with a right-to-left mark so terminals render them RTL.
+fn rtl(s: &str) -> String {
+    if fa() {
+        format!("\u{200F}{s}")
+    } else {
+        s.to_string()
+    }
+}
+
+/// Pick the Persian string when FA mode is on, English otherwise.
+macro_rules! tx {
+    ($en:expr, $fa:expr) => {
+        if fa() { $fa } else { $en }
+    };
+}
+
+/// Persist the language choice into the CLI config file (best effort).
+fn save_fa(cfg_path: &Path, b: bool) {
+    let mut v: serde_json::Value = std::fs::read_to_string(cfg_path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(serde_json::json!({
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "kind": "openai"
+        }));
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("fa".into(), serde_json::json!(b));
+    }
+    let text = serde_json::to_string_pretty(&v).unwrap_or_default();
+    let _ = std::fs::create_dir_all(cfg_path.parent().unwrap_or_else(|| Path::new(".")));
+    let _ = std::fs::write(cfg_path, text);
 }
 
 /* ---------------- argument parsing ---------------- */
@@ -48,6 +98,7 @@ struct Args {
     update: bool,
     version: bool,
     help: bool,
+    fa: Option<bool>,
 }
 
 fn parse_args(args: &[String]) -> Args {
@@ -62,6 +113,7 @@ fn parse_args(args: &[String]) -> Args {
         update: false,
         version: false,
         help: false,
+        fa: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -73,6 +125,8 @@ fn parse_args(args: &[String]) -> Args {
             "--version" | "-V" => out.version = true,
             "--update" => out.update = true,
             "--full" | "--dangerous" | "--everything" => out.full = true,
+            "--fa" => out.fa = Some(true),
+            "--en" => out.fa = Some(false),
             "--provider" | "--prov" => {
                 i += 1;
                 if i < args.len() {
@@ -115,6 +169,8 @@ enum Cmd {
     Provider(Option<String>),
     Full(Option<String>),
     Key(Option<String>),
+    /// /fa (Persian/RTL on) or /en (English on).
+    Lang(bool),
     Unknown(String),
     /// A plain user message (no leading slash).
     Plain,
@@ -137,6 +193,8 @@ fn parse_slash(line: &str) -> Cmd {
         "provider" | "prov" | "api" => Cmd::Provider(arg),
         "full" | "dangerous" => Cmd::Full(arg),
         "key" => Cmd::Key(arg),
+        "fa" => Cmd::Lang(true),
+        "en" => Cmd::Lang(false),
         other => Cmd::Unknown(other.to_string()),
     }
 }
@@ -284,14 +342,16 @@ fn write_starter(path: &Path) {
     let starter = serde_json::json!({
         "base_url": "https://api.openai.com/v1",
         "model": "gpt-4o-mini",
-        "kind": "openai"
+        "kind": "openai",
+    "fa": false
     });
     if let Err(e) = std::fs::write(path, serde_json::to_string_pretty(&starter).unwrap()) {
-        eprintln!("failed to write config file: {e}");
+        eprintln!("{} {e}", tx!("failed to write config file:", "نوشتن فایل تنظیمات ناموفق بود:"));
         std::process::exit(2);
     }
-    eprintln!("config written: {}", path.display());
-    eprintln!("edit it to point at your provider, then set ATRIA_API_KEY and run atria-cli");
+    eprintln!("{} {}", tx!("config written:", "تنظیمات نوشته شد:"), path.display());
+    eprintln!("{}", tx!("edit it to point at your provider, then set ATRIA_API_KEY and run atria-cli",
+        "آن را برای ارائه‌دهندهٔ خود ویرایش کن، سپس ATRIA_API_KEY را تنظیم کن و atria-cli را اجرا کن"));
 }
 
 /* ---------------- session ---------------- */
@@ -483,7 +543,7 @@ fn run_turn(
                     eprint!(
                         "\r\x1b[2K  {} {} {} {}",
                         paint("✻", "35;1", colors),
-                        paint("thinking", "35", colors),
+                        paint(if fa() { "فکر کردن" } else { "thinking" }, "35", colors),
                         paint("…", "35", colors),
                         paint(&format!("{secs:.1}s"), "90", colors)
                     );
@@ -545,20 +605,37 @@ fn run_turn(
     match result {
         Ok(out) => {
             println!();
-            eprintln!(
-                "  {} {} {} {} {} {}{}{}",
-                c("·", "90"),
-                out.rounds,
-                if out.rounds == 1 { c("round", "90") } else { c("rounds", "90") },
-                c(&format!("{elapsed:.1}s"), "90"),
-                c("·", "90"),
-                c(
-                    &format!("{} in / {} out tokens", out.input_tokens, out.output_tokens),
-                    "90"
-                ),
-                if cancelled { c(" (cancelled)", "33") } else { String::new() },
-                ""
-            );
+            if fa() {
+                eprintln!(
+                    "  {} {} {} {} {} {}{}{}",
+                    c("·", "90"),
+                    out.rounds,
+                    c(&rtl("دور"), "90"),
+                    c(&format!("{elapsed:.1}s"), "90"),
+                    c("·", "90"),
+                    c(
+                        &rtl(&format!("{} توکن ورود / {} خروج", out.input_tokens, out.output_tokens)),
+                        "90"
+                    ),
+                    if cancelled { c(&rtl(" (لغو شد)"), "33") } else { String::new() },
+                    ""
+                );
+            } else {
+                eprintln!(
+                    "  {} {} {} {} {} {}{}{}",
+                    c("·", "90"),
+                    out.rounds,
+                    if out.rounds == 1 { c("round", "90") } else { c("rounds", "90") },
+                    c(&format!("{elapsed:.1}s"), "90"),
+                    c("·", "90"),
+                    c(
+                        &format!("{} in / {} out tokens", out.input_tokens, out.output_tokens),
+                        "90"
+                    ),
+                    if cancelled { c(" (cancelled)", "33") } else { String::new() },
+                    ""
+                );
+            }
             if !cancelled {
                 history.extend(out.new_messages);
             }
@@ -658,11 +735,11 @@ fn update_available(rt: &tokio::runtime::Runtime) -> Result<Option<(String, Stri
 }
 
 fn run_update(rt: &tokio::runtime::Runtime) -> ! {
-    eprintln!("checking for updates...");
+    eprintln!("{}", tx!("checking for updates...", "در حال بررسی به‌روزرسانی..."));
     let want = match update_available(rt) {
         Ok(Some((_tag, w))) => w,
         Ok(None) => {
-            eprintln!("{} atria-cli is up to date.", c("✓", "32"));
+            eprintln!("{} {}", c("✓", "32"), tx!("atria-cli is up to date.", "atria-cli به‌روز است."));
             std::process::exit(0);
         }
         Err(e) => {
@@ -673,7 +750,7 @@ fn run_update(rt: &tokio::runtime::Runtime) -> ! {
     let exe_url = format!(
         "https://github.com/{REPO}/releases/latest/download/atria-cli.exe"
     );
-    eprintln!("downloading {exe_url}");
+    eprintln!("{} {}", tx!("downloading", "در حال دانلود"), c(&exe_url, "90"));
     let bytes = rt
         .block_on(atria_core::http_get_bytes(&exe_url, 120))
         .map_err(|e| e.to_string())
@@ -682,19 +759,19 @@ fn run_update(rt: &tokio::runtime::Runtime) -> ! {
             fail(1);
         });
     if sha256_hex(&bytes) != want {
-        eprintln!("{} SHA-256 mismatch — refusing to replace the binary.", c("✗", "31"));
+        eprintln!("{} {}", c("✗", "31"), tx!("SHA-256 mismatch — refusing to replace the binary.", "همخوانی SHA-256 نبود — فایل جایگزین نمی‌شود."));
         fail(1);
     }
     let cur = match std::env::current_exe() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("{} cannot locate current exe: {e}", c("✗", "31"));
+            eprintln!("{} {}", c("✗", "31"), tx!(format!("cannot locate current exe: {e}"), format!("پیداکردن فایل فعلی نشد: {e}")));
             fail(1);
         }
     };
     let tmp = cur.with_extension("exe.new");
     if let Err(e) = std::fs::write(&tmp, &bytes) {
-        eprintln!("{} cannot write {}: {e}", c("✗", "31"), tmp.display());
+        eprintln!("{} {}", c("✗", "31"), tx!(format!("cannot write {}: {e}", tmp.display()), format!("نوشتن فایل موقت نشد: {e}")));
         fail(1);
     }
     #[cfg(windows)]
@@ -709,7 +786,7 @@ fn run_update(rt: &tokio::runtime::Runtime) -> ! {
             cur.display()
         );
         if let Err(e) = std::fs::write(&bat, body) {
-            eprintln!("{} cannot write updater script: {e}", c("✗", "31"));
+            eprintln!("{} {}", c("✗", "31"), tx!(format!("cannot write updater script: {e}"), format!("نوشتن اسکریپت به‌روزرسانی نشد: {e}")));
             fail(1);
         }
         use std::os::windows::process::CommandExt;
@@ -720,18 +797,18 @@ fn run_update(rt: &tokio::runtime::Runtime) -> ! {
             .spawn()
             .is_err()
         {
-            eprintln!("{} could not start the replacement step — move {} over {} manually.", c("✗", "31"), tmp.display(), cur.display());
+            eprintln!("{} {}", c("✗", "31"), tx!(format!("could not start the replacement step — move {} over {} manually.", tmp.display(), cur.display()), format!("مرحلهٔ جایگزینی آغاز نشد — دستی {t} را جایگزین {c} کن.", t=tmp.display(), c=cur.display())));
             fail(1);
         }
-        eprintln!("{} update verified and downloaded — atria-cli.exe is being replaced (a few seconds). Run atria-cli again.", c("✓", "32"));
+        eprintln!("{} {}", c("✓", "32"), tx!("update verified and downloaded — atria-cli.exe is being replaced (a few seconds). Run atria-cli again.", "به‌روزرسانی تأیید و دانلود شد — atria-cli.exe در حال جایگزینی است (چند ثانیه). دوباره اجرا کن."));
     }
     #[cfg(not(windows))]
     {
         if let Err(e) = std::fs::rename(&tmp, &cur) {
-            eprintln!("{} cannot replace the binary: {e}", c("✗", "31"));
+            eprintln!("{} {}", c("✗", "31"), tx!(format!("cannot replace the binary: {e}"), format!("جایگزینی فایل ممکن نشد: {e}")));
             fail(1);
         }
-        eprintln!("{} updated.", c("✓", "32"));
+        eprintln!("{} {}", c("✓", "32"), tx!("updated.", "به‌روزرسانی شد."));
     }
     std::process::exit(0);
 }
@@ -741,6 +818,40 @@ fn run_update(rt: &tokio::runtime::Runtime) -> ! {
 
 fn print_banner(s: &Session, cfg_path: &Path) {
     let date = chrono::Local::now().format("%Y-%m-%d %H:%M");
+    if fa() {
+        println!("{}  v{}", c(&rtl("آتریا — ایجنت ترمینالی"), "1"), env!("CARGO_PKG_VERSION"));
+        println!("{} {}  ({})", c(&rtl("ارائه‌دهنده:"), "90"), s.kind, c(&s.base_url, "90"));
+        println!("{} {}", c(&rtl("مدل:"), "90"), s.model);
+        if s.full {
+            println!(
+                "{} {} — {}",
+                c(&rtl("حالت:"), "90"),
+                c("FULL", "33;1"),
+                rtl(&format!("ترمینال، کنترل رایانه، فایل‌های {}", Session::cwd_string()))
+            );
+        } else {
+            println!("{} {}", c(&rtl("حالت:"), "90"), rtl("استاندارد (جست‌وجوی وب + فایل‌های workspace)"));
+        }
+        println!("{} {}", c(&rtl("تنظیمات:"), "90"), cfg_path.display());
+        println!(
+            "{} {}  {}  {}: {}",
+            c(&rtl("تاریخ:"), "90"),
+            date,
+            c("·", "90"),
+            rtl("ابزار"),
+            if s.tools { rtl("روشن") } else { rtl("خاموش") }
+        );
+        println!("{}", rtl("دستورات: /help  ·  خروج: /exit یا Ctrl+D  ·  زبان انگلیسی: /en"));
+        println!();
+        if s.full {
+            eprintln!(
+                "{} {}",
+                c("⚠", "33;1"),
+                rtl("حالت FULL: دستورات بلافاصله اجرا و در همین گفتگو ثبت می‌شوند. ارتقاء به admin نیست. /full off برای بازگشت.")
+            );
+        }
+        return;
+    }
     println!("{}  v{}", c("Atria — terminal agent", "1"), env!("CARGO_PKG_VERSION"));
     println!("{} {}  ({})", c("provider:", "90"), s.kind, c(&s.base_url, "90"));
     println!("{} {}", c("model:", "90"), s.model);
@@ -773,6 +884,14 @@ fn print_banner(s: &Session, cfg_path: &Path) {
 }
 
 fn print_help() {
+    if fa() {
+        print_help_fa();
+    } else {
+        print_help_en();
+    }
+}
+
+fn print_help_en() {
     println!(
         "atria-cli — Atria terminal agent
 
@@ -811,6 +930,46 @@ Claude Code. Self-update replaces only atria-cli.exe after a SHA-256 check."
     );
 }
 
+fn print_help_fa() {
+    println!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        rtl("atria-cli — ایجنت ترمینالی آتریا"),
+        rtl("استفاده:"),
+        rtl("  atria-cli                        شروع جلسهٔ تعاملی"),
+        rtl("  atria-cli \"prompt\"               یک گفتگو، سپس خروج"),
+        rtl("  echo \"متن\" | atria-cli          یک گفتگو از stdin"),
+        rtl("  atria-cli --init                 نوشتن ~/.atria/cli.json نمونه"),
+        rtl("  atria-cli --config PATH          فایل تنظیمات جایگزین"),
+        rtl("  atria-cli --model NAME           تغییر مدل بدون تغییر فایل"),
+        rtl("  atria-cli --provider NAME        openai|anthropic|deepseek|groq|openrouter|gemini|ollama|deepseekweb"),
+        rtl("  atria-cli --full                 مثل Claude Code: ترمینال + رایانه + فایل‌های دایرکتوری فعلی"),
+        rtl("  atria-cli --update               خودبه‌روزرسانی از آخرین نسخه (مدرک‌شده با SHA-256)"),
+        rtl("  atria-cli --fa | --en            رابط فارسی/راست‌به‌چپ | انگلیسی (پیش‌فرض)"),
+        rtl("  atria-cli --tools | --no-tools   اجبار روشن/خاموش بودن حلقهٔ ابزار"),
+        rtl("  atria-cli --version              نمایش نسخه و زمان ساخت"),
+        "",
+    );
+    println!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        rtl("دستورات جلسه:"),
+        rtl("  /help                 همین راهنما"),
+        rtl("  /clear                پاک کردن گفتگو (حافظهٔ بلندمدت می‌ماند)"),
+        rtl("  /model [NAME]         نمایش یا تغییر مدل (بدون آرگومان = فهرست مدل‌ها)"),
+        rtl("  /provider [NAME] [URL] نمایش یا تعویض ارائه‌دهنده (فقط این جلسه)"),
+        rtl("  /full [on|off]        حالت FULL: ترمینال + کنترل رایانه + فایل‌های دایرکتوری"),
+        rtl("                         فعلی (همان قوانین Full Access آتریا: ثبت هر دستور،"),
+        rtl("                         بدون ارتقاء به admin)"),
+        rtl("  /fa | /en             زبان رابط: فارسی/راست‌به‌چپ | انگلیسی"),
+        rtl("  /key [VALUE]          وضعیت کلید یا تنظیم آن (فقط این جلسه)"),
+        rtl("  /exit                 خروج (Ctrl+D هم کار می‌کند)"),
+    );
+    println!("{}\n{}\n{}\n{}\n{}",
+        rtl("کلید API فقط از متغیر محیطی ATRIA_API_KEY خوانده می‌شود و هرگز در"),
+        rtl("دیسک ذخیره نمی‌شود. در حالت استاندارد، ابزارهای فایل محدود به"),
+        rtl("~/.atria/workspace است؛ با --full در دایرکتوری فعلی کار می‌کنند،"),
+        rtl("مثل Claude Code. خودبه‌روزرسانی فقط بعد از بررسی SHA-256 فایل"),
+        rtl("atria-cli.exe را جایگزین می‌کند."),
+    );
+}
+
 /* ---------------- main ---------------- */
 
 fn main() {
@@ -823,8 +982,13 @@ fn main() {
         } else {
             "unknown panic".to_string()
         };
-        eprintln!("\natria-cli hit an unexpected error: {msg}");
-        eprintln!("Re-run with RUST_BACKTRACE=1 for details, and report this to Atria.");
+        if fa() {
+            eprintln!("\n{} {msg}", rtl("atria-cli با یک خطای غیرمنتظره مواجه شد:"));
+            eprintln!("{}", rtl("با RUST_BACKTRACE=1 دوباره اجرا کن و این را به تیم آتریا گزارش بده."));
+        } else {
+            eprintln!("\natria-cli hit an unexpected error: {msg}");
+            eprintln!("Re-run with RUST_BACKTRACE=1 for details, and report this to Atria.");
+        }
         pause_if_tty();
     }));
 
@@ -835,6 +999,9 @@ fn main() {
 
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let args = parse_args(&raw);
+    if let Some(b) = args.fa {
+        set_fa(b);
+    }
     if args.version {
         println!("atria-cli v{} (built {})", env!("CARGO_PKG_VERSION"), env!("BUILD_TIME"));
         return;
@@ -877,13 +1044,14 @@ fn main() {
                 // First run: create the starter config and keep going so the
                 // window never flashes closed on a double-click.
                 eprintln!(
-                    "first run: creating a starter config at {}",
-                    args.config.display()
+                    "{} {}",
+                    tx!("first run: creating a starter config at", "اولین اجرا: ساخت فایل تنظیمات اولیه در"),
+                    c(&args.config.display().to_string(), "90")
                 );
                 write_starter(&args.config);
                 match load_config(&args.config) {
                     Ok(c) => {
-                        eprintln!("edit that file to set your provider/model, then start chatting.");
+                        eprintln!("{}", tx!("edit that file to set your provider/model, then start chatting.", "آن فایل را ویرایش کن (ارائه‌دهنده/مدل) و سپس شروع به گفتگو کن."));
                         eprintln!();
                         c
                     }
@@ -894,36 +1062,44 @@ fn main() {
                 }
             } else {
                 eprintln!("{e}");
-                eprintln!("run `atria-cli --init` to create a config file.");
+                eprintln!("{}", tx!("run `atria-cli --init` to create a config file.", "برای ساخت فایل تنظیمات، `atria-cli --init` را اجرا کن."));
                 fail(2);
             }
         }
     };
+    set_fa(match args.fa { Some(b) => b, None => cfg.fa });
     if let Some(p) = &args.provider {
         match resolve_provider(p) {
             Some((nm, kind, url)) => {
                 cfg.kind = kind.to_string();
                 cfg.base_url = url.to_string();
-                eprintln!("provider: {nm}  ({url})");
+                eprintln!("{} {}  ({})", tx!("provider:", "ارائه‌دهنده:"), nm, c(&url, "90"));
             }
             None => {
-                eprintln!("unknown provider: {p} — try: {}", provider_names());
+                eprintln!(
+                    "{}",
+                    tx!(format!("unknown provider: {p} — try: {}", provider_names()),
+                        format!("ارائه‌دهنده ناشناخته: {p} — این‌ها را امتحان کن: {}", provider_names()))
+                );
                 fail(2);
             }
         }
     }
     let api_key = std::env::var("ATRIA_API_KEY").unwrap_or_default();
     if api_key.trim().is_empty() {
-        eprintln!("ATRIA_API_KEY is not set. Export it — the key is never written to disk.");
+        eprintln!("{}", tx!("ATRIA_API_KEY is not set. Export it — the key is never written to disk.",
+            "ATRIA_API_KEY تنظیم نیست. آن را export کن — کلید هرگز در دیسک نوشته نمی‌شود."));
         if interactive {
-            eprintln!("(you can also type /key <value> inside the session)");
-            eprint!("API key: ");
+            eprintln!("{}", tx!("(you can also type /key <value> inside the session)",
+                "(هم می‌توانی داخل جلسه /key <value> را بنویسی)"));
+            eprint!("{}", tx!("API key: ", "کلید API: "));
             let _ = std::io::stdout().flush();
             let mut k = String::new();
             let _ = std::io::stdin().read_line(&mut k);
             let k = k.trim().to_string();
             if k.is_empty() {
-                eprintln!("no key given — exiting. Set ATRIA_API_KEY or paste one when asked.");
+                eprintln!("{}", tx!("no key given — exiting. Set ATRIA_API_KEY or paste one when asked.",
+                    "کلیدی وارد نشد — خارج می‌شوم. ATRIA_API_KEY را تنظیم کن یا هنگام سؤال یکی بچسبان."));
                 fail(2);
             }
             run_repl(cfg, &args.config, k, args.tools, args.model, args.full);
@@ -955,7 +1131,7 @@ fn main() {
     match run_turn(&rt, &session, &mut history) {
         Ok(_) => {}
         Err(e) => {
-            eprintln!("{} {e}", c("error:", "31;1"));
+            eprintln!("{} {}", c(&tx!("error:", "خطا:"), "31;1"), e);
             fail(1);
         }
     }
@@ -994,8 +1170,10 @@ fn run_repl(
     .ok();
     if let Some(Ok(Some(_))) = check {
         eprintln!(
-            "{} a newer atria-cli is available — run `atria-cli --update`",
-            c("↑", "35;1")
+            "{} {}",
+            c("↑", "35;1"),
+            tx!("a newer atria-cli is available — run `atria-cli --update`",
+                "نسخهٔ تازه‌تری از atria-cli هست — `atria-cli --update` را اجرا کن")
         );
     }
 
@@ -1010,7 +1188,7 @@ fn run_repl(
             }
             Ok(_) => {}
             Err(e) => {
-                eprintln!("input error: {e}");
+                eprintln!("{} {e}", tx!("input error:", "خطای ورودی:"));
                 break;
             }
         }
@@ -1023,14 +1201,15 @@ fn run_repl(
             Cmd::Help => print_help(),
             Cmd::Clear => {
                 history.clear();
-                eprintln!("conversation cleared (long-term memory is kept)");
+                eprintln!("{}", tx!("conversation cleared (long-term memory is kept)",
+                    "گفتگو پاک شد (حافظهٔ بلندمدت حفظ است)"));
             }
             Cmd::Model(Some(name)) => {
                 session.model = name;
-                eprintln!("model set to: {}", session.model);
+                eprintln!("{} {}", tx!("model set to:", "مدل تنظیم شد:"), session.model);
             }
             Cmd::Model(None) => {
-                eprintln!("model: {}", session.model);
+                eprintln!("{} {}", tx!("model:", "مدل:"), session.model);
                 let models = rt.block_on(atria_core::list_models(
                     &session.base_url,
                     &session.api_key,
@@ -1041,16 +1220,19 @@ fn run_repl(
                             .into_iter()
                             .filter(|m| !m.contains("embedding"))
                             .collect();
-                        eprintln!("{} models from the provider:", ids.len());
+                        eprintln!("{} {}", ids.len(), tx!("models from the provider:", "مدل از ارائه‌دهنده:"));
                         for m in ids.iter().take(100) {
                             eprintln!("  {m}");
                         }
                         if ids.len() > 100 {
                             eprintln!("  … {} more", ids.len() - 100);
                         }
-                        eprintln!("set one with: /model <name>");
+                        eprintln!("{}", tx!("set one with: /model <name>", "با /model <name> یکی را انتخاب کن"));
                     }
-                    Err(e) => eprintln!("could not list models: {e}\nset one manually with: /model <name>"),
+                    Err(e) => eprintln!("{}\n{}",
+                        tx!(format!("could not list models: {e}"), format!("فهرست گرفتن مدل‌ها نشد: {e}")),
+                        tx!("set one manually with: /model <name>", "دستی با /model <name> یکی را انتخاب کن")),
+
                 }
             }
             Cmd::Provider(Some(spec)) => {
@@ -1063,51 +1245,74 @@ fn run_repl(
                         let target = custom_url.unwrap_or(url);
                         session.base_url = target.to_string();
                         eprintln!(
-                            "provider set to: {nm}  (base_url: {})  — /model to pick a model",
-                            session.base_url
+                            "{} {nm}  ({})  {}",
+                            tx!("provider set to:", "ارائه‌دهنده تنظیم شد:"),
+                            c(&session.base_url, "90"),
+                            tx!("— /model to pick a model", "— با /model مدل را انتخاب کن")
                         );
                     }
                     None => eprintln!(
-                        "unknown provider: {name} — try: {}",
-                        provider_names()
+                        "{}",
+                        tx!(format!("unknown provider: {name} — try: {}", provider_names()),
+                            format!("ارائه‌دهنده ناشناخته: {name} — این‌ها را امتحان کن: {}", provider_names()))
                     ),
                 }
             }
             Cmd::Provider(None) => {
-                eprintln!("provider: {}  (base_url: {})", session.kind, session.base_url);
-                eprintln!("known providers: {}", provider_names());
+                eprintln!("{} {}  ({})", tx!("provider:", "ارائه‌دهنده:"), session.kind, session.base_url);
+                eprintln!("{} {}", tx!("known providers:", "ارائه‌دهنده‌های شناخته‌شده:"), provider_names());
             }
             Cmd::Full(Some(v)) => match v.to_ascii_lowercase().as_str() {
                 "on" | "true" | "1" | "yes" | "full" => {
                     session.full = true;
                     eprintln!(
-                        "FULL mode ON — terminal, computer control, files in {}; every command is logged. No admin escalation.",
-                        Session::cwd_string()
+                        "{}",
+                        tx!(format!("FULL mode ON — terminal, computer control, files in {}; every command is logged. No admin escalation.", Session::cwd_string()),
+                            format!("حالت FULL روشن شد — ترمینال، کنترل رایانه، فایل‌های {}; هر دستور ثبت می‌شود. بدون ارتقاء به admin.", Session::cwd_string()))
                     );
                 }
                 "off" | "false" | "0" | "no" | "standard" => {
                     session.full = false;
-                    eprintln!("FULL mode OFF — back to standard (web + workspace files).");
+                    eprintln!("{}", tx!("FULL mode OFF — back to standard (web + workspace files).",
+                        "حالت FULL خاموش شد — بازگشت به استاندارد (وب + فایل‌های workspace)."));
                 }
-                other => eprintln!("usage: /full on | /full off (got: {other})"),
+                other => eprintln!("{}", tx!(format!("usage: /full on | /full off (got: {other})"),
+                    format!("استفاده: /full on | /full off (دریافت شد: {other})"))),
             },
             Cmd::Full(None) => {
                 let state = if session.full { c("ON", "33;1") } else { c("off", "90") };
-                eprintln!("FULL mode: {state}");
+                eprintln!("{} {state}", tx!("FULL mode:", "حالت FULL:"));
             }
             Cmd::Key(Some(value)) => {
                 session.api_key = value;
-                eprintln!("api key updated for this session (not saved to disk)");
+                eprintln!("{}", tx!("api key updated for this session (not saved to disk)",
+                    "کلید API برای این جلسه به‌روز شد (در دیسک ذخیره نمی‌شود)"));
             }
             Cmd::Key(None) => {
                 if session.api_key.is_empty() {
-                    eprintln!("no api key set");
+                    eprintln!("{}", tx!("no api key set", "کلید API تنظیم نشده"));
                 } else {
                     let head: String = session.api_key.chars().take(4).collect();
-                    eprintln!("api key: {head}… (session only)");
+                    eprintln!("{} {head}… {}", tx!("api key:", "کلید API:"), tx!("(session only)", "(فقط این جلسه)"));
                 }
             }
-            Cmd::Unknown(name) => eprintln!("unknown command: /{name} — try /help"),
+            Cmd::Lang(enable_fa) => {
+                set_fa(enable_fa);
+                save_fa(cfg_path, enable_fa);
+                eprintln!(
+                    "{}",
+                    if enable_fa {
+                        rtl("زبان رابط: فارسی (راست‌به‌چپ) — /en برای بازگشت به انگلیسی")
+                    } else {
+                        "UI language: English (left-to-right) — /fa for Persian".to_string()
+                    }
+                );
+            }
+            Cmd::Unknown(name) => eprintln!(
+                "{}",
+                tx!(format!("unknown command: /{name} — try /help"),
+                    format!("دستور ناشناخته: /{name} — /help را ببین"))
+            ),
             Cmd::Plain => {
                 let turn_line = line.clone();
                 history.push(atria_core::Message {
@@ -1117,14 +1322,14 @@ fn run_repl(
                 match run_turn(&rt, &session, &mut history) {
                     Ok(_) => {}
                     Err(e) => {
-                        eprintln!("{} {e}", c("error:", "31;1"));
+                        eprintln!("{} {}", c(&tx!("error:", "خطا:"), "31;1"), e);
                         history.pop(); // drop the failed user turn so it can be retried
                     }
                 }
             }
         }
     }
-    println!("bye");
+    println!("{}", tx!("bye", "خدا حافظ"));
 }
 
 /* ---------------- tests ---------------- */
