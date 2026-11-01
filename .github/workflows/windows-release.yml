@@ -97,11 +97,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust (stable + universal target)
+      - name: Install Rust (stable + Apple targets)
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustup target add universal-apple-darwin
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
@@ -122,7 +122,9 @@ jobs:
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
         run: |
           mkdir -p release-assets
-          cp target/release/bundle/dmg/*.dmg release-assets/Atria-Dawn-macos.dmg
+          D=$(find target -type d -path '*/release/bundle/dmg' | head -1)
+          echo "dmg dir: $D"
+          cp "$D"/*.dmg release-assets/Atria-Dawn-macos.dmg
           cp target/release/atria-cli release-assets/atria-cli
           ls -la release-assets
 
