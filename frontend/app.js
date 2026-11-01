@@ -2917,6 +2917,10 @@ function renderCmdkList(q) {
 
 /* ---------------- signed update UI ---------------- */
 
+// True while a verified update is downloading/replacing: the boot-time
+// silent check (and any manual check) must not clobber the install UI.
+let updateInstalling = false;
+
 function showUpdatePrompt(result) {
   if (!els.updateModal) return;
   if (els.updatePromptTitle) els.updatePromptTitle.textContent = 'نسخهٔ ' + (result.latest_version || 'تازه') + ' آتریا آماده است';
@@ -2931,7 +2935,9 @@ function hideUpdatePrompt() {
   if (els.updateModal) closeModal(els.updateModal);
 }
 async function performUpdateInstall() {
+  if (updateInstalling) return;
   if (!window.__atria || !window.__atria.update_install) return toast('پل به‌روزرسانی آماده نیست', 'err');
+  updateInstalling = true;
   if (els.updatePromptYes) els.updatePromptYes.disabled = true;
   if (els.updatePromptNo) els.updatePromptNo.disabled = true;
   if (els.updateModalX) els.updateModalX.disabled = true;
@@ -2950,9 +2956,12 @@ async function performUpdateInstall() {
     if (els.updatePromptNo) els.updatePromptNo.disabled = false;
     if (els.updateModalX) els.updateModalX.disabled = false;
     toast('به‌روزرسانی نصب نشد؛ از Release رسمی استفاده کن.', 'err');
+  } finally {
+    updateInstalling = false;
   }
 }
 async function checkForUpdate(silent = false) {
+  if (updateInstalling) return; // never clobber an in-progress install
   if (!els.updateStatus || !window.__atria || !window.__atria.update_check) return;
   if (els.btnCheckUpdate) { els.btnCheckUpdate.disabled = true; els.btnCheckUpdate.textContent = 'در حال بررسی…'; }
   els.updateStatus.textContent = 'در حال دریافت Release و بررسی امضای آن…';
@@ -2978,7 +2987,9 @@ async function checkForUpdate(silent = false) {
   }
 }
 async function installUpdate() {
+  if (updateInstalling) return;
   if (!confirm('فایل نسخهٔ جدید دریافت می‌شود، امضا و SHA-256 آن بررسی خواهد شد، سپس آتریا برای جایگزینی دوباره راه‌اندازی می‌شود. ادامه؟')) return;
+  updateInstalling = true;
   if (els.btnInstallUpdate) els.btnInstallUpdate.disabled = true;
   if (els.updateStatus) els.updateStatus.textContent = 'در حال دریافت و اعتبارسنجی امضا و SHA-256…';
   try {
@@ -2989,6 +3000,8 @@ async function installUpdate() {
     if (els.updateStatus) els.updateStatus.textContent = 'نصب خودکار انجام نشد: ' + message;
     if (els.btnInstallUpdate) els.btnInstallUpdate.disabled = false;
     toast('به‌روزرسانی نصب نشد؛ از Release رسمی استفاده کن.', 'err');
+  } finally {
+    updateInstalling = false;
   }
 }
 

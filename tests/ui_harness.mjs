@@ -370,6 +370,9 @@ localStorage.setItem('atria.activeconn.v1', 'c1');
 
 let bootError = null;
 try { doc.dispatch('DOMContentLoaded'); if (win.__atriaBootPromise) await win.__atriaBootPromise; } catch (e) { bootError = e; }
+// The app schedules a silent update check 1500ms after boot. Let it fire now
+// (while updateCheckAvailable=false) so it can never race the update UI tests.
+await sleep(1700);
 
 console.log('\n=== 1) پل IPC + راه‌اندازی (boot) ===');
 ok('boot بدون خطا اجرا شد', !bootError, bootError && String(bootError));
@@ -894,6 +897,19 @@ byId.updatePromptYes.click();
 await sleep(10);
 ok('«حالا به‌روز کنم» دانلودِ معتبر + جایگزینی را آغاز می‌کند', bridgeCalls.some((c) => c[0] === 'update_install') && String(byId.updatePromptStatus.textContent).length > 0);
 ok('دکمه‌ها حین نصب قفل شده‌اند', byId.updatePromptYes.disabled === true && byId.updatePromptNo.disabled === true);
+// regression: a version check (boot-time or manual) must not clobber an in-progress install
+const savedInstall = win.__atria.update_install;
+let resolveInstall;
+win.__atria.update_install = () => new Promise((r) => { resolveInstall = r; });
+bridgeCalls.length = 0;
+byId.updatePromptYes.click();
+await sleep(10);
+await T.checkForUpdate(true); // must be a no-op while installing
+ok('بررسی نسخه حین نصب، رابط نصب را دست‌نخورده می‌گذارد', String(byId.updatePromptStatus.textContent).includes('در حال دریافت') && byId.updatePromptYes.disabled === true && byId.updatePromptNo.disabled === true);
+resolveInstall();
+await sleep(10);
+win.__atria.update_install = savedInstall;
+ok('پس از پایان نصب، وضعیت نهایی نمایش داده می‌شود', String(byId.updatePromptStatus.textContent).includes('آمادهٔ جایگزینی'));
 updateCheckAvailable = false;
 await T.checkForUpdate(true);
 ok('وقتی به‌روز است، مودال نمی‌افتد و وضعیت «به‌روز» می‌ماند', byId.updateModal.classList.contains('hidden') && byId.updateStatus.textContent.includes('به‌روز'));
