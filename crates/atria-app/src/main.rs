@@ -51,6 +51,15 @@ fn main() {
             } else {
                 "index.html".into()
             };
+            // Taskbar icon: attach the full 512px pixel icon to the window itself.
+            // On Linux this sets _NET_WM_ICON at window-creation time (before the
+            // window is first mapped), so the panel has a crisp icon from frame one
+            // without depending on the desktop's icon-theme cache (which is the
+            // usual cause of the taskbar icon flickering with AppImages).
+            let window_icon = tauri::image::Image::from_bytes(include_bytes!(
+                "../icons/icon.png"
+            ))
+            .expect("bundled app icon must be a valid image");
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -65,6 +74,7 @@ fn main() {
             .resizable(true)
             .center()
             .focused(true)
+            .icon(window_icon)?
             .build()?;
 
             // v0.18.0: scheduler thread + global hotkey (Ctrl+Alt+A).

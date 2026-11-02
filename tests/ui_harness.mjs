@@ -261,7 +261,7 @@ let v18ConnSaved = false;
 let clipboardStub = 'متن کلیپ‌بورد تستی';
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.22.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.22.1' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -285,8 +285,8 @@ function router(cmd, args = {}) {
     case 'command_apply_command': return Promise.resolve('دستور اجرا شد (تأییده‌شده توسط کاربر). کد خروجی: 0\nخروجی:\nhello-atria');
     case 'command_reject_command': return Promise.resolve();
     case 'update_check':
-      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.22.0', latest_version: '0.23.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.23.0', download_size: 10485760 });
-      return Promise.resolve({ current_version: '0.22.0', latest_version: '0.22.0', available: false, release_url: '', download_size: 0 });
+      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.22.1', latest_version: '0.23.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.23.0', download_size: 10485760 });
+      return Promise.resolve({ current_version: '0.22.1', latest_version: '0.22.1', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'mcp_test_server': { const sv = (args && args.server) || {}; return Promise.resolve({ ok: true, name: sv.name || '', tools: [{ name: 'echo', description: 'echo the arguments' }] }); }
     case 'files_stash': return Promise.resolve('/home/u/.atria/uploads/harness_' + ((args && args.name) || 'file'));
@@ -392,7 +392,7 @@ ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نماند
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.22.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.22.1');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
 ok('UI می‌گوید ابزارهای فایل تابع Full Access‌اند و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس محدود است', indexHtml.includes('ایجنت و ابزارهای فایل') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است'));
 ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس می‌ماند', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است') && indexHtml.includes('کل سیستم — مسیر مطلق (با محافظت)'));

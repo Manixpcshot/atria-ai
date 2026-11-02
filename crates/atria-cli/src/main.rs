@@ -700,9 +700,33 @@ fn fetch_latest_sums(rt: &tokio::runtime::Runtime) -> Result<(String, String), S
     Ok((tag, sums))
 }
 
-/// Some((release tag, published hash)) when the published exe differs from
+/// The release asset name of the atria-cli binary for THIS platform.
+/// None = no published asset for this platform (auto-update unavailable).
+fn cli_asset_name() -> Option<&'static str> {
+    #[cfg(target_os = "windows")]
+    {
+        Some("atria-cli.exe")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Some("atria-cli")
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        Some("atria-cli-linux-x86_64")
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", all(target_os = "linux", target_arch = "x86_64"))))]
+    {
+        None
+    }
+}
+
+/// Some((release tag, published hash)) when the published binary differs from
 /// ours; Ok(None) when we are up to date.
 fn update_available(rt: &tokio::runtime::Runtime) -> Result<Option<(String, String)>, String> {
+    let asset = cli_asset_name().ok_or(
+        "auto-update has no published binary for this platform — download it from the release page instead",
+    )?;
     let sums_path = home().join(".atria").join(".cli_update_check");
     let fresh = std::fs::read_to_string(&sums_path)
         .ok()
@@ -723,8 +747,8 @@ fn update_available(rt: &tokio::runtime::Runtime) -> Result<Option<(String, Stri
             (tag, sums)
         }
     };
-    let want = sums_hash_of(&sums, "atria-cli.exe")
-        .ok_or("no atria-cli.exe line in SHA256SUMS.txt")?;
+    let want = sums_hash_of(&sums, asset)
+        .ok_or_else(|| format!("no {asset} line in SHA256SUMS.txt"))?;
     let cur_path = std::env::current_exe().map_err(|e| e.to_string())?;
     let cur = std::fs::read(&cur_path).map_err(|e| format!("cannot read current exe: {e}"))?;
     if sha256_hex(&cur) == want {
@@ -747,8 +771,22 @@ fn run_update(rt: &tokio::runtime::Runtime) -> ! {
             fail(1);
         }
     };
+    let asset = match cli_asset_name() {
+        Some(a) => a,
+        None => {
+            eprintln!(
+                "{} {}",
+                c("✗", "31"),
+                tx!(
+                    "auto-update has no published binary for this platform — download it from the release page instead.",
+                    "برای این پلتفرم باینری منتشرشده‌ای برای به‌روزرسانی خودکار نیست — از صفحهٔ release دانلودش کن."
+                )
+            );
+            fail(1);
+        }
+    };
     let exe_url = format!(
-        "https://github.com/{REPO}/releases/latest/download/atria-cli.exe"
+        "https://github.com/{REPO}/releases/latest/download/{asset}"
     );
     eprintln!("{} {}", tx!("downloading", "در حال دانلود"), c(&exe_url, "90"));
     let bytes = rt
@@ -806,6 +844,12 @@ fn run_update(rt: &tokio::runtime::Runtime) -> ! {
     {
         if let Err(e) = std::fs::rename(&tmp, &cur) {
             eprintln!("{} {}", c("✗", "31"), tx!(format!("cannot replace the binary: {e}"), format!("جایگزینی فایل ممکن نشد: {e}")));
+            fail(1);
+        }
+        // fs::write created the temp file 0644 — restore the exec bit.
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(&cur, std::fs::Permissions::from_mode(0o755)) {
+            eprintln!("{} {}", c("✗", "31"), tx!(format!("cannot set the executable bit: {e}"), format!("تغییر حق اجرای فایل ممکن نشد: {e}")));
             fail(1);
         }
         eprintln!("{} {}", c("✓", "32"), tx!("updated.", "به‌روزرسانی شد."));
@@ -926,7 +970,7 @@ Config (~/.atria/cli.json):
 The API key comes from the ATRIA_API_KEY environment variable and is never
 written to disk. In standard mode, file tools are scoped to
 ~/.atria/workspace; with --full they work in the current directory, like
-Claude Code. Self-update replaces only atria-cli.exe after a SHA-256 check."
+Claude Code. Self-update replaces only the atria-cli binary after a SHA-256 check."
     );
 }
 
@@ -966,7 +1010,7 @@ fn print_help_fa() {
         rtl("دیسک ذخیره نمی‌شود. در حالت استاندارد، ابزارهای فایل محدود به"),
         rtl("~/.atria/workspace است؛ با --full در دایرکتوری فعلی کار می‌کنند،"),
         rtl("مثل Claude Code. خودبه‌روزرسانی فقط بعد از بررسی SHA-256 فایل"),
-        rtl("atria-cli.exe را جایگزین می‌کند."),
+        rtl("atria-cli را جایگزین می‌کند."),
     );
 }
 

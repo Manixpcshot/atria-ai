@@ -1,6 +1,10 @@
-//! Provider credentials in the current Windows user's Credential Manager.
-//! Connection metadata stays in the webview; credentials use generic Windows
-//! credentials (persisted for this user on this machine), never plaintext files.
+//! Provider credentials stored in the OS credential store:
+//! - Windows: the current user's Credential Manager (generic credentials).
+//! - macOS/Linux: a private file under `~/.atria/secrets/` — directory 0700,
+//!   file 0600 (owner-only), created with O_EXCL so a pre-existing path can
+//!   never be followed. Same model as `~/.netrc` / `~/.git-credentials`.
+//! Connection metadata stays in the webview; credential values are never
+//! written to chat logs or app state.
 
 use std::path::{Path, PathBuf};
 
@@ -21,6 +25,7 @@ fn legacy_dpapi_path(root: &Path, id: &str) -> Result<PathBuf, String> {
 #[cfg(windows)]
 mod platform {
     use std::ffi::c_void;
+    use std::path::Path;
     use std::ptr::null_mut;
 
     const CRED_TYPE_GENERIC: u32 = 1;
@@ -72,7 +77,7 @@ mod platform {
         format!("Atria/Provider/{id}\0").encode_utf16().collect()
     }
 
-    pub fn set(id: &str, value: &str) -> Result<(), String> {
+    pub fn set(_root: &Path, id: &str, value: &str) -> Result<(), String> {
         if value.is_empty() {
             return Err("credential cannot be empty".into());
         }
@@ -105,7 +110,7 @@ mod platform {
         }
     }
 
-    pub fn get(id: &str) -> Result<Option<String>, String> {
+    pub fn get(_root: &Path, id: &str) -> Result<Option<String>, String> {
         let name = target(id);
         let mut credential: *mut CredentialW = null_mut();
         let ok = unsafe { CredReadW(name.as_ptr(), CRED_TYPE_GENERIC, 0, &mut credential) };
@@ -139,7 +144,7 @@ mod platform {
         result.map(Some)
     }
 
-    pub fn delete(id: &str) -> Result<(), String> {
+    pub fn delete(_root: &Path, id: &str) -> Result<(), String> {
         let name = target(id);
         let ok = unsafe { CredDeleteW(name.as_ptr(), CRED_TYPE_GENERIC, 0) };
         if ok != 0 {
@@ -156,14 +161,68 @@ mod platform {
 
 #[cfg(not(windows))]
 mod platform {
-    pub fn set(_: &str, _: &str) -> Result<(), String> {
-        Err("provider credentials require Windows Credential Manager".into())
+    use std::fs::{self, File, OpenOptions};
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    use std::path::{Path, PathBuf};
+
+    fn secret_path(root: &Path, id: &str) -> PathBuf {
+        root.join("secrets").join(format!("{id}.key"))
     }
-    pub fn get(_: &str) -> Result<Option<String>, String> {
-        Err("provider credentials require Windows Credential Manager".into())
+
+    fn ensure_secret_dir(root: &Path) -> Result<(), String> {
+        let dir = root.join("secrets");
+        fs::create_dir_all(&dir).map_err(|e| format!("cannot create the credentials folder: {e}"))?;
+        let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+        Ok(())
     }
-    pub fn delete(_: &str) -> Result<(), String> {
-        Err("provider credentials require Windows Credential Manager".into())
+
+    pub fn set(root: &Path, id: &str, value: &str) -> Result<(), String> {
+        if value.is_empty() {
+            return Err("credential cannot be empty".into());
+        }
+        ensure_secret_dir(root)?;
+        let path = secret_path(root, id);
+        // O_EXCL: never follow a pre-existing file or symlink at this path.
+        let mut file = match OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Rewriting a credential we stored earlier: force owner-only perms.
+                let file = File::create(&path).map_err(|e| format!("cannot store credential: {e}"))?;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                    .map_err(|e| format!("cannot store credential: {e}"))?;
+                file
+            }
+            Err(error) => return Err(format!("cannot store credential: {error}")),
+        };
+        file.write_all(value.as_bytes())
+            .and_then(|_| file.sync_all())
+            .map_err(|e| format!("cannot store credential: {e}"))?;
+        Ok(())
+    }
+
+    pub fn get(root: &Path, id: &str) -> Result<Option<String>, String> {
+        let path = secret_path(root, id);
+        match fs::read(&path) {
+            Ok(bytes) => std::str::from_utf8(&bytes)
+                .map(|s| Some(s.to_owned()))
+                .map_err(|_| "stored credential is not valid UTF-8".to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("cannot read stored credential: {error}")),
+        }
+    }
+
+    pub fn delete(root: &Path, id: &str) -> Result<(), String> {
+        match fs::remove_file(secret_path(root, id)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!("cannot delete stored credential: {error}")),
+        }
     }
 }
 
@@ -233,20 +292,17 @@ pub fn set(root: &Path, id: &str, value: &str) -> Result<(), String> {
     if !valid_id(id) {
         return Err("invalid connection id".into());
     }
-    platform::set(id, value)?;
+    platform::set(root, id, value)?;
     if let Ok(path) = legacy_dpapi_path(root, id) {
         let _ = std::fs::remove_file(path);
     }
     Ok(())
 }
 
-pub fn get(root: &Path, id: &str) -> Result<Option<String>, String> {
-    if !valid_id(id) {
-        return Err("invalid connection id".into());
-    }
-    if let Some(value) = platform::get(id)? {
-        return Ok(Some(value));
-    }
+/// One-time migration of the obsolete DPAPI file-store into the OS store.
+/// Only relevant on Windows; other platforms never had the DPAPI layout.
+#[cfg(windows)]
+fn legacy_migration_get(root: &Path, id: &str) -> Result<Option<String>, String> {
     let path = legacy_dpapi_path(root, id)?;
     let cipher = match std::fs::read(&path) {
         Ok(bytes) => bytes,
@@ -258,16 +314,29 @@ pub fn get(root: &Path, id: &str) -> Result<Option<String>, String> {
         .map_err(|_| "legacy credential is not valid UTF-8".to_string())?
         .to_owned();
     plain.fill(0);
-    platform::set(id, &value)?;
+    platform::set(root, id, &value)?;
     std::fs::remove_file(path).map_err(|error| format!("credential moved to Windows Credential Manager, but legacy file cleanup failed: {error}"))?;
     Ok(Some(value))
+}
+
+pub fn get(root: &Path, id: &str) -> Result<Option<String>, String> {
+    if !valid_id(id) {
+        return Err("invalid connection id".into());
+    }
+    if let Some(value) = platform::get(root, id)? {
+        return Ok(Some(value));
+    }
+    #[cfg(windows)]
+    return legacy_migration_get(root, id);
+    #[cfg(not(windows))]
+    return Ok(None);
 }
 
 pub fn delete(root: &Path, id: &str) -> Result<(), String> {
     if !valid_id(id) {
         return Err("invalid connection id".into());
     }
-    platform::delete(id)?;
+    platform::delete(root, id)?;
     if let Ok(path) = legacy_dpapi_path(root, id) {
         match std::fs::remove_file(path) {
             Ok(()) => {}
@@ -294,9 +363,24 @@ mod tests {
     #[test]
     fn windows_credential_manager_round_trip() {
         let id = format!("test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
-        super::platform::set(&id, "atria-credential-test").unwrap();
-        let value = super::platform::get(&id).unwrap();
-        super::platform::delete(&id).unwrap();
+        super::platform::set(std::path::Path::new("."), &id, "atria-credential-test").unwrap();
+        let value = super::platform::get(std::path::Path::new("."), &id).unwrap();
+        super::platform::delete(std::path::Path::new("."), &id).unwrap();
         assert_eq!(value.as_deref(), Some("atria-credential-test"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn file_credential_round_trip() {
+        let dir = std::env::temp_dir().join(format!("atria-secret-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let id = format!("test-{}", std::process::id());
+        super::platform::set(&dir, &id, "atria-credential-test").unwrap();
+        let value = super::platform::get(&dir, &id).unwrap();
+        assert_eq!(value.as_deref(), Some("atria-credential-test"));
+        super::platform::delete(&dir, &id).unwrap();
+        assert_eq!(super::platform::get(&dir, &id).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

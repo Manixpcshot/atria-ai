@@ -145,7 +145,7 @@ function loadSettings() {
 }
 function saveSettings() {
   const persisted = { ...st.settings };
-  delete persisted.api_key; // provider secrets belong in Windows Credential Manager, never browser storage
+  delete persisted.api_key; // provider secrets belong in the OS credential store (Windows Credential Manager / owner-only file), never browser storage
   localStorage.setItem(LS_SETTINGS, JSON.stringify(persisted));
   const label = effModel() || '—';
   if (els.modelChip) els.modelChip.textContent = label;
@@ -486,20 +486,20 @@ function saveConns() {
     const failures = [];
     for (const c of snapshot) {
       try {
-        if (!window.__atria) throw new Error('Windows Credential Manager bridge is unavailable');
+        if (!window.__atria) throw new Error('secure credential storage is unavailable');
         if (String(c.key || '').trim()) {
-          if (!window.__atria.secret_set) throw new Error('Windows Credential Manager bridge is unavailable');
+          if (!window.__atria.secret_set) throw new Error('secure credential storage is unavailable');
           await window.__atria.secret_set({ id: c.id, value: c.key });
         } else if (c._secretDelete) {
           // Only an explicit clear/delete removes a stored OS credential.
-          if (!window.__atria.secret_delete) throw new Error('Windows Credential Manager delete bridge is unavailable');
+          if (!window.__atria.secret_delete) throw new Error('secure credential storage is unavailable');
           await window.__atria.secret_delete({ id: c.id });
         }
         const live = st.conns.find((item) => item.id === c.id);
         if (live) live._secretDelete = false;
       } catch (error) { failures.push(String(error && error.message || error)); }
     }
-    // Even if Windows rejects a credential write, never keep plaintext in browser storage.
+    // Even if the OS credential store rejects a write, never keep plaintext in browser storage.
     localStorage.setItem(LS_CONNS, JSON.stringify(snapshot.map((c) => { const safe = { ...c, key: '' }; delete safe._secretDelete; return safe; })));
     if (failures.length) throw new Error(failures.join('; '));
     connSaveError = '';
@@ -524,10 +524,10 @@ async function hydrateConnSecrets() {
       }
     } catch (e) {
       connSaveError = String(e && e.message || e);
-      toast('ذخیره/انتقال کلید به Windows Credential Manager ناموفق بود. کلید را در تنظیمات دوباره وارد کن.', 'err');
+      toast('ذخیره/انتقال کلید در مخزن امن سیستم ناموفق بود. کلید را در تنظیمات دوباره وارد کن.', 'err');
     }
   }
-  // Persist only metadata even if a Credential Manager write failed; a missing key must be re-entered.
+  // Persist only metadata even if the credential store write failed; a missing key must be re-entered.
   await saveConns();
   st.settings.api_key = '';
   saveSettings();
@@ -1229,7 +1229,7 @@ function paintGithubStatus(identity, error) {
     return;
   }
   if (identity && identity.login) {
-    els.githubStatus.textContent = 'متصل با حساب @' + identity.login + ' — کلید در Credential Manager است.';
+    els.githubStatus.textContent = 'متصل با حساب @' + identity.login + ' — کلید در مخزن امن سیستم است.';
     if (els.githubDisconnect) els.githubDisconnect.disabled = false;
   } else {
     els.githubStatus.textContent = 'متصل نیست؛ خواندن مخزن‌های عمومی بدون توکن همچنان ممکن است.';
@@ -1239,7 +1239,7 @@ function paintGithubStatus(identity, error) {
 
 async function refreshGithubStatus() {
   if (!els.githubStatus || !window.__atria || !window.__atria.github_status) return;
-  els.githubStatus.textContent = 'در حال بررسی Credential Manager…';
+  els.githubStatus.textContent = 'در حال بررسی مخزن امن سیستم…';
   try { paintGithubStatus(await window.__atria.github_status()); }
   catch (e) { paintGithubStatus(null, String(e && e.message ? e.message : e)); }
 }
@@ -1268,7 +1268,7 @@ async function connectGithub() {
 
 async function disconnectGithub() {
   if (!window.__atria || !window.__atria.github_disconnect) return;
-  if (window.confirm && !window.confirm('توکن GitHub از Windows Credential Manager حذف شود؟')) return;
+  if (window.confirm && !window.confirm('توکن GitHub از مخزن امن سیستم حذف شود؟')) return;
   try {
     await window.__atria.github_disconnect();
     if (els.githubTokenInput) els.githubTokenInput.value = '';
@@ -2313,7 +2313,7 @@ function startTurn() {
     toast('پنجرهٔ متن نزدیک سقف تنظیم‌شده است؛ بودجه را در تنظیمات افزایش بده.', 'warn');
   }
   if (connSaveError) {
-    failRun('کلید اتصال در Windows Credential Manager ذخیره نشده است. تنظیمات اتصال را باز کن و کلید را دوباره ذخیره کن.');
+    failRun('کلید اتصال در مخزن امن سیستم ذخیره نشده است. تنظیمات اتصال را باز کن و کلید را دوباره ذخیره کن.');
     return;
   }
   if (!window.__atria || !window.__atria.chat_send) {
@@ -3601,7 +3601,7 @@ async function boot() {
   // Update discovery is automatic; applying a verified update always requires an explicit click.
   setTimeout(() => checkForUpdate(true), 1500);
 
-  // Connection credentials are kept in Windows Credential Manager; localStorage holds metadata only.
+  // Connection credentials are kept in the OS credential store; localStorage holds metadata only.
   const startupConn = activeConn();
   if (!startupConn || !String(startupConn.key || '').trim()) {
     openConns(startupConn ? startupConn.id : null);
@@ -4090,7 +4090,7 @@ function v18WireMic() {
   if (!els.btnMic) return;
   const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
   if (!SR) {
-    els.btnMic.onclick = () => toast('دریافت گفتار در این مرورگر در دسترس نیست (روی Windows با WebView2 پشتیبانی می‌شود)', 'warn');
+    els.btnMic.onclick = () => toast('دریافت گفتار در این مرورگر در دسترس نیست (فقط روی Windows با WebView2 پشتیبانی می‌شود)', 'warn');
     return;
   }
   let rec = null;
@@ -4161,7 +4161,7 @@ const V18_MCP_HUB = [
   { name: 'filesystem', command: 'npx', args: '-y @modelcontextprotocol/server-filesystem C:/files', env: '' , hint: 'دسترسی فایل‌های یک پوشه (مسیر را با پوشهٔ خودت عوض کن)' },
   { name: 'memory', command: 'npx', args: '-y @modelcontextprotocol/server-memory', env: '', hint: 'حافظهٔ گراف‌محور MCP' },
   { name: 'fetch', command: 'npx', args: '-y @modelcontextprotocol/server-fetch', env: '', hint: 'خواندن محتوای پیوندها' },
-  { name: 'github', command: 'npx', args: '-y @modelcontextprotocol/server-github', env: 'GITHUB_PERSONAL_ACCESS_TOKEN=', hint: 'ابزارهای GitHub — توکن را فقط در ویندوز Credential Manager نگه‌دار؛ اینجا فقط برای اجرای سرور استفاده می‌شود' },
+  { name: 'github', command: 'npx', args: '-y @modelcontextprotocol/server-github', env: 'GITHUB_PERSONAL_ACCESS_TOKEN=', hint: 'ابزارهای GitHub — توکن را فقط در مخزن امن سیستم نگه‌دار؛ اینجا فقط برای اجرای سرور استفاده می‌شود' },
 ];
 function v18RenderMcpHub() {
   const box = els.mcpHub;

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name={{name}}
+GenericName=AI Assistant
+Comment=Atria — AI desktop assistant
+Exec={{exec}}
+Icon={{icon}}
+Terminal=false
+Type=Application
+Categories=Utility;Network;
+Keywords=ai;chat;assistant;atria;
+StartupWMClass=Atria
