@@ -67,7 +67,8 @@ pub struct ClientConfig {
     pub autonomous_mode: bool,
     /// Explicit high-risk trust mode: no per-action approval for currently supported tools.
     pub full_access_mode: bool,
-    /// Allow automatic file writes relative to the Windows user profile instead of only workspace.
+    /// Allow automatic file writes relative to the current user's home
+    /// folder instead of only the workspace.
     pub full_access_profile: bool,
     /// Full Access system file scope: file tools also accept absolute local
     /// paths (e.g. C:/Users/you/...) with the same guards; relative paths stay
@@ -83,6 +84,14 @@ pub struct ClientConfig {
     /// base for file tools (relative paths), web downloads and terminal
     /// commands instead of the configured workspace.
     pub project_root: String,
+    /// Codex (code) mode — the user's explicit coding section. It is a third
+    /// trust tier between the ask-first default and Full Access:
+    /// - terminal commands run immediately (like Full Access), always logged,
+    ///   no admin escalation, working directory = active project or workspace;
+    /// - file writes are applied automatically with backup inside the current
+    ///   user's home folder (like the Full Access profile scope, never system).
+    /// Web/GitHub/MCP/computer-tool gating stays exactly as configured.
+    pub codex_mode: bool,
     /// Download root for the Full Access web-download tools; empty means the
     /// user's Desktop. The model may only address relative subfolders inside it.
     pub downloads_root: String,
@@ -125,6 +134,7 @@ impl std::fmt::Debug for ClientConfig {
             .field("computer_tools", &self.computer_tools)
             .field("terminal_tools", &self.terminal_tools)
             .field("project_root", &self.project_root)
+            .field("codex_mode", &self.codex_mode)
             .field("downloads_root", &self.downloads_root)
             .field("web_thinking", &self.web_thinking)
             .field("web_search", &self.web_search)
@@ -159,6 +169,7 @@ impl Default for ClientConfig {
             computer_tools: true,
             terminal_tools: true,
             project_root: String::new(),
+            codex_mode: false,
             downloads_root: String::new(),
             web_thinking: true,
             web_search: false,

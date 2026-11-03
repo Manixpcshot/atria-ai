@@ -1534,6 +1534,8 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
   background: rgba(132,112,255,.10); cursor: pointer; font: 600 10.5px var(--font);
 }
 .project-chip:hover { background: rgba(132,112,255,.19); border-color: rgba(148,128,255,.48); }
+.codex-chip { color: #b9f6d4; background: rgba(52,211,153,.10); border-color: rgba(52,211,153,.30); }
+.codex-chip:hover { background: rgba(52,211,153,.20); border-color: rgba(52,211,153,.52); }
 
 /* Model capability and favorite affordances */
 .mp-favorites-toggle {

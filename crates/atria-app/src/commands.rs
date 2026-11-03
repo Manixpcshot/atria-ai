@@ -71,8 +71,11 @@ pub struct ChatPayload {
     /// DeepSeek-web: DeepThink toggle (default on).
     #[serde(default = "default_true")]
     pub thinking: bool,
-    /// Codex mode (programming section) — the UI already appends the mode's
-    /// system block; kept here so the backend can observe/extend it.
+    /// Codex mode (programming section): the coding trust tier. Terminal and
+    /// script commands run immediately (working folder = active project or
+    /// workspace, always logged) and file writes apply automatically with
+    /// backup under the user's home folder. Web/GitHub/MCP gating is
+    /// unchanged. The UI also appends the mode's system block.
     #[serde(default)]
     pub codex_mode: bool,
     /// DeepSeek-web: web-search toggle.
@@ -139,6 +142,7 @@ pub async fn test_connection(base: String, key: String, model: String, kind: Str
         computer_tools: true,
         terminal_tools: true,
         project_root: String::new(),
+        codex_mode: false,
         downloads_root: String::new(),
         web_thinking: false,
         web_search: false,
@@ -542,6 +546,7 @@ pub async fn chat_send(
             computer_tools: payload.computer_tools,
             terminal_tools: payload.terminal_tools,
             project_root: payload.project_root.trim().to_string(),
+            codex_mode: payload.codex_mode,
             downloads_root: payload.downloads_root.trim().to_string(),
             web_thinking: payload.thinking,
             web_search: payload.web_search,
@@ -731,6 +736,7 @@ pub async fn memory_extract(payload: serde_json::Value, state: State<'_, AppStat
         computer_tools: false,
         terminal_tools: false,
         project_root: String::new(),
+        codex_mode: false,
         downloads_root: String::new(),
         web_thinking: false,
         web_search: false,

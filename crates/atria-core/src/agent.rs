@@ -121,11 +121,21 @@ pub async fn run_agent(
 
         let mut tools = if cfg.tools { tool_catalog() } else { Vec::new() };
         if cfg.file_tools {
+            // Codex mode (when Full Access is off) advertises the file trust of
+            // the Full Access profile scope: automatic backed-up writes under
+            // the user's home folder, no per-file approval, no system scope.
+            let (fa, prof, sys) = if cfg.full_access_mode {
+                (true, cfg.full_access_profile, cfg.full_access_system)
+            } else if cfg.codex_mode {
+                (true, true, false)
+            } else {
+                (false, false, false)
+            };
             tools.extend(file_tool_catalog_for_access(
                 cfg.autonomous_mode,
-                cfg.full_access_mode,
-                cfg.full_access_profile,
-                cfg.full_access_system,
+                fa,
+                prof,
+                sys,
             ));
         }
         if cfg.web_tools {
@@ -139,8 +149,10 @@ pub async fn run_agent(
         }
         if cfg.terminal_tools {
             // Staged for approval in ask/autonomous modes; direct (with full
-            // chat logging) only under the explicit Full Access opt-in.
-            tools.extend(terminal_tool_catalog(cfg.full_access_mode));
+            // chat logging) under the explicit Full Access opt-in or Codex
+            // mode. Codex keeps the working folder anchored to the active
+            // project (or workspace) via `command_cwd` below.
+            tools.extend(terminal_tool_catalog(cfg.full_access_mode || cfg.codex_mode));
         }
         if !mcp_tools.is_empty() {
             tools.extend(mcp_tools.iter().cloned());
@@ -286,6 +298,11 @@ pub async fn run_agent(
                         }
                     } else if name == "write_file" && cfg.full_access_mode {
                         auto_file_write_full_access(input, root, cfg.full_access_profile, cfg.full_access_system, data_root)
+                    } else if name == "write_file" && cfg.codex_mode {
+                        // Codex mode: automatic backed-up writes under the
+                        // user's home folder (profile scope, never system
+                        // scope) — the coding trust tier the user selected.
+                        auto_file_write_full_access(input, root, true, false, data_root)
                     } else if name == "write_file" && cfg.autonomous_mode {
                         auto_file_write(input, root, data_root)
                     } else if let Some(res) = execute_async_tool(
@@ -294,6 +311,7 @@ pub async fn run_agent(
                         &cfg.github_token,
                         cfg.autonomous_mode,
                         cfg.full_access_mode,
+                        cfg.codex_mode,
                         &effective_downloads_root,
                         &command_cwd,
                         data_root,

@@ -75,7 +75,7 @@ pub fn file_tool_catalog_for_access(
         let scope = if full_access_system {
             "an absolute path on this computer (e.g. C:/Users/you/...); a restorable backup is created. System directories (Windows, Program Files, ProgramData, ...), Atria private data, credential/browser paths such as AppData, .ssh, .env, and symlinks are blocked"
         } else if full_access_profile {
-            "a relative path under the Windows user profile, excluding AppData, Atria private data, sensitive config/credential paths such as .ssh, .config, and .env, and symlinks"
+            "a relative path under the current user's home folder (e.g. C:/Users/you on Windows, ~/ on Linux/macOS), excluding AppData, Atria private data, sensitive config/credential paths such as .ssh, .config, and .env, and symlinks"
         } else {
             "a relative path inside the configured workspace"
         };
@@ -207,7 +207,7 @@ pub fn github_tool_catalog() -> Vec<Value> {
 /// a capped output tail.
 pub fn terminal_tool_catalog(full_access_mode: bool) -> Vec<Value> {
     let description = if full_access_mode {
-        "Run a terminal command on this computer (Windows cmd /C, POSIX sh -c). Runs immediately in Full Access without a separate approval; the command, working folder, exit code and an output tail are always logged in the chat. Working folder: the active project folder when set, otherwise the workspace. No admin escalation. Commands are limited to 10 minutes (long builds are fine) and output is truncated to the last 64KB. Use for builds, installs, git, scripts and system tasks the file tools cannot do."
+        "Run a terminal command on this computer (Windows cmd /C, POSIX sh -c). Runs immediately without a separate approval (the user explicitly enabled an auto-running mode: Full Access or Code mode); the command, working folder, exit code and an output tail are always logged in the chat. Working folder: the active project folder when set, otherwise the workspace. No admin escalation. Commands are limited to 10 minutes (long builds are fine) and output is truncated to the last 64KB. Use for builds, installs, git, scripts and system tasks the file tools cannot do."
     } else {
         "Run a terminal command on this computer (Windows cmd /C, POSIX sh -c). Staged: the exact command line is shown in the chat and NOTHING runs until the user approves it there. Working folder: the active project folder when set, otherwise the workspace. No admin escalation. Use for builds, installs, git, scripts and system tasks the file tools cannot do."
     };
@@ -224,7 +224,7 @@ pub fn terminal_tool_catalog(full_access_mode: bool) -> Vec<Value> {
     }),
     serde_json::json!({
         "name": "run_code",
-        "description": "Write code to a temporary script under the app data folder and run it with the matching interpreter (python, javascript/node, powershell, bat, sh). Same approval flow as run_command: in Full Access it runs immediately, otherwise the exact command line (interpreter + script path) is staged in the chat and nothing runs until the user approves it. The script path is always logged in the chat. Use for short scripts where composing a one-line command is awkward.",
+        "description": "Write code to a temporary script under the app data folder and run it with the matching interpreter (python, javascript/node, powershell, bat, sh). Same approval flow as run_command: in Full Access or Code mode it runs immediately (always logged), otherwise the exact command line (interpreter + script path) is staged in the chat and nothing runs until the user approves it. The script path is always logged in the chat. Use for short scripts where composing a one-line command is awkward.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -444,6 +444,7 @@ pub async fn execute_async_tool(
     github_token: &str,
     autonomous_mode: bool,
     full_access_mode: bool,
+    codex_mode: bool,
     downloads_root: &str,
     command_cwd: &str,
     data_root: &Path,
@@ -451,9 +452,11 @@ pub async fn execute_async_tool(
     let result = match name {
         "run_command" => {
             let command = input.get("command").and_then(Value::as_str).unwrap_or("");
-            if full_access_mode {
-                // Explicit Full Access: the user opted into no per-command
-                // approvals; the run is still fully logged in the chat.
+            if full_access_mode || codex_mode {
+                // Explicit Full Access or Codex mode: the user opted into no
+                // per-command approvals; the run is still fully logged in the
+                // chat and the working folder is the active project (or the
+                // workspace) — never an arbitrary directory.
                 let command_owned = command.to_string();
                 let cwd_owned = command_cwd.to_string();
                 let done = tokio::task::spawn_blocking(move || {
@@ -556,7 +559,7 @@ pub async fn execute_async_tool(
             Ok((id, preview)) => Ok(format!("[ATRIA_PENDING_GITHUB:{id}]\n{preview}")),
             Err(error) => Err(error),
         }),
-        "run_code" => Some(run_code_tool(input, full_access_mode, command_cwd, data_root).await),
+        "run_code" => Some(run_code_tool(input, full_access_mode || codex_mode, command_cwd, data_root).await),
         "multi_search" => Some(run_multi_search(input).await),
         "extract_text" => Some(extract_text_tool(input, command_cwd, full_access_mode)),
         _ => None,
@@ -2357,7 +2360,7 @@ mod tests {
         assert!(!full_access_write["description"].as_str().unwrap().contains("separate explicit approval"));
         let file = file_tool_catalog_for_access(false, true, true, false);
         let file_write = file.iter().find(|tool| tool["name"] == "write_file").unwrap();
-        assert!(file_write["description"].as_str().unwrap().contains("user profile"));
+        assert!(file_write["description"].as_str().unwrap().contains("home folder"));
     }
 
     #[test]
@@ -2538,6 +2541,7 @@ mod tests {
             "",
             false,
             false,
+            false,
             "",
             data_root.to_string_lossy().as_ref(),
             &data_root,
@@ -2570,6 +2574,7 @@ mod tests {
             "",
             false,
             false,
+            false,
             "",
             data_root.to_string_lossy().as_ref(),
             &data_root,
@@ -2591,6 +2596,7 @@ mod tests {
             "",
             false,
             true,
+            false,
             "",
             data_root.to_string_lossy().as_ref(),
             &data_root,
@@ -2613,6 +2619,7 @@ mod tests {
             "",
             false,
             true,
+            false,
             "",
             data_root.to_string_lossy().as_ref(),
             &data_root,
@@ -2631,14 +2638,14 @@ mod tests {
         let empty = execute_async_tool(
             "run_command",
             &serde_json::json!({ "command": "   " }),
-            "", false, true, "", "", &data_root,
+            "", false, true, false, "", "", &data_root,
         )
         .await.expect("handled");
         assert!(empty.is_error, "empty command must be rejected");
         let huge = execute_async_tool(
             "run_command",
             &serde_json::json!({ "command": "echo ".to_string() + &"a".repeat(MAX_COMMAND_CHARS + 1) }),
-            "", false, true, "", "", &data_root,
+            "", false, true, false, "", "", &data_root,
         )
         .await.expect("handled");
         assert!(huge.is_error, "oversize command must be rejected");
@@ -2667,7 +2674,7 @@ mod tests {
         let got = execute_async_tool(
             "run_code",
             &serde_json::json!({ "code": "print(6*7)", "lang": "python" }),
-            "", false, false, "", "", &data_root,
+            "", false, false, false, "", "", &data_root,
         )
         .await
         .expect("handled");
@@ -2689,13 +2696,13 @@ mod tests {
         let data_root = terminal_temp("code-bad");
         let e1 = execute_async_tool(
             "run_code", &serde_json::json!({ "code": "   " }),
-            "", false, false, "", "", &data_root,
+            "", false, false, false, "", "", &data_root,
         ).await.expect("handled");
         assert!(e1.is_error);
         let e2 = execute_async_tool(
             "run_code",
             &serde_json::json!({ "code": "x = ".to_string() + &"1".repeat(MAX_CODE_CHARS + 1), "lang": "python" }),
-            "", false, false, "", "", &data_root,
+            "", false, false, false, "", "", &data_root,
         ).await.expect("handled");
         assert!(e2.is_error);
         let _ = std::fs::remove_dir_all(&data_root);
@@ -2705,11 +2712,101 @@ mod tests {
     async fn multi_search_requires_2_to_5_queries() {
         let got = execute_async_tool(
             "multi_search", &serde_json::json!({ "queries": ["only one"] }),
-            "", false, false, "", "", &std::path::Path::new("."),
+            "", false, false, false, "", "", &std::path::Path::new("."),
         )
         .await
         .expect("handled");
         assert!(got.is_error);
+    }
+
+    // ---- v0.23.0: Codex mode (coding trust tier) ----
+
+    #[tokio::test]
+    async fn terminal_codex_mode_runs_without_stage() {
+        let data_root = terminal_temp("codex");
+        let got = execute_async_tool(
+            "run_command",
+            &serde_json::json!({ "command": "echo codex-runs" }),
+            "",
+            false,
+            false,
+            true, // codex_mode
+            "",
+            data_root.to_string_lossy().as_ref(),
+            &data_root,
+        )
+        .await
+        .expect("handled");
+        assert!(!got.is_error, "run failed: {}", got.output);
+        assert!(got.output.contains("codex-runs"), "output: {}", got.output);
+        assert!(got.output.contains("کد خروجی: 0"), "exit code missing: {}", got.output);
+        assert!(!got.output.contains("[ATRIA_PENDING_COMMAND:"), "codex must not stage");
+        let _ = std::fs::remove_dir_all(&data_root);
+    }
+
+    #[tokio::test]
+    async fn terminal_codex_mode_keeps_web_and_github_gated() {
+        let data_root = terminal_temp("codex-gate");
+        // Codex is a coding tier: it must NOT lift the web-download gate that
+        // belongs to Full Access.
+        let got = execute_async_tool(
+            "download_web_file",
+            &serde_json::json!({ "url": "https://example.com/a.txt", "folder": "", "filename": "a.txt" }),
+            "",
+            false,
+            false,
+            true, // codex_mode
+            "",
+            "",
+            &data_root,
+        )
+        .await
+        .expect("handled");
+        assert!(got.is_error, "download must stay gated in codex mode");
+        assert!(got.output.contains("Full Access"), "gate message: {}", got.output);
+        // open_url stays staged in codex mode
+        let staged = execute_async_tool(
+            "open_url",
+            &serde_json::json!({ "url": "https://example.com" }),
+            "",
+            false,
+            false,
+            true,
+            "",
+            "",
+            &data_root,
+        )
+        .await
+        .expect("handled");
+        assert!(!staged.is_error);
+        assert!(staged.output.contains("[ATRIA_PENDING_URL:"), "open_url must stay staged: {}", staged.output);
+        let _ = std::fs::remove_dir_all(&data_root);
+    }
+
+    #[test]
+    fn codex_file_catalog_matches_profile_auto_write_trust() {
+        let tools = file_tool_catalog_for_access(false, true, true, false);
+        let write = tools.iter().find(|t| t["name"] == "write_file").expect("write_file");
+        let desc = write["description"].as_str().expect("desc");
+        assert!(desc.contains("automatically"), "desc: {desc}");
+        assert!(desc.contains("home folder"), "profile scope desc: {desc}");
+        assert!(!desc.contains("Wait for the user's separate approval"), "no staged wording: {desc}");
+        // reads stay base-scoped (not absolute system paths)
+        let read = tools.iter().find(|t| t["name"] == "read_file").expect("read_file");
+        let rdesc = read["description"].as_str().expect("desc");
+        assert!(!rdesc.contains("absolute"), "reads stay scoped: {rdesc}");
+    }
+
+    #[test]
+    fn codex_terminal_catalog_advertises_direct_runs() {
+        let tools = terminal_tool_catalog(true);
+        let desc = tools.iter().find(|t| t["name"] == "run_command").expect("run_command")["description"].as_str().expect("desc");
+        assert!(desc.contains("Runs immediately"), "desc: {desc}");
+        assert!(desc.contains("always logged"), "logging note: {desc}");
+        assert!(desc.contains("No admin escalation"), "escalation note: {desc}");
+        let normal = terminal_tool_catalog(false);
+        let ndesc = normal.iter().find(|t| t["name"] == "run_command").expect("run_command")["description"].as_str().expect("desc");
+        assert!(ndesc.contains("Staged"), "normal mode stays staged: {ndesc}");
     }
 
     #[tokio::test]
@@ -2722,7 +2819,7 @@ mod tests {
         let got = execute_async_tool(
             "extract_text",
             &serde_json::json!({ "path": "notes.txt" }),
-            "", false, false, "", ws.to_str().unwrap(), &data_root,
+            "", false, false, false, "", ws.to_str().unwrap(), &data_root,
         )
         .await
         .expect("handled");

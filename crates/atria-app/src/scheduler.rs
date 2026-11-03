@@ -219,6 +219,7 @@ fn fire_job(root: &Path, job: &ScheduledJob) -> ScheduleResult {
         computer_tools: false,
         terminal_tools: false,
         project_root: String::new(),
+        codex_mode: false,
         downloads_root: String::new(),
         web_thinking: false,
         web_search: false,

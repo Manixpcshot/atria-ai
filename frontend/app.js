@@ -50,11 +50,16 @@ const PERSONA = [
 // Codex mode — the programming section (ChatGPT-Codex style). Appended to the
 // system prompt only while the user has the «کدکس» toggle on.
 const CODEX_MODE_BLOCK = '[CODEX MODE — بخش برنامه‌نویسی آتریا]\n' +
-  'تو حالا در حالت کدکس هستی: یک برنامه‌نویس ارشدِ جفت‌برنامه‌نویس (pair programmer).\n' +
-  '- اول وظیفه را کامل بفهم؛ اگر فایل‌های مرتبط وجود دارند با ابزارهای فایل بخوان، بعد کد بنویس یا ویرایش کن (edit_file / write_file).\n' +
-  '- اگر پوشهٔ پروژهٔ فعال داری، همهٔ کارها را آنجا انجام بده؛ اگر نه، بپرس یا در workspace کار کن.\n' +
+  'تو حالا در حالت کدکس هستی: یک برنامه‌نویس ارشدِ جفت‌برنامه‌نویس (pair programmer) با دسترسی اجرایی روی این سیستم.\n' +
+  'دسترسی‌های فعال در این حالت (شفاف و log‌شده):\n' +
+  '- ترمینال (run_command / run_code) بدون تأیید تک‌به‌تک اجرا می‌شود؛ دایرکتوری کار = پوشهٔ پروژهٔ فعال (اگر نباشد، workspaceٔ آتریا). هر دستور، کد خروجی و دمِ خروجی در چت log می‌شود؛ admin escalation وجود ندارد.\n' +
+  '- نوشتن/ویرایش فایل (write_file) خودکار اعمال می‌شود (با نسخهٔ پشتیبان قابل‌بازگشت) در محدودهٔ پوشهٔ خانگی کاربر؛ مسیرهای حساس (.ssh، .env، AppData و…) مسدودند.\n' +
+  'روش کار:\n' +
+  '- اول وظیفه را کامل بفهم؛ فایل‌های مرتبط را با list_files/read_file بخوان، بعد کد بنویس یا ویرایش کن.\n' +
   '- تغییرات را کوتاه، متمرکز و diff-محور نگه دار؛ تصمیمات غیرمسلسل را در یک خط توضیح بده.\n' +
-  '- جایی که ابزار ترمینال در دسترس است، تست و بیلد را اجرا کن تا نتیجهٔ تغییر را نشان بده.\n' +
+  '- بعد از تغییر، اگر بیلد/تست وجود دارد اجرا کن (مثل cargo test، npm test، pytest) تا نتیجهٔ تغییر را نشان بده؛ در صورت خطا فیکس کن و دوباره تست کن.\n' +
+  '- بهداشت git: اگر repository است، تغییرات را با git status/git diff بررسی و خلاصه کن؛ commit فقط اگر کاربر خواسته باشد.\n' +
+  '- پایان: یک گزارش کوتاه بده — چه فایل‌هایی تغییر کرد، چرا، و چطور verify شود.\n' +
   '- کد و شناسه‌ها انگلیسی بمانند؛ توضیحات و گزارش به زبان کاربر.';
 
 const LS_PERSONA = 'atria.persona.v1';
@@ -1123,7 +1128,7 @@ function cacheEls() {
     updatePromptStatus: $('#updatePromptStatus'),
     modelPick: $('#modelPick'), mpName: $('#mpName'), modelMenu: $('#modelMenu'),
     chipThink: $('#chipThink'), fullAccessIndicator: $('#fullAccessIndicator'),
-    codexChatBtn: $('#codexChatBtn'), codexCodeBtn: $('#codexCodeBtn'), codexSwitch: $('#codexSwitch'),
+    codexChatBtn: $('#codexChatBtn'), codexCodeBtn: $('#codexCodeBtn'), codexSwitch: $('#codexSwitch'), codexChip: $('#codexChip'),
     btnMore: $('#btnMore'), moreMenu: $('#moreMenu'),
     settingsModal: $('#settingsModal'), settingsX: $('#settingsX'),
     settingsTitle: $('#settingsTitle'), settingsSubtitle: $('#settingsSubtitle'),
@@ -3376,6 +3381,12 @@ function syncCodex() {
     els.codexCodeBtn.setAttribute('aria-pressed', String(on));
   }
   if (els.codexSwitch) els.codexSwitch.classList.toggle('codex-on', on);
+  if (els.codexChip) {
+    els.codexChip.classList.toggle('hidden', !on);
+    els.codexChip.title = on
+      ? 'حالت کدکس فعال: ترمینال در پوشهٔ پروژهٔ فعال (یا workspace) مستقیم اجرا می‌شود و فایل‌نویسی با backup خودکار انجام می‌شود — همه‌چیز در چت log است. برای بازگشت «💬 گفتگو» را بزن.'
+      : 'کدکس — بخش برنامه‌نویسی آتریا';
+  }
   const ph = on
     ? 'کدکس: وظیفهٔ برنامه‌نویسی‌ات را بنویس… (مثلاً: این تست خراب را فیکس کن)  (Enter: ارسال)'
     : 'هرچی می‌خوای بپرس…  (Enter: ارسال · Shift+Enter: سطر جدید)';
@@ -3387,6 +3398,11 @@ function setCodex(on) {
   st.settings.codex = on;
   saveSettings();
   syncCodex();
+  // v0.23.0: entering Code mode without a project folder — the terminal would
+  // run in the app workspace; nudge the user toward anchoring it to their code.
+  if (on && !projectForChat(currentChat())) {
+    toast('کدکس فعال شد. پیشنهاد: برای اینکه دستورات ترمینال داخل پروژه‌ات اجرا شوند، از چیپ «📁» یک پوشهٔ پروژه انتخاب کن.', 'ok');
+  }
 }
 
 function syncChips() {

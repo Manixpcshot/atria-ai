@@ -416,6 +416,7 @@ impl Session {
             computer_tools: self.full,
             terminal_tools: self.full,
             project_root: cwd,
+            codex_mode: false, // CLI exposes its own `--full` trust tier; Codex mode is the desktop UI section
             downloads_root: String::new(),
             web_thinking: false,
             web_search: false,
