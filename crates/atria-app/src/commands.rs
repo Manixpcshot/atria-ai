@@ -492,6 +492,22 @@ pub fn reveal_dir() -> Result<(), String> {
     spawned.map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// Reveal an existing directory in the OS file manager (v0.24.0 model
+/// library + image gallery). Only existing directories are opened.
+#[tauri::command]
+pub fn reveal_path(path: PathBuf) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err("این مسیر یک پوشهٔ موجود نیست".into());
+    }
+    #[cfg(target_os = "windows")]
+    let spawned = std::process::Command::new("explorer").arg(&path).spawn();
+    #[cfg(target_os = "macos")]
+    let spawned = std::process::Command::new("open").arg(&path).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawned = std::process::Command::new("xdg-open").arg(&path).spawn();
+    spawned.map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// Start one agentic turn. Returns immediately; progress is streamed through
 /// `atria:*` events and finalized with `atria:done` / `atria:error` /
 /// `atria:stopped`.

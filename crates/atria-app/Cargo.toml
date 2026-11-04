@@ -18,6 +18,8 @@ base64 = "0.22"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 chrono = "0.4"
 tauri-plugin-dialog = "2"
+# v0.24.0: free disk space for the model library
+disk-space = "0.1"
 atria-core = { path = "../atria-core" }
 
 [[bin]]

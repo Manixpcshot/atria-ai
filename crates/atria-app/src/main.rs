@@ -3,6 +3,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod img;
+mod models;
 mod scheduler;
 mod secrets;
 mod updates;
@@ -108,6 +110,7 @@ fn main() {
             commands::chats_load,
             commands::chats_sync,
             commands::reveal_dir,
+            commands::reveal_path,
             commands::chat_send,
             commands::chat_stop,
             commands::mcp_test_server,
@@ -131,6 +134,22 @@ fn main() {
             commands::schedule_has_connection,
             commands::schedule_unprocessed,
             commands::schedule_ack,
+            // v0.24.0: model library (Hugging Face) + image studio
+            models::models_state,
+            models::models_set_folder,
+            models::models_hf_token,
+            models::models_hf_token_get,
+            models::models_search,
+            models::models_add,
+            models::models_start,
+            models::models_pause,
+            models::models_stop,
+            models::models_remove,
+            img::img_generate,
+            img::img_gallery_list,
+            img::img_delete,
+            img::img_bytes,
+            img::img_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Atria app");

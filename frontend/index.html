@@ -55,6 +55,8 @@
         <nav class="conv-list" id="convList"></nav>
         <div class="side-footer">
           <button class="side-btn" id="btnProjects">📁&nbsp; پروژه‌ها و ادامهٔ کار</button>
+          <button class="side-btn" id="btnModels">📦&nbsp; مدل‌ها (Hugging Face)</button>
+          <button class="side-btn" id="btnStudio">🎨&nbsp; استودیو عکس</button>
           <button class="side-btn" id="btnSchedule">⏰&nbsp; زمان‌بندی‌ها</button>
           <button class="side-btn" id="btnSettings">⚙︎&nbsp; تنظیمات</button>
           <button class="side-btn" id="btnMemory">🧠&nbsp; حافظهٔ بلندمدت</button>
@@ -107,6 +109,7 @@
               <button type="button" class="cs-btn" id="codexCodeBtn" aria-pressed="false" title="بخش کدکس — مخصوص برنامه‌نویسی">⌨ کدکس</button>
             </div>
             <div class="composer-status">
+              <button class="project-chip img-chip" id="imgChip" type="button" title="حالت تولید عکس — پرامپت بنویسید؛ عکس از منبع انتخاب‌شدهٔ استودیو ساخته می‌شود">🎨 عکس</button>
               <button class="project-chip codex-chip hidden" id="codexChip" type="button" title="کدکس">⌨ کدکس</button>
               <button class="project-chip hidden" id="projectChip" type="button" title="پروژهٔ فعال"></button>
               <span class="ctx-meter" id="ctxMeter" title="برآورد تقریبی مصرف پنجرهٔ متن">متن: —</span>
@@ -587,6 +590,7 @@
       dirs_info: function () { return invoke('dirs_info'); },
       downloads_root_info: function (configured) { return invoke('downloads_root_info', { configured }); },
       reveal_dir: function () { return invoke('reveal_dir'); },
+      reveal_path: function (path) { return invoke('reveal_path', { path }); },
       minimize_win: function () { return invoke('minimize_win'); },
       maximize_win: function () { return invoke('maximize_win'); },
       close_win: function () { return invoke('close_win'); }
@@ -675,6 +679,110 @@
     </section>
   </div>
 
-  <!-- ============ Code Work — فضای جدا مثل کلاد ============ -->
+  <!-- ============ Model Library (Hugging Face) ============ -->
+  <div class="modal-backdrop hidden" id="modelsModal">
+    <section class="project-modal glass models-section" role="dialog" aria-modal="true" aria-labelledby="modelsTitle">
+      <header class="modal-head">
+        <div>
+          <h2 id="modelsTitle">📦 مدل‌ها — Hugging Face</h2>
+          <p class="project-intro">جست‌وجو و دانلود مدل (عکس، LLM، …) با صف، پیشرفت و ادامهٔ دانلود. فایل‌ها برای استفاده در ComfyUI / A1111 / LM Studio و… ذخیره می‌شوند.</p>
+        </div>
+        <button class="x" id="modelsX" type="button" aria-label="بستن مدل‌ها">✕</button>
+      </header>
+      <div class="models-body">
+        <section class="models-left">
+          <div class="field">
+            <label class="flabel">پوشهٔ دانلود</label>
+            <div class="models-folder-row">
+              <span class="models-folder" id="modelsFolder" dir="ltr">…</span>
+              <button class="btn tiny" id="modelsFolderPick" type="button">تغییر</button>
+            </div>
+            <div class="models-free" id="modelsFree"></div>
+          </div>
+          <div class="field">
+            <label class="flabel">توکن Hugging Face <span class="models-optional">(اختیاری — مدل‌های خصوصی و تولید عکس با HF)</span></label>
+            <div class="models-folder-row">
+              <input type="password" id="hfToken" dir="ltr" placeholder="hf_…" autocomplete="off">
+              <button class="btn tiny" id="hfTokenSave" type="button">ذخیره</button>
+            </div>
+          </div>
+          <div class="field">
+            <label class="flabel">جست‌وجو</label>
+            <div class="models-search-row">
+              <input type="text" id="modelsSearch" dir="ltr" placeholder="مثلاً stable diffusion xl یا org/model">
+              <select id="modelsFilter" title="فیلتر نوع مدل">
+                <option value="">همه</option>
+                <option value="image-generation">تولید عکس</option>
+                <option value="text-generation">متن (LLM)</option>
+              </select>
+              <button class="btn primary tiny" id="modelsSearchBtn" type="button">جستجو</button>
+            </div>
+          </div>
+          <div class="models-results" id="modelsResults"></div>
+        </section>
+        <section class="models-right">
+          <h3 class="models-h">صف دانلود</h3>
+          <div class="models-queue" id="modelsQueue"></div>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============ Image Studio ============ -->
+  <div class="modal-backdrop hidden" id="studioModal">
+    <section class="project-modal glass studio-section" role="dialog" aria-modal="true" aria-labelledby="studioTitle">
+      <header class="modal-head">
+        <div>
+          <h2 id="studioTitle">🎨 استودیو عکس</h2>
+          <p class="project-intro">تولید عکس از ابر (Hugging Face، OpenAI، Google، Stability) یا سرور محلی (A1111 / ComfyUI). عکس‌های ذخیره‌شده در گالری می‌مانند.</p>
+        </div>
+        <button class="x" id="studioX" type="button" aria-label="بستن استودیو">✕</button>
+      </header>
+      <div class="studio-body">
+        <section class="studio-left">
+          <div class="field">
+            <label class="flabel">منبع تصویر</label>
+            <div class="studio-sources" id="studioSources"></div>
+          </div>
+          <div class="studio-cfg" id="studioCfg"></div>
+          <div class="field">
+            <label class="flabel" for="studioPrompt">پرامپت</label>
+            <textarea id="studioPrompt" rows="3" dir="auto" placeholder="تصویر را توصیف کنید…"></textarea>
+          </div>
+          <div class="field">
+            <label class="flabel" for="studioNegative">پرامپت منفی (اختیاری — بیشتر برای مدل‌های محلی)</label>
+            <input id="studioNegative" type="text" dir="auto" placeholder="blurry, low quality">
+          </div>
+          <div class="studio-row">
+            <div class="field">
+              <label class="flabel">اندازه</label>
+              <select id="studioSize">
+                <option value="1024x1024">مربع 1024</option>
+                <option value="768x768">مربع 768</option>
+                <option value="832x1216">عمودی</option>
+                <option value="1216x832">افقی</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="flabel">تعداد</label>
+              <select id="studioN">
+                <option>1</option><option>2</option><option>3</option><option>4</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="flabel">Steps (محلی)</label>
+              <input id="studioSteps" type="number" min="5" max="100" value="25" dir="ltr">
+            </div>
+          </div>
+          <button class="btn primary full" id="studioGen" type="button">✨ ساختن تصویر</button>
+          <div class="studio-result" id="studioResult"></div>
+        </section>
+        <section class="studio-right">
+          <h3 class="models-h">گالری <button class="btn tiny" id="galleryReveal" type="button">بازکردن پوشه</button></h3>
+          <div class="gallery-grid" id="galleryGrid"></div>
+        </section>
+      </div>
+    </section>
+  </div>
   </body>
 </html>

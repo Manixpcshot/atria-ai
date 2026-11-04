@@ -78,11 +78,12 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "atria-app"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "atria-core",
  "base64 0.22.1",
  "chrono",
+ "disk-space",
  "reqwest 0.12.28",
  "ring",
  "serde",
@@ -95,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "atria-cli"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "atria-core",
  "chrono",
@@ -108,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "atria-core"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -678,6 +679,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "disk-space"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc3df31d87f96506b6c4bd1e9302b2d3a086b6bceb99df822fbeca5b99aa3c02"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "dispatch2"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -818,7 +828,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

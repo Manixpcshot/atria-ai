@@ -207,7 +207,12 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'cfName', 'cfKind', 'cfTemplate', 'cfBase', 'cfKey', 'cfKeyEye', 'cfKeyLabel', 'cfTokenGuide', 'cfHint',
   'cfTags', 'cfModelInput', 'cfModelAdd', 'cfFetchModels', 'cfSrvWrap', 'cfSrvSearch', 'cfSrvList',
   'cfDelete', 'cfSetActive', 'cfTestConn', 'cfTestStatus', 'storageBox', 'btnRevealAtria', 'btnAttach', 'fileInput', 'imgTray',
-  'stars', 'appVer', 'tokChip']) addId(id);
+  'stars', 'appVer', 'tokChip',
+  // v0.24.0: image chip + model library + image studio
+  'imgChip', 'btnModels', 'modelsModal', 'modelsX', 'modelsFolder', 'modelsFolderPick', 'modelsFree', 'hfToken', 'hfTokenSave',
+  'modelsSearch', 'modelsFilter', 'modelsSearchBtn', 'modelsResults', 'modelsQueue',
+  'btnStudio', 'studioModal', 'studioX', 'studioSources', 'studioCfg', 'studioPrompt', 'studioNegative',
+  'studioSize', 'studioN', 'studioSteps', 'studioGen', 'studioResult', 'galleryGrid', 'galleryReveal']) addId(id);
 byId.connsBody.classList.add('conns-body');
 // mirror the real DOM: ⋯ button + menu live in a .more-wrap that is a sibling
 // of .messages (not an ancestor of it), so outside-click detection works
@@ -261,7 +266,7 @@ let v18ConnSaved = false;
 let clipboardStub = 'متن کلیپ‌بورد تستی';
 function router(cmd, args = {}) {
   switch (cmd) {
-    case 'app_meta': return Promise.resolve({ version: '0.23.0' });
+    case 'app_meta': return Promise.resolve({ version: '0.24.0' });
     case 'chat_stop': return Promise.resolve();
     case 'secret_set': secretStore.set(args.id, args.value); return Promise.resolve();
     case 'secret_get': return Promise.resolve(secretStore.get(args.id) || null);
@@ -285,8 +290,8 @@ function router(cmd, args = {}) {
     case 'command_apply_command': return Promise.resolve('دستور اجرا شد (تأییده‌شده توسط کاربر). کد خروجی: 0\nخروجی:\nhello-atria');
     case 'command_reject_command': return Promise.resolve();
     case 'update_check':
-      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.23.0', latest_version: '0.24.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.24.0', download_size: 10485760 });
-      return Promise.resolve({ current_version: '0.23.0', latest_version: '0.23.0', available: false, release_url: '', download_size: 0 });
+      if (updateCheckAvailable) return Promise.resolve({ current_version: '0.24.0', latest_version: '0.25.0', available: true, release_url: 'https://github.com/Manixpcshot/atria-ai/releases/tag/v0.25.0', download_size: 10485760 });
+      return Promise.resolve({ current_version: '0.24.0', latest_version: '0.24.0', available: false, release_url: '', download_size: 0 });
     case 'update_install': return Promise.resolve();
     case 'mcp_test_server': { const sv = (args && args.server) || {}; return Promise.resolve({ ok: true, name: sv.name || '', tools: [{ name: 'echo', description: 'echo the arguments' }] }); }
     case 'files_stash': return Promise.resolve('/home/u/.atria/uploads/harness_' + ((args && args.name) || 'file'));
@@ -310,9 +315,54 @@ function router(cmd, args = {}) {
     case 'schedule_has_connection': return Promise.resolve(v18ConnSaved);
     case 'schedule_unprocessed': return Promise.resolve(v18Log);
     case 'schedule_ack': v18Log = []; return Promise.resolve(0);
+    // v0.24.0: model library (Hugging Face)
+    case 'models_state': return Promise.resolve({ folder: 'C:/u/.atria/models', free_space: 40 * 1073741824, token_configured: v24HfTokenSet, active: v24ActiveJob, jobs: v24Jobs });
+    case 'models_set_folder': return Promise.resolve({ folder: args.folder, free_space: 40 * 1073741824 });
+    case 'models_hf_token': v24HfTokenSet = !!(args.value && args.value.trim()); if (args.value && args.value.trim()) v24HfToken = args.value.trim(); return Promise.resolve();
+    case 'models_hf_token_get': return Promise.resolve(v24HfToken || null);
+    case 'models_search': return Promise.resolve([
+      { id: 'stabilityai/stable-diffusion-xl-base-1.0', downloads: 2100000, likes: 3100, pipeline_tag: 'image-generation' },
+      { id: 'stabilityai/stable-diffusion-3-medium', downloads: 480000, likes: 900, pipeline_tag: 'image-generation' },
+      { id: 'Qwen/Qwen2.5-7B-Instruct-GGUF', downloads: 900000, likes: 1200, pipeline_tag: 'text-generation' },
+    ]);
+    case 'models_add': {
+      if (v24Jobs.some((j) => j.repo === args.repo)) return Promise.reject(new Error('این مدل قبلاً به صف اضافه شده است'));
+      const job = { id: 'job-' + (++v24JobSeq), repo: args.repo, added_at: Date.now(), folder: 'C:/u/.atria/models/' + args.repo.replace('/', '-'), files: [
+        { path: 'README.md', size: 1200, downloaded: 0, state: 'pending', error: null },
+        { path: 'weights/model.safetensors', size: 6930000000, downloaded: 0, state: 'pending', error: null },
+      ], error: null };
+      v24Jobs.push(job);
+      return Promise.resolve({ job });
+    }
+    case 'models_start': v24ActiveJob = args.job_id; { const sj = v24Jobs.find((j) => j.id === args.job_id); if (sj) sj.files.forEach((f) => { if (f.state !== 'done') f.state = 'downloading'; }); } return Promise.resolve({ started: args.job_id });
+    case 'models_pause': { const pj = v24Jobs.find((j) => j.id === args.job_id); if (pj) pj.files.forEach((f) => { if (f.state === 'downloading') f.state = 'paused'; }); v24ActiveJob = null; return Promise.resolve({ paused: args.job_id }); }
+    case 'models_stop': { const stj = v24Jobs.find((j) => j.id === args.job_id); if (stj) stj.files.forEach((f) => { if (f.state === 'downloading') { f.state = 'pending'; f.downloaded = 0; } }); v24ActiveJob = null; return Promise.resolve({ stopped: args.job_id }); }
+    case 'models_remove': v24Jobs = v24Jobs.filter((j) => j.id !== args.job_id); return Promise.resolve({ removed: args.job_id });
+    // v0.24.0: image studio
+    case 'img_generate': {
+      if (args.source.kind === 'hf' && !args.source.token) return Promise.reject(new Error('توکن Hugging Face لازم است (در بخش مدل‌ها ذخیره کنید)'));
+      const n = Math.max(1, Number(args.req && args.req.n) || 1);
+      const made = Array.from({ length: n }).map(() => { const e = { id: 'img-' + (++v24ImgSeq), ts: Date.now(), prompt: args.req.prompt, negative: '', source: args.source.kind, model: args.source.model || 'mock-model', width: args.req.width, height: args.req.height, mime: 'image/png', bytes: 200, file: 'img.png' }; v24Gallery.push(e); return e; });
+      return Promise.resolve(made);
+    }
+    case 'img_gallery_list': return Promise.resolve(v24Gallery.slice());
+    case 'img_bytes': return Promise.resolve('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+    case 'img_delete': v24Gallery = v24Gallery.filter((e) => e.id !== args.id); return Promise.resolve();
+    case 'img_folder': return Promise.resolve('C:/u/.atria/images');
+    case 'reveal_path': return Promise.resolve();
     default: return Promise.resolve({});
   }
 }
+// v0.24.0 mock state
+let v24HfToken = '';
+let v24HfTokenSet = false;
+let v24ActiveJob = null;
+let v24Jobs = [];
+let v24JobSeq = 0;
+let v24ImgSeq = 0;
+let v24Gallery = [
+  { id: 'img-seed', ts: 1, prompt: 'عکس سیاه‌قو روی آب', negative: '', source: 'hf', model: 'seed-model', width: 512, height: 512, mime: 'image/png', bytes: 100, file: 'seed.png' },
+];
 const mdStub = {
   renderAll(el, text) { el._mdText = text; el.innerHTML = '<p></p>'; },
   createLiveStream(sec) {
@@ -386,13 +436,13 @@ ok('نشانگر Full Access سیم‌کشی شد', typeof byId.fullAccessIndica
 ok('دکمهٔ ارسال سیم‌کشی شد', typeof byId.btnSend.onclick === 'function');
 eq('listenEvents همهٔ رویدادها را ثبت کرد (۱۱ + schedule + drag-drop)',
   Object.keys(tauriListeners).sort(),
-  ['atria:done', 'atria:error', 'atria:retry', 'atria:round', 'atria:schedule_result', 'atria:stopped', 'atria:text',
+  ['atria-models-progress', 'atria-models-status', 'atria:done', 'atria:error', 'atria:retry', 'atria:round', 'atria:schedule_result', 'atria:stopped', 'atria:text',
    'atria:thinking', 'atria:tool_args', 'atria:tool_end', 'atria:tool_pending', 'atria:tool_start', 'tauri://drag-drop']);
 ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نمانده', !('btnManageConns' in T.els));
 await sleep(20);
 ok('بازیابی گفتگو از دیسک صدا زده شد', chatsLoadCalled > 0);
 await sleep(10);
-eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.23.0');
+eq('نسخه از app_meta بالای پنجره نشست', byId.appVer.textContent, 'v0.24.0');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
 ok('UI می‌گوید ابزارهای فایل تابع Full Access‌اند و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس محدود است', indexHtml.includes('ایجنت و ابزارهای فایل') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است'));
 ok('UI می‌گوید محدودهٔ Full Access فقط برای نوشتن است و خواندن در حالت‌های غیرسیستمی به ورک‌اسپیس می‌ماند', indexHtml.includes('این محدوده فقط برای نوشتن خودکار است') && indexHtml.includes('در بقیهٔ حالت‌ها خواندن/فهرست‌کردن همیشه به ورک‌اسپیس محدود است') && indexHtml.includes('کل سیستم — مسیر مطلق (با محافظت)'));
@@ -884,7 +934,7 @@ console.log('\n=== 16c) بررسی خودکار هنگام راه‌اندازی
 ok('پیش از بررسی، مودال آپدیت بسته است', byId.updateModal.classList.contains('hidden'));
 updateCheckAvailable = true;
 await T.checkForUpdate(true); // همان بررسیِ خودکارِ boot (silent)
-ok('با وجود نسخهٔ تازه، مودالِ تأیید روی کاربر باز می‌شود', !byId.updateModal.classList.contains('hidden') && String(byId.updatePromptTitle.textContent).includes('0.24.0'));
+ok('با وجود نسخهٔ تازه، مودالِ تأیید روی کاربر باز می‌شود', !byId.updateModal.classList.contains('hidden') && String(byId.updatePromptTitle.textContent).includes('0.25.0'));
 ok('متن مودال امضا و جایگزینی را توضیح می‌دهد', String(byId.updatePromptBody.textContent).includes('Ed25519') && String(byId.updatePromptBody.textContent).includes('باز می‌شود'));
 ok('قبل از تأیید، نصبی صدا زده نشده', !bridgeCalls.some((c) => c[0] === 'update_install'));
 byId.updatePromptNo.click();
@@ -1222,6 +1272,94 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
   ok('در حالت گفتگو بلوک کدکس در prompt نیست', !String(sentN.system || '').includes('[CODEX MODE'));
   emit('atria:done', { new_messages: null, final_text: 'باشه.', session_id: '', input_tokens: 2, output_tokens: 2 });
   ok('جریان گفتگو بسته شد', T.st.sending === false);
+
+  // ============ v0.24.0: چیپ عکس + کتابخانهٔ مدل (HF) + استودیو عکس ============
+  ok('چیپ «🎨 عکس» در نوار کامپوزر است (قبل از چیپ کدکس)', !!byId.imgChip && htmlSrc.includes('id="imgChip"') && htmlSrc.indexOf('imgChip') < htmlSrc.indexOf('codexChip'));
+  ok('دکمه‌های «مدل‌ها» و «استودیو عکس» در نوار کناری هستند (بعد از پروژه‌ها)', !!byId.btnModels && !!byId.btnStudio && htmlSrc.includes('id="btnModels"') && htmlSrc.includes('id="btnStudio"') && htmlSrc.indexOf('btnModels') > htmlSrc.indexOf('btnProjects') && htmlSrc.indexOf('btnStudio') > htmlSrc.indexOf('btnModels'));
+  ok('سبک‌بندی چیپ عکس، صف دانلود و گالری در CSS تعریف شده', cssSrc.includes('.img-chip') && cssSrc.includes('.q-bar') && cssSrc.includes('.gallery-grid') && cssSrc.includes('.src-card'));
+
+  // — مدل‌ها (Hugging Face) —
+  byId.btnModels.click();
+  await sleep(40);
+  ok('مودال مدل‌ها با models_state باز می‌شود و پوشه را نشان می‌دهد', !byId.modelsModal.classList.contains('hidden') && byId.modelsFolder.textContent.includes('.atria/models'));
+  ok('فضای خالی دیسک نمایش می‌یابد', String(byId.modelsFree.textContent).includes('GB'));
+  byId.modelsSearch.value = 'stable diffusion';
+  byId.modelsSearchBtn.click();
+  await sleep(50);
+  const v24Cards = byId.modelsResults.querySelectorAll('.model-card');
+  ok('جست‌وجو HF کارت مدل برمی‌گرداند', v24Cards.length === 3 && v24Cards[0].textContent.includes('stabilityai/stable-diffusion-xl-base-1.0'));
+  ok('برچسب pipeline روی کارت مدل است', v24Cards[0].textContent.includes('image-generation'));
+  v24Cards[0].querySelector('.model-card-add').click();
+  await sleep(50);
+  let v24Rows = byId.modelsQueue.querySelectorAll('.q-row');
+  ok('مدل به صف اضافه شد و row ساخته می‌شود', v24Rows.length === 1 && v24Rows[0].textContent.includes('stabilityai/stable-diffusion-xl-base-1.0'));
+  ok('حجم کل فایل‌های مدل محاسبه می‌شود (6.5 GB)', String(byId.modelsQueue.textContent).includes('6.5 GB'));
+  v24Rows[0].querySelectorAll('button')[0].click(); // شروع
+  await sleep(50);
+  const v24JobId = v24Rows[0].dataset.job;
+  emit('atria-models-progress', { job_id: v24JobId, file: 'weights/model.safetensors', downloaded: 3465000000, total: 6930000000, state: 'downloading', file_count: 2, file_index: 2 });
+  await sleep(30);
+  v24Rows = byId.modelsQueue.querySelectorAll('.q-row');
+  ok('رویداد پیشرفت نوار progress را به‌روز می‌کند (50٪)', v24Rows.length === 1 && v24Rows[0].querySelector('.q-bar').style.width === '50%');
+  ok('فایل در حال دانلود علامت دانلود دارد', !!v24Rows[0].querySelector('.q-file.downloading'));
+  for (const b of v24Rows[0].querySelectorAll('button')) if (b.textContent.includes('توقف')) b.click();
+  await sleep(50);
+  ok('توقف، job را «معلق» نشان می‌دهد', byId.modelsQueue.querySelector('.q-row').classList.contains('paused'));
+  confirmResult = true;
+  for (const b of byId.modelsQueue.querySelectorAll('button')) if (b.textContent.includes('حذف از صف')) b.click();
+  await sleep(50);
+  ok('حذف از صف، row را برمی‌دارد (فایل‌ها می‌مانند)', byId.modelsQueue.querySelectorAll('.q-row').length === 0);
+
+  // — استودیو عکس —
+  byId.btnStudio.click();
+  await sleep(40);
+  ok('استودیو با ۶ منبع باز می‌شود', !byId.studioModal.classList.contains('hidden') && byId.studioSources.querySelectorAll('.src-card').length === 6);
+  ok('منبع پیش‌فرض HF است و کارت آن فعال است', String(byId.studioSources.querySelector('.src-card.active').textContent).includes('Hugging Face'));
+  byId.hfToken.value = 'hf_test_token';
+  byId.hfTokenSave.click();
+  await sleep(40);
+  ok('ذخیرهٔ توکن HF از models_hf_token می‌گذرد', bridgeCalls.some((c) => c[0] === 'models_hf_token' && c[1].value === 'hf_test_token'));
+  const v24Srcs = byId.studioSources.querySelectorAll('.src-card');
+  v24Srcs[1].click(); // OpenAI
+  await sleep(30);
+  const v24CfgInputs = byId.studioCfg.querySelectorAll('input');
+  ok('انتخاب منبع OpenAI، فیلدهای key/model/base را می‌سازد', v24CfgInputs.length === 3 && byId.studioCfg.textContent.includes('کلید API'));
+  v24CfgInputs[0].value = 'sk-test';
+  v24CfgInputs[0].oninput();
+  byId.studioPrompt.value = 'یک گربهٔ نئونی روی بام شهر';
+  byId.studioSize.value = '768x768';
+  bridgeCalls.length = 0;
+  byId.studioGen.click();
+  await sleep(80);
+  const v24Gen = bridgeCalls.find((c) => c[0] === 'img_generate');
+  ok('دکمهٔ ساختن تصویر، img_generate با منبع openai می‌فرستد', !!v24Gen && v24Gen[1].source.kind === 'openai' && v24Gen[1].source.key === 'sk-test' && v24Gen[1].req.prompt.includes('گربه') && v24Gen[1].req.width === 768);
+  const v24ResImgs = byId.studioResult.querySelectorAll('img');
+  ok('تصویر نتیجه با data-URL render می‌شود', v24ResImgs.length === 1 && String(v24ResImgs[0].src).startsWith('data:image/png;base64,'));
+  ok('زیرنویس نتیجه، منبع را نام می‌برد', String(byId.studioResult.textContent).includes('OpenAI'));
+  const v24GItems = byId.galleryGrid.querySelectorAll('.g-item');
+  ok('گالری عکس‌های ذخیره‌شده را نشان می‌دهد (seed + تازه)', v24GItems.length >= 2);
+  await sleep(100); // تامنیل‌های lazy
+  ok('تامنیل گالری از img_bytes بارگذاری می‌شود', String(v24GItems[0].querySelector('img').src).startsWith('data:image/png;base64,'));
+
+  // — حالت عکس در چت —
+  byId.imgChip.click();
+  ok('چیپ عکس، حالت imgMode را روشن می‌کند', T.st.imgMode === true && byId.imgChip.classList.contains('active'));
+  ok('جای‌نگه‌دار جعبهٔ نوشتن در حالت عکس عوض می‌شود', String(byId.input.placeholder).includes('عکس'));
+  byId.input.value = 'یک خرس قطبی در برف، سبک آبرنگ';
+  bridgeCalls.length = 0;
+  byId.btnSend.click();
+  await sleep(100);
+  const v24ChatGen = bridgeCalls.find((c) => c[0] === 'img_generate');
+  ok('ارسال در حالت عکس مستقیم img_generate می‌فرستد (بدون chat_send)', !!v24ChatGen && !bridgeCalls.some((c) => c[0] === 'chat_send') && v24ChatGen[1].req.prompt.includes('خرس قطبی'));
+  await sleep(80);
+  const v24ChatImgs = byId.messages.querySelectorAll('.msg-img');
+  ok('حباب عکس در چت render شد و با img_bytes پر می‌شود', v24ChatImgs.length >= 1 && [...v24ChatImgs].some((i) => String(i.src).startsWith('data:image/png;base64,iVBOR')));
+  const v24LastChat = T.st.chats.find((c) => (c.messages || []).some((m) => m.role === 'user' && String(m.text).includes('خرس قطبی')));
+  const v24AiMsg = v24LastChat.messages.find((m) => m.role === 'assistant' && m.images);
+  ok('پیام ذخیره‌شده فقط ارجاع گالری دارد (نه base64 کامل — فایل چت کوچک می‌ماند)', !!v24AiMsg && !!v24AiMsg.images[0].gid && !v24AiMsg.images[0].data);
+  ok('عکس در گالری ماندگار ذخیره شد', v24Gallery.some((e) => e.prompt.includes('خرس قطبی')));
+  byId.imgChip.click();
+  ok('بازکلیک چیپ، حالت عکس را خاموش می‌کند', T.st.imgMode === false && !byId.imgChip.classList.contains('active'));
 }
 
 console.log('\n============================');

@@ -120,6 +120,7 @@ const st = {
   activeConnId: '',
   pendingImgs: [],
   pendingFiles: [],
+  imgMode: false, // v0.24.0: composer image mode (prompt → image, no LLM)
 };
 let dirtyChats = new Set();
 let goneChats = new Set();
@@ -1170,6 +1171,19 @@ function cacheEls() {
     connPresets: $('#connPresets'), mcpHub: $('#mcpHub'), mcpEnv: $('#mcpEnv'),
     autoMemVal: $('#autoMemVal'), speechOutVal: $('#speechOutVal'),
     projectRepo: $('#projectRepo'), projectRepoCheck: $('#projectRepoCheck'), projectRepoStatus: $('#projectRepoStatus'),
+    // v0.24.0: image chip + model library + image studio
+    imgChip: $('#imgChip'),
+    btnModels: $('#btnModels'), modelsModal: $('#modelsModal'), modelsX: $('#modelsX'),
+    modelsFolder: $('#modelsFolder'), modelsFolderPick: $('#modelsFolderPick'), modelsFree: $('#modelsFree'),
+    hfToken: $('#hfToken'), hfTokenSave: $('#hfTokenSave'),
+    modelsSearch: $('#modelsSearch'), modelsFilter: $('#modelsFilter'), modelsSearchBtn: $('#modelsSearchBtn'),
+    modelsResults: $('#modelsResults'), modelsQueue: $('#modelsQueue'),
+    btnStudio: $('#btnStudio'), studioModal: $('#studioModal'), studioX: $('#studioX'),
+    studioSources: $('#studioSources'), studioCfg: $('#studioCfg'),
+    studioPrompt: $('#studioPrompt'), studioNegative: $('#studioNegative'),
+    studioSize: $('#studioSize'), studioN: $('#studioN'), studioSteps: $('#studioSteps'),
+    studioGen: $('#studioGen'), studioResult: $('#studioResult'),
+    galleryGrid: $('#galleryGrid'), galleryReveal: $('#galleryReveal'),
   };
 }
 
@@ -1984,7 +1998,17 @@ function bubbleEl(role, text, flow, images, files) {
       const el = document.createElement('img');
       el.className = 'msg-img';
       el.alt = im.name || '';
-      el.src = 'data:' + im.media + ';base64,' + im.data;
+      if (im.gid) {
+        // v0.24.0: gallery-referenced image — keep chat files small, fetch bytes lazily
+        el.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+        if (window.__atria && window.__atria.invoke) {
+          window.__atria.invoke('img_bytes', { id: im.gid }).then((b64) => {
+            el.src = 'data:' + (im.media || 'image/png') + ';base64,' + b64;
+          }).catch(() => {});
+        }
+      } else {
+        el.src = 'data:' + im.media + ';base64,' + im.data;
+      }
       tray.appendChild(el);
     }
     b.insertBefore(tray, md);
@@ -2253,6 +2277,12 @@ function send() {
   if (st.sending) return toast('تولید فعلی هنوز تمام نشده — ⏹ بزن یا صبر کن', 'warn');
   const chat = currentChat();
   if (!chat) { newChat(true); return send(); }
+
+  // v0.24.0: image mode — the prompt goes to the image source, not the LLM
+  if (st.imgMode && text) {
+    clearAttach();
+    return v24SendImageTurn(text);
+  }
 
   const conn = activeConn();
   if (!conn) {
@@ -4481,3 +4511,609 @@ function v19WireMoreMenu() {
 }
 
 document.addEventListener('DOMContentLoaded', v19WireMoreMenu);
+
+/* =========================================================================
+   v0.24.0 — 🎨 Image Studio + 📦 Model Library (Hugging Face)
+   --------------------------------------------------------------------------
+   - composer image mode: 🎨 عکس chip → prompt goes straight to the image
+     source configured in the studio (no LLM round), result rendered in chat
+     as a gallery-referenced image (small chat files).
+   - Model Library: HF search, add-to-queue, sequential download engine with
+     live progress events, pause/stop/remove, folder + token settings.
+   - Image Studio: six sources (HF router, OpenAI, Google Imagen, Stability,
+     local A1111, local ComfyUI), prompt/negative/size/n/steps, gallery with
+     lazy thumbnails, delete, reveal folder.
+   ========================================================================= */
+
+const LS_STUDIO = 'atria-studio-v1';
+
+function v24Atr(cmd, args) {
+  if (!window.__atria || !window.__atria.invoke) return Promise.reject(new Error('IPC آماده نیست'));
+  return window.__atria.invoke(cmd, args || {});
+}
+function v24Err(e) {
+  const m = (e && (e.message || e.error)) || String(e || 'خطای ناشناس');
+  return m;
+}
+function v24Bytes(n) {
+  n = Number(n) || 0;
+  if (n >= 1073741824) return (n / 1073741824).toFixed(1) + ' GB';
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+  return n + ' B';
+}
+function v24El(tag, cls, text) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+/* ---------------- image sources ---------------- */
+
+const V24_SOURCES = [
+  { kind: 'hf', name: '🤗 Hugging Face', sub: 'Inference API — توکن HF از بخش مدل‌ها', fields: [
+    { k: 'model', label: 'مدل', ph: 'stabilityai/stable-diffusion-xl-base-1.0', def: 'stabilityai/stable-diffusion-xl-base-1.0' },
+    { k: 'base_url', label: 'Base URL (پیش‌فرض: router)', ph: 'https://router.huggingface.co' }
+  ]},
+  { kind: 'openai', name: '⚡ OpenAI', sub: 'dall-e-3 / gpt-image-1 — یا endpoint سازگار', fields: [
+    { k: 'key', label: 'کلید API', ph: 'sk-…', secret: true },
+    { k: 'model', label: 'مدل', ph: 'dall-e-3', def: 'dall-e-3' },
+    { k: 'base_url', label: 'Base URL (پیش‌فرض: api.openai.com/v1)', ph: 'https://api.openai.com/v1' }
+  ]},
+  { kind: 'google', name: '🔷 Google (Imagen)', sub: 'Gemini API — gemini-2.5-flash-image', fields: [
+    { k: 'key', label: 'کلید Google API', ph: 'AIza…', secret: true },
+    { k: 'model', label: 'مدل', ph: 'gemini-2.5-flash-image', def: 'gemini-2.5-flash-image' }
+  ]},
+  { kind: 'stability', name: '🌀 Stability AI', sub: 'stable-image — کلید api.stability.ai', fields: [
+    { k: 'key', label: 'کلید API', ph: 'sk-…', secret: true },
+    { k: 'model', label: 'مدل (پیش‌فرض: stable-image)', ph: 'stable-image' }
+  ]},
+  { kind: 'a1111', name: '🖥 A1111 (محلی)', sub: 'Stable Diffusion WebUI — localhost:7860', fields: [
+    { k: 'url', label: 'آدرس سرور', ph: 'http://127.0.0.1:7860', def: 'http://127.0.0.1:7860' }
+  ]},
+  { kind: 'comfy', name: '🧩 ComfyUI (محلی)', sub: 'localhost:8188 — نام checkpoint را بدهید', fields: [
+    { k: 'url', label: 'آدرس سرور', ph: 'http://127.0.0.1:8188', def: 'http://127.0.0.1:8188' },
+    { k: 'checkpoint', label: 'نام checkpoint', ph: 'sd_xl_base_1.0.safetensors' }
+  ]},
+];
+const V24_SRC_NAME = {};
+V24_SOURCES.forEach((s) => { V24_SRC_NAME[s.kind] = s.name; });
+
+function v24LoadStudio() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LS_STUDIO) || 'null');
+    if (s && s.kind && V24_SRC_NAME[s.kind]) return s;
+  } catch {}
+  return { kind: 'hf', values: {}, negative: '', size: '1024x1024', n: 1, steps: 25 };
+}
+function v24SaveStudio(s) {
+  try { localStorage.setItem(LS_STUDIO, JSON.stringify(s)); } catch {}
+}
+let v24studio = v24LoadStudio();
+
+function v24BuildSource() {
+  const v = v24studio.values || {};
+  const out = { kind: v24studio.kind };
+  for (const [k, val] of Object.entries(v)) out[k] = val;
+  if (v24studio.kind === 'hf') {
+    // HF token comes from the model-library secure store (single source of truth)
+    out.token = v24hfToken || '';
+  }
+  return out;
+}
+let v24hfToken = '';
+
+/* ---------------- model library ---------------- */
+
+let v24models = { folder: '', free_space: 0, active: null, jobs: [] };
+let v24busy = false;
+
+async function v24RefreshModels() {
+  try {
+    v24models = await v24Atr('models_state');
+  } catch (e) { return; }
+  v24RenderModelsFolder();
+  v24RenderQueue();
+}
+function v24RenderModelsFolder() {
+  if (!els.modelsFolder) return;
+  els.modelsFolder.textContent = v24models.folder || '…';
+  const free = Number(v24models.free_space) || 0;
+  els.modelsFree.textContent = free > 0 ? 'فضای خالی در دسترس: ' + v24Bytes(free) : '';
+  els.modelsFree.classList.toggle('warn', free > 0 && free < 2 * 1073741824);
+}
+
+const V24_QSTATE_FA = { pending: 'در صف', downloading: 'در حال دانلود', paused: 'معلق', done: 'تمام شد', error: 'خطا' };
+
+function v24JobState(job) {
+  const states = job.files.map((f) => f.state);
+  if (states.every((s) => s === 'done')) return 'done';
+  if (v24models.active === job.id) return states.some((s) => s === 'downloading') ? 'downloading' : 'pending';
+  if (states.some((s) => s === 'error')) return 'error';
+  if (states.some((s) => s === 'paused')) return 'paused';
+  return 'pending';
+}
+function v24JobProgress(job) {
+  const total = job.files.reduce((a, f) => a + (f.size || 0), 0);
+  const done = job.files.reduce((a, f) => a + (f.state === 'done' ? (f.size || 0) : (f.downloaded || 0)), 0);
+  return total > 0 ? done / total : 0;
+}
+
+function v24RenderQueue() {
+  if (!els.modelsQueue) return;
+  els.modelsQueue.textContent = '';
+  const jobs = (v24models.jobs || []).slice().reverse();
+  if (!jobs.length) {
+    els.modelsQueue.appendChild(v24El('div', 'models-empty', 'صف خالی است — از سمت راست مدل پیدا کنید و به صف اضافه کنید.'));
+    return;
+  }
+  for (const job of jobs) els.modelsQueue.appendChild(v24QueueRow(job));
+}
+
+function v24QueueRow(job) {
+  const state = v24JobState(job);
+  const row = v24El('div', 'q-row ' + state);
+  row.dataset.job = job.id;
+
+  const head = v24El('div', 'q-row-head');
+  head.appendChild(v24El('span', 'q-row-id', job.repo));
+  head.appendChild(v24El('span', 'q-state ' + state, V24_QSTATE_FA[state] || state));
+  row.appendChild(head);
+
+  const prog = v24El('div', 'q-progress');
+  const bar = v24El('div', 'q-bar');
+  bar.style.width = Math.round(v24JobProgress(job) * 100) + '%';
+  prog.appendChild(bar);
+  row.appendChild(prog);
+
+  const total = job.files.reduce((a, f) => a + (f.size || 0), 0);
+  const doneB = job.files.reduce((a, f) => a + (f.state === 'done' ? (f.size || 0) : (f.downloaded || 0)), 0);
+  const doneF = job.files.filter((f) => f.state === 'done').length;
+  const meta = v24El('div', 'q-row-meta');
+  meta.appendChild(v24El('span', '', v24Bytes(doneB) + ' از ' + v24Bytes(total) + ' · ' + doneF + '/' + job.files.length + ' فایل'));
+  meta.appendChild(v24El('span', '', job.folder ? '' : ''));
+  row.appendChild(meta);
+
+  const files = v24El('div', 'q-files');
+  for (const f of job.files.slice(0, 12)) {
+    const fr = v24El('div', 'q-file ' + f.state);
+    fr.dataset.fpath = f.path;
+    fr.appendChild(v24El('span', 'q-dot'));
+    fr.appendChild(v24El('span', 'q-file-name', f.path));
+    fr.appendChild(v24El('span', '', v24Bytes(f.size || f.downloaded || 0)));
+    files.appendChild(fr);
+  }
+  row.appendChild(files);
+
+  const act = v24El('div', 'q-row-actions');
+  if (state !== 'done') {
+    const start = v24El('button', 'btn primary tiny', v24models.active === job.id ? 'در حال اجرا…' : (state === 'paused' ? '▶ ادامه' : '▶ شروع'));
+    start.disabled = v24models.active === job.id;
+    start.onclick = () => v24StartJob(job.id);
+    act.appendChild(start);
+    if (v24models.active === job.id) {
+      const pause = v24El('button', 'btn tiny', '⏸ توقف');
+      pause.onclick = () => v24PauseJob(job.id);
+      act.appendChild(pause);
+      const stop = v24El('button', 'btn tiny', '⏹ لغو فایل فعلی');
+      stop.onclick = () => v24StopJob(job.id);
+      act.appendChild(stop);
+    }
+  }
+  const folder = v24El('button', 'btn tiny', '📂 پوشه');
+  folder.onclick = () => v24Atr('reveal_path', { path: job.folder }).catch((e) => toast(v24Err(e), 'warn'));
+  act.appendChild(folder);
+  const rm = v24El('button', 'btn tiny', '🗑 حذف از صف');
+  rm.onclick = () => {
+    if (!window.confirm || window.confirm('این مدل از صف حذف شود؟ (فایل‌های دانلودشده می‌مانند)')) v24RemoveJob(job.id);
+  };
+  act.appendChild(rm);
+  row.appendChild(act);
+  return row;
+}
+
+function v24ApplyProgress(ev) {
+  if (!ev || !ev.job_id) return;
+  const job = (v24models.jobs || []).find((j) => j.id === ev.job_id);
+  if (!job) return;
+  if (ev.file) {
+    const f = job.files.find((x) => x.path === ev.file);
+    if (f) {
+      if (ev.state === 'downloading') { f.state = 'downloading'; f.downloaded = ev.downloaded || f.downloaded || 0; }
+      if (ev.state === 'done') { f.state = 'done'; f.downloaded = ev.total || f.size; }
+      if (ev.state === 'paused') { f.state = 'paused'; f.downloaded = ev.downloaded || 0; }
+      if (ev.state === 'error' || ev.state === 'stopped') { f.downloaded = ev.downloaded || 0; }
+    }
+  }
+  if (ev.state === 'done' || ev.state === 'paused' || ev.state === 'error' || ev.state === 'stopped') {
+    v24RenderQueue();
+    return;
+  }
+  // downloading: update the existing row in place (cheap)
+  const row = els.modelsQueue && els.modelsQueue.querySelector('.q-row[data-job="' + ev.job_id + '"]');
+  if (row) {
+    const bar = row.querySelector('.q-bar');
+    if (bar) bar.style.width = Math.round(v24JobProgress(job) * 100) + '%';
+    const meta = row.querySelector('.q-row-meta span');
+    if (meta) {
+      const total = job.files.reduce((a, f) => a + (f.size || 0), 0);
+      const doneB = job.files.reduce((a, f) => a + (f.state === 'done' ? (f.size || 0) : (f.downloaded || 0)), 0);
+      meta.textContent = v24Bytes(doneB) + ' از ' + v24Bytes(total);
+    }
+  } else {
+    v24RenderQueue();
+  }
+}
+
+async function v24StartJob(id) {
+  if (v24busy) return;
+  v24busy = true;
+  try {
+    await v24Atr('models_start', { job_id: id });
+    await v24RefreshModels();
+  } catch (e) { toast(v24Err(e), 'err'); }
+  v24busy = false;
+}
+async function v24PauseJob(id) {
+  try { await v24Atr('models_pause', { job_id: id }); await v24RefreshModels(); }
+  catch (e) { toast(v24Err(e), 'warn'); }
+}
+async function v24StopJob(id) {
+  try { await v24Atr('models_stop', { job_id: id }); await v24RefreshModels(); }
+  catch (e) { toast(v24Err(e), 'warn'); }
+}
+async function v24RemoveJob(id) {
+  try { await v24Atr('models_remove', { job_id: id }); await v24RefreshModels(); }
+  catch (e) { toast(v24Err(e), 'err'); }
+}
+
+async function v24Search() {
+  const q = (els.modelsSearch.value || '').trim();
+  const pipe = els.modelsFilter.value || '';
+  if (els.modelsSearchBtn) els.modelsSearchBtn.disabled = true;
+  els.modelsResults.textContent = '';
+  els.modelsResults.appendChild(v24El('div', 'models-empty', 'در حال جست‌وجو در Hugging Face…'));
+  try {
+    const list = await v24Atr('models_search', { query: q, pipeline: pipe || null, limit: 20 });
+    els.modelsResults.textContent = '';
+    if (!list || !list.length) {
+      els.modelsResults.appendChild(v24El('div', 'models-empty', 'چیزی پیدا نشد — کلمهٔ دیگری امتحان کنید.'));
+      return;
+    }
+    for (const m of list) els.modelsResults.appendChild(v24ModelCard(m));
+  } catch (e) {
+    els.modelsResults.textContent = '';
+    els.modelsResults.appendChild(v24El('div', 'models-empty', 'جست‌وجو شکست: ' + v24Err(e)));
+  }
+  if (els.modelsSearchBtn) els.modelsSearchBtn.disabled = false;
+}
+
+function v24ModelCard(m) {
+  const card = v24El('div', 'model-card');
+  const top = v24El('div', 'model-card-top');
+  top.appendChild(v24El('span', 'model-card-id', m.id));
+  if (m.pipeline_tag) top.appendChild(v24El('span', 'model-badge', m.pipeline_tag));
+  card.appendChild(top);
+  const meta = v24El('div', 'model-card-meta');
+  meta.textContent = '↓ ' + fmtN(m.downloads || 0) + ' دانلود · ♥ ' + fmtN(m.likes || 0);
+  card.appendChild(meta);
+  const add = v24El('button', 'btn primary tiny model-card-add', '＋ افزودن به صف');
+  add.onclick = () => v24AddModel(m.id);
+  card.appendChild(add);
+  return card;
+}
+
+async function v24AddModel(repo) {
+  if (!repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return toast('repo id نامعتبر است', 'warn');
+  try {
+    const r = await v24Atr('models_add', { repo });
+    const job = r && r.job;
+    if (job) {
+      const total = (job.files || []).reduce((a, f) => a + (f.size || 0), 0);
+      const free = Number(v24models.free_space) || 0;
+      if (free > 0 && total > free) toast('هشدار: فضای خالی دیسک (' + v24Bytes(free) + ') از حجم مدل (' + v24Bytes(total) + ') کمتر است', 'warn');
+    }
+    await v24RefreshModels();
+    toast('به صف اضافه شد — «شروع» را بزنید', 'ok');
+  } catch (e) { toast(v24Err(e), 'err'); }
+}
+
+/* ---------------- image studio ---------------- */
+
+function v24RenderSources() {
+  if (!els.studioSources) return;
+  els.studioSources.textContent = '';
+  for (const s of V24_SOURCES) {
+    const c = v24El('button', 'src-card' + (v24studio.kind === s.kind ? ' active' : ''));
+    c.type = 'button';
+    c.appendChild(v24El('span', '', s.name));
+    c.appendChild(v24El('span', 'src-sub', s.sub));
+    c.onclick = () => { v24studio.kind = s.kind; v24SaveStudio(v24studio); v24RenderSources(); v24RenderCfg(); };
+    els.studioSources.appendChild(c);
+  }
+}
+
+function v24RenderCfg() {
+  if (!els.studioCfg) return;
+  els.studioCfg.textContent = '';
+  const def = V24_SOURCES.find((s) => s.kind === v24studio.kind);
+  if (!def) return;
+  v24studio.values = v24studio.values || {};
+  for (const f of def.fields) {
+    const lab = v24El('label', 'flabel', f.label + ' ');
+    const inp = document.createElement('input');
+    inp.type = f.secret ? 'password' : 'text';
+    inp.dir = 'ltr';
+    inp.placeholder = f.ph || '';
+    inp.value = v24studio.values[f.k] || '';
+    inp.autocomplete = 'off';
+    inp.oninput = () => { v24studio.values[f.k] = inp.value; v24SaveStudio(v24studio); };
+    lab.appendChild(inp);
+    els.studioCfg.appendChild(lab);
+  }
+  if (v24studio.kind === 'hf') {
+    const hint = v24El('div', 'models-free', v24hfToken ? '✓ توکن HF از بخش مدل‌ها استفاده می‌شود' : '⚠ توکن HF ذخیره نشده — از بخش «مدل‌ها» ذخیره کنید');
+    els.studioCfg.appendChild(hint);
+  }
+}
+
+function v24ReadParams() {
+  const [w, h] = String(els.studioSize.value || '1024x1024').split('x');
+  return {
+    width: Number(w) || 1024,
+    height: Number(h) || 1024,
+    n: Number(els.studioN.value) || 1,
+    steps: Math.min(100, Math.max(5, Number(els.studioSteps.value) || 25)),
+  };
+}
+
+async function v24Generate(prompt) {
+  const p = (prompt || els.studioPrompt.value || '').trim();
+  if (!p) return toast('پرامپت تصویر را بنویسید', 'warn');
+  const src = v24BuildSource();
+  if (src.kind === 'hf' && !src.token) {
+    openModels();
+    return toast('توکن Hugging Face را در بخش «مدل‌ها» ذخیره کنید', 'warn');
+  }
+  if ((src.kind === 'openai' || src.kind === 'google' || src.kind === 'stability') && !src.key) {
+    return toast('کلید API منبع «' + (V24_SRC_NAME[src.kind] || src.kind) + '» خالی است', 'warn');
+  }
+  const params = v24ReadParams();
+  if (els.studioGen) { els.studioGen.classList.add('studio-gen-busy'); els.studioGen.textContent = '⏳ در حال ساختن تصویر…'; }
+  if (els.studioResult) { els.studioResult.textContent = ''; }
+  try {
+    const entries = await v24Atr('img_generate', {
+      source: src,
+      req: { prompt: p, negative: (els.studioNegative.value || '').trim(), width: params.width, height: params.height, n: params.n, steps: params.steps },
+    });
+    const imgs = [];
+    for (const e of entries || []) {
+      const b64 = await v24Atr('img_bytes', { id: e.id });
+      imgs.push({ id: e.id, mime: e.mime || 'image/png', b64, model: e.model || '' });
+    }
+    v24RenderStudioResult(imgs, p);
+    await v24RenderGallery();
+  } catch (e) {
+    if (els.studioResult) {
+      els.studioResult.appendChild(v24El('div', 'studio-result-cap', '❌ ' + v24Err(e)));
+    }
+  } finally {
+    if (els.studioGen) { els.studioGen.classList.remove('studio-gen-busy'); els.studioGen.textContent = '✨ ساختن تصویر'; }
+  }
+}
+
+function v24RenderStudioResult(imgs, prompt) {
+  if (!els.studioResult) return;
+  els.studioResult.textContent = '';
+  if (!imgs || !imgs.length) return;
+  for (const im of imgs) {
+    const el = document.createElement('img');
+    el.className = 'studio-result-img';
+    el.src = 'data:' + im.mime + ';base64,' + im.b64;
+    els.studioResult.appendChild(el);
+  }
+  const cap = v24El('div', 'studio-result-cap');
+  cap.textContent = (V24_SRC_NAME[v24studio.kind] || v24studio.kind) + (imgs[0].model ? ' · ' + imgs[0].model : '') + ' — در گالری ذخیره شد';
+  els.studioResult.appendChild(cap);
+}
+
+async function v24RenderGallery() {
+  if (!els.galleryGrid) return;
+  els.galleryGrid.textContent = '';
+  let list = [];
+  try { list = await v24Atr('img_gallery_list'); } catch { return; }
+  list = (list || []).slice(0, 24);
+  if (!list.length) {
+    els.galleryGrid.appendChild(v24El('div', 'models-empty', 'هنوز عکسی ذخیره نشده — اولین تصویر را بسازید.'));
+    return;
+  }
+  const items = [];
+  for (const e of list) {
+    const it = v24El('div', 'g-item');
+    const img = document.createElement('img');
+    img.className = 'g-thumb';
+    img.alt = e.prompt || '';
+    it.appendChild(img);
+    it.appendChild(v24El('div', 'g-item-cap', (e.prompt || '').slice(0, 90)));
+    const x = v24El('button', 'g-item-x', '✕');
+    x.onclick = (ev) => {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      if (window.confirm && !window.confirm('این عکس از گالری حذف شود؟')) return;
+      v24Atr('img_delete', { id: e.id }).then(v24RenderGallery).catch((er) => toast(v24Err(er), 'err'));
+    };
+    it.appendChild(x);
+    it.onclick = () => {
+      v24Atr('img_bytes', { id: e.id }).then((b64) => {
+        v24RenderStudioResult([{ id: e.id, mime: e.mime || 'image/png', b64, model: e.model || '' }], e.prompt || '');
+      }).catch((er) => toast(v24Err(er), 'err'));
+    };
+    items.push({ it, img, entry: e });
+    els.galleryGrid.appendChild(it);
+  }
+  // lazy thumbnail bytes (chunked so we don't open 24 invokes at once)
+  for (let i = 0; i < items.length; i += 6) {
+    const chunk = items.slice(i, i + 6);
+    await Promise.all(chunk.map(async (c) => {
+      try {
+        const b64 = await v24Atr('img_bytes', { id: c.entry.id });
+        c.img.src = 'data:' + (c.entry.mime || 'image/png') + ';base64,' + b64;
+      } catch {}
+    }));
+  }
+}
+
+/* ---------------- chat image mode ---------------- */
+
+function v24ToggleImgMode() {
+  st.imgMode = !st.imgMode;
+  if (els.imgChip) els.imgChip.classList.toggle('active', st.imgMode);
+  if (els.input) els.input.placeholder = st.imgMode ? 'پرامپت تصویر بنویس… (حالت عکس)' : 'پیام خود را بنویس…';
+  if (st.imgMode) toast('حالت عکس: پرامپت بنویس و بفرست — عکس از منبع انتخاب‌شدهٔ استودیو ساخته می‌شود', 'ok');
+}
+
+async function v24SendImageTurn(text) {
+  const chat = currentChat();
+  if (!chat) { newChat(true); return v24SendImageTurn(text); }
+  const src = v24BuildSource();
+  if (src.kind === 'hf' && !src.token) {
+    openStudio();
+    return toast('ابتدا توکن HF را در «مدل‌ها» ذخیره کن یا منبع دیگری در استودیو انتخاب کن', 'warn');
+  }
+  if ((src.kind === 'openai' || src.kind === 'google' || src.kind === 'stability') && !src.key) {
+    openStudio();
+    return toast('کلید API منبع عکس را در استودیو وارد کن', 'warn');
+  }
+  chat.messages.push({ role: 'user', text, plain: text, ts: Date.now() });
+  if (chat.title === 'گفتگوی جدید') {
+    chat.title = text.replace(/\s+/g, ' ').trim().slice(0, 42);
+    renderConvList();
+  }
+  saveChats(chat.id);
+  els.empty.classList.add('hidden', 'off');
+  els.messages.appendChild(bubbleEl('user', text, null));
+  els.input.value = '';
+  autosize();
+  forceScrollBottom();
+
+  st.sending = true;
+  els.btnSend.classList.add('hidden');
+  els.btnStop.classList.remove('hidden');
+  els.btnStop.disabled = true;
+  const origStop = els.btnStop.onclick; // no live agent to stop; keep the original handler after
+  els.btnStop.onclick = null;
+  const ph = bubbleEl('ai', '🎨 در حال ساختن تصویر… (چند ثانیه تا چند دقیقه)', null);
+  els.messages.appendChild(ph);
+  forceScrollBottom();
+
+  try {
+    const [w, h] = String(els.studioSize.value || '1024x1024').split('x');
+    const entries = await v24Atr('img_generate', {
+      source: src,
+      req: { prompt: text, negative: (els.studioNegative ? els.studioNegative.value : '') || '', width: Number(w) || 1024, height: Number(h) || 1024, n: Number(els.studioN.value) || 1, steps: Math.min(100, Math.max(5, Number(els.studioSteps.value) || 25)) },
+    });
+    ph.remove();
+    const imgs = [];
+    for (const e of entries || []) {
+      imgs.push({ name: e.id, media: e.mime || 'image/png', gid: e.id });
+    }
+    const cap = '🎨 تصویر ساخته شد — ' + (V24_SRC_NAME[src.kind] || src.kind) + ((entries && entries[0] && entries[0].model) ? ' · ' + entries[0].model : '');
+    chat.messages.push({ role: 'assistant', text: cap, ts: Date.now(), images: imgs });
+    saveChats(chat.id);
+    els.messages.appendChild(bubbleEl('ai', cap, null, imgs));
+  } catch (e) {
+    ph.remove();
+    const msg = '❌ ساختن تصویر نشکست: ' + v24Err(e);
+    chat.messages.push({ role: 'assistant', text: msg, ts: Date.now() });
+    saveChats(chat.id);
+    els.messages.appendChild(bubbleEl('ai', msg, null));
+  }
+  st.sending = false;
+  els.btnSend.classList.remove('hidden');
+  els.btnStop.classList.add('hidden');
+  els.btnStop.disabled = false;
+  els.btnStop.onclick = origStop;
+  forceScrollBottom();
+}
+
+/* ---------------- open/close + init ---------------- */
+
+function openModels() {
+  if (!els.modelsModal) return;
+  openModal(els.modelsModal);
+  v24RefreshModels();
+  v24Atr('models_hf_token_get').then((t) => { if (t && els.hfToken) els.hfToken.value = t; }).catch(() => {});
+}
+function openStudio() {
+  if (!els.studioModal) return;
+  openModal(els.studioModal);
+  v24RenderSources();
+  v24RenderCfg();
+  if (els.studioPrompt) els.studioPrompt.value = v24studio.prompt || '';
+  if (els.studioNegative) els.studioNegative.value = v24studio.negative || '';
+  if (els.studioSize) els.studioSize.value = v24studio.size || '1024x1024';
+  if (els.studioN) els.studioN.value = String(v24studio.n || 1);
+  if (els.studioSteps) els.studioSteps.value = String(v24studio.steps || 25);
+  v24RenderGallery();
+}
+
+function v24Init() {
+  // side buttons
+  if (els.btnModels) els.btnModels.onclick = () => openModels();
+  if (els.modelsX) els.modelsX.onclick = () => closeModal(els.modelsModal);
+  if (els.modelsModal) els.modelsModal.onclick = (e) => { if (e.target === els.modelsModal) closeModal(els.modelsModal); };
+  if (els.btnStudio) els.btnStudio.onclick = () => openStudio();
+  if (els.studioX) els.studioX.onclick = () => closeModal(els.studioModal);
+  if (els.studioModal) els.studioModal.onclick = (e) => { if (e.target === els.studioModal) closeModal(els.studioModal); };
+
+  // image chip
+  if (els.imgChip) els.imgChip.onclick = () => v24ToggleImgMode();
+
+  // models: folder + token + search
+  if (els.modelsFolderPick) els.modelsFolderPick.onclick = async () => {
+    const dlg = window.__TAURI__ && window.__TAURI__.dialog;
+    if (!dlg) return toast('انتخاب پوشه در دسترس نیست', 'warn');
+    try {
+      const picked = await dlg.open({ directory: true, multiple: false, title: 'پوشهٔ دانلود مدل‌ها' });
+      if (!picked) return;
+      const r = await v24Atr('models_set_folder', { folder: picked });
+      v24models.folder = r.folder; v24models.free_space = r.free_space;
+      v24RenderModelsFolder();
+    } catch (e) { toast(v24Err(e), 'err'); }
+  };
+  if (els.hfTokenSave) els.hfTokenSave.onclick = async () => {
+    try {
+      await v24Atr('models_hf_token', { value: (els.hfToken.value || '').trim() });
+      v24hfToken = (els.hfToken.value || '').trim();
+      toast(v24hfToken ? 'توکن HF ذخیره شد' : 'توکن HF پاک شد', 'ok');
+      v24RenderCfg();
+    } catch (e) { toast(v24Err(e), 'err'); }
+  };
+  if (els.modelsSearchBtn) els.modelsSearchBtn.onclick = () => v24Search();
+  if (els.modelsSearch) els.modelsSearch.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') v24Search();
+  });
+
+  // studio
+  for (const k of ['size', 'n', 'steps']) {
+    const el = els['studio' + k[0].toUpperCase() + k.slice(1)];
+    if (el) el.addEventListener('change', () => { v24ReadParams(); v24SaveStudio(v24studio); });
+  }
+  if (els.studioPrompt) els.studioPrompt.addEventListener('input', () => { v24studio.prompt = els.studioPrompt.value; v24SaveStudio(v24studio); });
+  if (els.studioNegative) els.studioNegative.addEventListener('input', () => { v24studio.negative = els.studioNegative.value; v24SaveStudio(v24studio); });
+  if (els.studioGen) els.studioGen.onclick = () => v24Generate();
+  if (els.galleryReveal) els.galleryReveal.onclick = () => {
+    v24Atr('img_folder').then((p) => v24Atr('reveal_path', { path: p })).catch((e) => toast(v24Err(e), 'warn'));
+  };
+
+  // live progress events from the download engine
+  v24AtrInvokeListen('atria-models-progress', (p) => v24ApplyProgress(p));
+  v24AtrInvokeListen('atria-models-status', () => v24RefreshModels());
+}
+
+function v24AtrInvokeListen(name, cb) {
+  if (!window.__atria || !window.__atria.listen) return;
+  window.__atria.listen(name, (e) => cb(e.payload));
+}
+
+document.addEventListener('DOMContentLoaded', v24Init);
