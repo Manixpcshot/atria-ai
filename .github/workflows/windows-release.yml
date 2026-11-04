@@ -24,6 +24,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+          # Stable key per OS: shared across all version tags/releases (the
+          # default key hashes Cargo.lock, orphaning ~1.3GB of cache on every
+          # version bump). Cargo fingerprints handle stale target dirs itself;
+          # a key change only happens when the dependency tree actually changes.
+          key: atria-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.toml', 'crates/**/Cargo.toml') }}
 
       - name: Syntax-check frontend
         run: node --check frontend/app.js
@@ -107,6 +112,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+          # Stable key per OS: shared across all version tags/releases (the
+          # default key hashes Cargo.lock, orphaning ~1.3GB of cache on every
+          # version bump). Cargo fingerprints handle stale target dirs itself;
+          # a key change only happens when the dependency tree actually changes.
+          key: atria-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.toml', 'crates/**/Cargo.toml') }}
 
       - name: Install Tauri CLI v2
         run: npm install -g @tauri-apps/cli@^2
