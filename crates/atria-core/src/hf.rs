@@ -204,12 +204,12 @@ pub async fn search_models(
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("Hugging Face request failed: {e}"))?
+        .map_err(|e| format!("اتصال به Hugging Face ممکن نشد: {e}"))?
         .error_for_status()
-        .map_err(|e| format!("Hugging Face error: {e}"))?
+        .map_err(|e| hf_http_err(e, None))?
         .json()
         .await
-        .map_err(|e| format!("Hugging Face response is not JSON: {e}"))?;
+        .map_err(|e| format!("پاسخ Hugging Face معتبر نبود: {e}"))?;
     Ok(v
         .into_iter()
         .filter_map(|m| {
@@ -230,23 +230,14 @@ pub async fn repo_files(repo: &str) -> Result<Vec<HfFile>, String> {
     if !is_repo_id(repo) {
         return Err("repo id نامعتبر است — شکل: `org/model-name`".into());
     }
-    let url = format!(
-        "{HF_API}/models/{}/tree/main?recursive=true",
-        urlenc(repo)
-    );
+    let url = tree_url(repo);
     let v: Vec<serde_json::Value> = http_client()
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("Hugging Face request failed: {e}"))?
+        .map_err(|e| format!("اتصال به Hugging Face ممکن نشد: {e}"))?
         .error_for_status()
-        .map_err(|e| {
-            if e.status() == Some(reqwest::StatusCode::NOT_FOUND) {
-                format!("مدل `{repo}` پیدا نشد (repo وجود ندارد یا خصوصی است)")
-            } else {
-                format!("Hugging Face error: {e}")
-            }
-        })?
+        .map_err(|e| hf_http_err(e, Some(repo)))?
         .json()
         .await
         .map_err(|e| format!("Hugging Face response is not JSON: {e}"))?;
@@ -285,6 +276,42 @@ pub fn is_repo_id(repo: &str) -> bool {
     parts
         .iter()
         .all(|p| p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)))
+}
+
+/// Tree-listing API URL for a repo. The repo id is validated by
+/// `is_repo_id` (ASCII `[A-Za-z0-9-_.]` segments, single slash) so it is
+/// embedded verbatim — percent-encoding the slash (`%2F`) makes the HF API
+/// return 400 Bad Request.
+pub fn tree_url(repo: &str) -> String {
+    format!("{HF_API}/models/{}/tree/main?recursive=true", repo.trim())
+}
+
+/// Friendly, actionable error text for HF API failures.
+fn hf_err_text(status: Option<reqwest::StatusCode>, generic: &str, repo: Option<&str>) -> String {
+    match status {
+        Some(reqwest::StatusCode::NOT_FOUND) => match repo {
+            Some(r) => format!("مدل `{r}` پیدا نشد (repo وجود ندارد یا خصوصی است)"),
+            None => "چیزی پیدا نشد (404)".into(),
+        },
+        Some(reqwest::StatusCode::UNAUTHORIZED) => {
+            "لوازم ورود: توکن Hugging Face را در بخش «مدل‌ها» ذخیره کنید (مدل gated/خصوصی است)".into()
+        }
+        Some(reqwest::StatusCode::FORBIDDEN) => match repo {
+            Some(r) => format!("دسترسی به `{r}` رد شد — احتمالاً خصوصی است و توکن با دسترسی لازم ندارد"),
+            None => "دسترسی رد شد (403)".into(),
+        },
+        Some(reqwest::StatusCode::TOO_MANY_REQUESTS) => {
+            "Hugging Face اجازهٔ بیشتری در این لحظه نمی‌دهد — چند لحظه صبر کنید و دوباره امتحان کنید".into()
+        }
+        Some(code) => format!("Hugging Face error: HTTP {code}"),
+        None => generic.to_string(),
+    }
+}
+
+fn hf_http_err(e: reqwest::Error, repo: Option<&str>) -> String {
+    let status = e.status();
+    let generic = format!("Hugging Face error: {e}");
+    hf_err_text(status, &generic, repo)
 }
 
 /// Direct download URL for a file in a repo (main branch).
@@ -437,7 +464,17 @@ pub async fn download_file(
             } else {
                 String::from(&body[..300])
             };
-            return Err(format!("HTTP {status} — {hint}"));
+            let msg = match status {
+                reqwest::StatusCode::UNAUTHORIZED => {
+                    "این مدل gated/خصوصی است — برای دانلود فایل‌ها باید توکن Hugging Face (با پذیرش لایسنس مدل) را در بخش «مدل‌ها» ذخیره کنید".to_string()
+                }
+                reqwest::StatusCode::FORBIDDEN => {
+                    "دسترسی به فایل رد شد (403) — مدل خصوصی است یا توکن با دسترسی لازم ندارد".to_string()
+                }
+                reqwest::StatusCode::NOT_FOUND => "فایل در repo پیدا نشد (404)".to_string(),
+                _ => format!("Hugging Face error: HTTP {status} — {hint}"),
+            };
+            return Err(msg);
         }
         if resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
             // part file already complete → finalize
@@ -538,6 +575,27 @@ mod tests {
         assert_eq!(urlenc("a/b c~1"), "a%2Fb%20c~1");
         assert_eq!(file_url("org/m", "weights/model.safetensors"),
             "https://huggingface.co/org/m/resolve/main/weights/model.safetensors");
+    }
+
+    #[test]
+    fn tree_url_keeps_repo_slash_verbatim() {
+        // Regression: percent-encoding the repo slash (%2F) made the HF API
+        // answer 400 Bad Request.
+        assert_eq!(
+            tree_url("black-forest-labs/Flux-3-image-klein-comfy"),
+            "https://huggingface.co/api/models/black-forest-labs/Flux-3-image-klein-comfy/tree/main?recursive=true"
+        );
+    }
+
+    #[test]
+    fn hf_error_text_is_actionable() {
+        use reqwest::StatusCode;
+        assert!(hf_err_text(Some(StatusCode::NOT_FOUND), "g", Some("o/m")).contains("پیدا نشد"));
+        assert!(hf_err_text(Some(StatusCode::UNAUTHORIZED), "g", None).contains("توکن"));
+        assert!(hf_err_text(Some(StatusCode::FORBIDDEN), "g", Some("o/m")).contains("دسترسی"));
+        assert!(hf_err_text(Some(StatusCode::TOO_MANY_REQUESTS), "g", None).contains("صبر کنید"));
+        assert_eq!(hf_err_text(Some(StatusCode::BAD_REQUEST), "g", None), "Hugging Face error: HTTP 400 Bad Request");
+        assert_eq!(hf_err_text(None, "connection dropped", None), "connection dropped");
     }
 
     #[test]

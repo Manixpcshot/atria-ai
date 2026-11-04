@@ -1201,10 +1201,12 @@ function invokeCmd(name, args) {
 function toast(msg, kind) {
   if (!els.toasts) return;
   const t = document.createElement('div');
-  t.className = 'toast' + (kind ? ' ' + kind : '');
+  const long = String(msg).length > 90; // v0.24.1: long errors get a compact, scrollable card
+  t.className = 'toast' + (kind ? ' ' + kind : '') + (long ? ' long' : '');
   t.textContent = msg;
   els.toasts.appendChild(t);
-  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 350); }, 2800);
+  const life = Math.min(9000, 2800 + (long ? 4000 : 0));
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 350); }, life);
 }
 
 function stars() {
@@ -3639,6 +3641,14 @@ async function boot() {
         closeModal(els.settingsModal);
         return;
       }
+      if (els.modelsModal && !els.modelsModal.classList.contains('hidden')) {
+        closeModal(els.modelsModal);
+        return;
+      }
+      if (els.studioModal && !els.studioModal.classList.contains('hidden')) {
+        closeModal(els.studioModal);
+        return;
+      }
       closeModal(els.cmdk);
       closeModal(els.memoryModal);
     }
@@ -4784,7 +4794,7 @@ async function v24Search() {
     for (const m of list) els.modelsResults.appendChild(v24ModelCard(m));
   } catch (e) {
     els.modelsResults.textContent = '';
-    els.modelsResults.appendChild(v24El('div', 'models-empty', 'جست‌وجو شکست: ' + v24Err(e)));
+    els.modelsResults.appendChild(v24El('div', 'models-error', 'جست‌وجو ممکن نشد: ' + v24Err(e)));
   }
   if (els.modelsSearchBtn) els.modelsSearchBtn.disabled = false;
 }
@@ -4816,7 +4826,13 @@ async function v24AddModel(repo) {
     }
     await v24RefreshModels();
     toast('به صف اضافه شد — «شروع» را بزنید', 'ok');
-  } catch (e) { toast(v24Err(e), 'err'); }
+  } catch (e) {
+    if (els.modelsResults) {
+      els.modelsResults.textContent = '';
+      els.modelsResults.appendChild(v24El('div', 'models-error', 'افزودن به صف ممکن نشد: ' + v24Err(e)));
+    }
+    toast(v24Err(e), 'err');
+  }
 }
 
 /* ---------------- image studio ---------------- */

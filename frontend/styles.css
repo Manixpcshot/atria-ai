@@ -637,6 +637,12 @@ input[type="range"] { accent-color: var(--violet); height: 26px; cursor: pointer
 .toast.ok { border-color: rgba(52, 211, 153, 0.4); }
 .toast.warn { border-color: rgba(255, 180, 84, 0.45); }
 .toast.err { border-color: rgba(248, 113, 113, 0.45); }
+/* long error messages: compact, wrapped, scrollable (v0.24.1) */
+.toast.long {
+  font-size: 11.5px; line-height: 1.6; max-width: min(430px, 84vw);
+  max-height: 138px; overflow-y: auto; text-align: center;
+}
+.toast.long.err { background: rgba(46, 16, 22, 0.92); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(16px) scale(0.94); } to { opacity: 1; transform: none; } }
 @keyframes toastOut { to { opacity: 0; transform: translateY(10px) scale(0.95); } }
 
@@ -1730,12 +1736,13 @@ mark.chat-hit.cur { background: rgba(255, 150, 60, 0.75); }
 
 /* ============ v0.24.0: image chip + model library + image studio ============ */
 
-/* composer chip: image mode */
-.img-chip {
+/* composer chip: image mode (v0.24.1 — its own class; the 64px .img-chip is
+   the uploaded-image thumbnail in chat bubbles and must not be reused here) */
+.photo-chip {
   color: #f2b8ff; border-color: rgba(240,150,255,.28); background: rgba(240,150,255,.07);
 }
-.img-chip:hover { border-color: rgba(240,150,255,.5); background: rgba(240,150,255,.14); }
-.img-chip.active { color: #ffe3ff; border-color: rgba(240,150,255,.65); background: rgba(240,150,255,.2); box-shadow: 0 0 14px rgba(240,150,255,.22); }
+.photo-chip:hover { border-color: rgba(240,150,255,.5); background: rgba(240,150,255,.14); }
+.photo-chip.active { color: #ffe3ff; border-color: rgba(240,150,255,.65); background: rgba(240,150,255,.2); box-shadow: 0 0 14px rgba(240,150,255,.22); }
 
 /* larger modals for models/studio */
 .models-section, .studio-section { width: min(1160px, calc(100vw - 36px)); }
@@ -1880,3 +1887,10 @@ mark.chat-hit.cur { background: rgba(255, 150, 60, 0.75); }
   box-shadow: 0 12px 36px rgba(0,0,0,.4); background: rgba(0,0,0,.25); display: block;
 }
 .msg-img-cap { margin-top: 5px; font: 10px var(--font); color: #94a1c6; }
+
+/* v0.24.1: inline error card inside the models modal */
+.models-error {
+  padding: 10px 14px; border-radius: 10px; margin: 8px 2px;
+  border: 1px solid rgba(248,113,113,.35); background: rgba(248,113,113,.08);
+  color: #ffb3b3; font-size: 11.5px; line-height: 1.6;
+}
