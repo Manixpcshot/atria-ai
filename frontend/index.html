@@ -54,12 +54,18 @@
         </button>
         <nav class="conv-list" id="convList"></nav>
         <div class="side-footer">
-          <button class="side-btn" id="btnProjects">📁&nbsp; پروژه‌ها و ادامهٔ کار</button>
-          <button class="side-btn" id="btnModels">📦&nbsp; مدل‌ها (Hugging Face)</button>
-          <button class="side-btn" id="btnStudio">🎨&nbsp; استودیو عکس</button>
-          <button class="side-btn" id="btnSchedule">⏰&nbsp; زمان‌بندی‌ها</button>
-          <button class="side-btn" id="btnSettings">⚙︎&nbsp; تنظیمات</button>
-          <button class="side-btn" id="btnMemory">🧠&nbsp; حافظهٔ بلندمدت</button>
+          <div class="side-group">
+            <div class="side-group-label">پروژه و مدل‌ها</div>
+            <button class="side-btn" id="btnProjects"><span class="sb-ic">📁</span> پروژه‌ها</button>
+            <button class="side-btn" id="btnModels"><span class="sb-ic">📦</span> مدل‌ها (Hugging Face)</button>
+            <button class="side-btn" id="btnStudio"><span class="sb-ic">🎨</span> استودیو عکس</button>
+          </div>
+          <div class="side-group">
+            <div class="side-group-label">اپلیکیشن</div>
+            <button class="side-btn" id="btnSchedule"><span class="sb-ic">⏰</span> زمان‌بندی</button>
+            <button class="side-btn" id="btnSettings"><span class="sb-ic">⚙︎</span> تنظیمات</button>
+            <button class="side-btn" id="btnMemory"><span class="sb-ic">🧠</span> حافظهٔ بلندمدت</button>
+          </div>
           <div class="engine-note"><span class="dot-live"></span> Rust engine · Tauri v2</div>
         </div>
       </aside>
@@ -707,14 +713,17 @@
             </div>
           </div>
           <div class="field">
+            <label class="flabel">نوع مدل</label>
+            <div class="models-tabs" id="modelsTabs" role="tablist">
+              <button class="models-tab active" data-pipe="" type="button">همه</button>
+              <button class="models-tab" data-pipe="image-generation" type="button">🖼 تصویری</button>
+              <button class="models-tab" data-pipe="text-generation" type="button">💬 متنی (LLM)</button>
+            </div>
+          </div>
+          <div class="field">
             <label class="flabel">جست‌وجو</label>
             <div class="models-search-row">
               <input type="text" id="modelsSearch" dir="ltr" placeholder="مثلاً stable diffusion xl یا org/model">
-              <select id="modelsFilter" title="فیلتر نوع مدل">
-                <option value="">همه</option>
-                <option value="image-generation">تولید عکس</option>
-                <option value="text-generation">متن (LLM)</option>
-              </select>
               <button class="btn primary tiny" id="modelsSearchBtn" type="button">جستجو</button>
             </div>
           </div>

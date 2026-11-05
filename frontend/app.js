@@ -1176,7 +1176,7 @@ function cacheEls() {
     btnModels: $('#btnModels'), modelsModal: $('#modelsModal'), modelsX: $('#modelsX'),
     modelsFolder: $('#modelsFolder'), modelsFolderPick: $('#modelsFolderPick'), modelsFree: $('#modelsFree'),
     hfToken: $('#hfToken'), hfTokenSave: $('#hfTokenSave'),
-    modelsSearch: $('#modelsSearch'), modelsFilter: $('#modelsFilter'), modelsSearchBtn: $('#modelsSearchBtn'),
+    modelsSearch: $('#modelsSearch'), modelsTabs: $('#modelsTabs'), modelsSearchBtn: $('#modelsSearchBtn'),
     modelsResults: $('#modelsResults'), modelsQueue: $('#modelsQueue'),
     btnStudio: $('#btnStudio'), studioModal: $('#studioModal'), studioX: $('#studioX'),
     studioSources: $('#studioSources'), studioCfg: $('#studioCfg'),
@@ -4618,6 +4618,7 @@ let v24hfToken = '';
 
 let v24models = { folder: '', free_space: 0, active: null, jobs: [] };
 let v24busy = false;
+let v24Pipe = ''; // v0.24.2: active type tab ('' | image-generation | text-generation)
 
 async function v24RefreshModels() {
   try {
@@ -4659,6 +4660,9 @@ function v24RenderQueue() {
     return;
   }
   for (const job of jobs) els.modelsQueue.appendChild(v24QueueRow(job));
+  if (!v24models.active) {
+    els.modelsQueue.appendChild(v24El('div', 'q-hint', 'دانلودها یکی‌در‌میان انجام می‌شوند — روی «⬇ دانلود» کارت مدل یا «▶ شروع» صف بزنید.'));
+  }
 }
 
 function v24QueueRow(job) {
@@ -4692,9 +4696,23 @@ function v24QueueRow(job) {
     fr.appendChild(v24El('span', 'q-dot'));
     fr.appendChild(v24El('span', 'q-file-name', f.path));
     fr.appendChild(v24El('span', '', v24Bytes(f.size || f.downloaded || 0)));
+    if (f.error) fr.title = f.error; // hover tooltip with the exact error
     files.appendChild(fr);
   }
   row.appendChild(files);
+
+  // v0.24.2: show the error inside the row — a red "خطا" badge with no
+  // explanation made the download look "broken" (e.g. gated models need a token)
+  const firstErr = (job.files.find((f) => f.error) || {}).error || job.error;
+  if (firstErr) {
+    const err = v24El('div', 'q-error', '⚠ ' + firstErr);
+    if (/توکن|token|401|gated|خصوصی|لایسنس/i.test(firstErr)) {
+      const tk = v24El('button', 'btn tiny q-error-token', '🔑 ذخیرهٔ توکن HF');
+      tk.onclick = () => { if (els.hfToken) { try { els.hfToken.scrollIntoView({ block: 'center' }); } catch {} els.hfToken.focus(); } };
+      err.appendChild(tk);
+    }
+    row.appendChild(err);
+  }
 
   const act = v24El('div', 'q-row-actions');
   if (state !== 'done') {
@@ -4733,7 +4751,7 @@ function v24ApplyProgress(ev) {
       if (ev.state === 'downloading') { f.state = 'downloading'; f.downloaded = ev.downloaded || f.downloaded || 0; }
       if (ev.state === 'done') { f.state = 'done'; f.downloaded = ev.total || f.size; }
       if (ev.state === 'paused') { f.state = 'paused'; f.downloaded = ev.downloaded || 0; }
-      if (ev.state === 'error' || ev.state === 'stopped') { f.downloaded = ev.downloaded || 0; }
+      if (ev.state === 'error' || ev.state === 'stopped') { f.downloaded = ev.downloaded || 0; if (ev.error) f.error = ev.error; }
     }
   }
   if (ev.state === 'done' || ev.state === 'paused' || ev.state === 'error' || ev.state === 'stopped') {
@@ -4780,7 +4798,7 @@ async function v24RemoveJob(id) {
 
 async function v24Search() {
   const q = (els.modelsSearch.value || '').trim();
-  const pipe = els.modelsFilter.value || '';
+  const pipe = v24Pipe || '';
   if (els.modelsSearchBtn) els.modelsSearchBtn.disabled = true;
   els.modelsResults.textContent = '';
   els.modelsResults.appendChild(v24El('div', 'models-empty', 'در حال جست‌وجو در Hugging Face…'));
@@ -4808,13 +4826,18 @@ function v24ModelCard(m) {
   const meta = v24El('div', 'model-card-meta');
   meta.textContent = '↓ ' + fmtN(m.downloads || 0) + ' دانلود · ♥ ' + fmtN(m.likes || 0);
   card.appendChild(meta);
-  const add = v24El('button', 'btn primary tiny model-card-add', '＋ افزودن به صف');
-  add.onclick = () => v24AddModel(m.id);
-  card.appendChild(add);
+  const acts = v24El('div', 'model-card-actions');
+  const dl = v24El('button', 'btn primary tiny model-card-add', '⬇ دانلود');
+  dl.onclick = () => v24AddModel(m.id, true);
+  acts.appendChild(dl);
+  const q = v24El('button', 'btn tiny model-card-queue', '＋ افزودن به صف');
+  q.onclick = () => v24AddModel(m.id, false);
+  acts.appendChild(q);
+  card.appendChild(acts);
   return card;
 }
 
-async function v24AddModel(repo) {
+async function v24AddModel(repo, autostart) {
   if (!repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return toast('repo id نامعتبر است', 'warn');
   try {
     const r = await v24Atr('models_add', { repo });
@@ -4825,7 +4848,16 @@ async function v24AddModel(repo) {
       if (free > 0 && total > free) toast('هشدار: فضای خالی دیسک (' + v24Bytes(free) + ') از حجم مدل (' + v24Bytes(total) + ') کمتر است', 'warn');
     }
     await v24RefreshModels();
-    toast('به صف اضافه شد — «شروع» را بزنید', 'ok');
+    if (autostart) {
+      if (v24models.active) {
+        toast('به صف اضافه شد — یک دانلود دیگر در حال اجراست؛ بعداً «شروع» را بزنید', 'warn');
+      } else if (job) {
+        toast('دانلود شروع شد…', 'ok');
+        v24StartJob(job.id);
+      }
+    } else {
+      toast('به صف اضافه شد — «▶ شروع» را بزنید', 'ok');
+    }
   } catch (e) {
     if (els.modelsResults) {
       els.modelsResults.textContent = '';
@@ -5105,6 +5137,15 @@ function v24Init() {
       v24RenderCfg();
     } catch (e) { toast(v24Err(e), 'err'); }
   };
+  if (els.modelsTabs) {
+    for (const tab of els.modelsTabs.querySelectorAll('.models-tab')) {
+      tab.onclick = () => {
+        v24Pipe = tab.dataset.pipe || '';
+        for (const t of els.modelsTabs.querySelectorAll('.models-tab')) t.classList.toggle('active', t === tab);
+        if (els.modelsResults && els.modelsResults.children && els.modelsResults.children.length) v24Search();
+      };
+    }
+  }
   if (els.modelsSearchBtn) els.modelsSearchBtn.onclick = () => v24Search();
   if (els.modelsSearch) els.modelsSearch.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') v24Search();

@@ -210,10 +210,18 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'stars', 'appVer', 'tokChip',
   // v0.24.0: image chip + model library + image studio
   'imgChip', 'btnModels', 'modelsModal', 'modelsX', 'modelsFolder', 'modelsFolderPick', 'modelsFree', 'hfToken', 'hfTokenSave',
-  'modelsSearch', 'modelsFilter', 'modelsSearchBtn', 'modelsResults', 'modelsQueue',
+  'modelsSearch', 'modelsTabs', 'modelsSearchBtn', 'modelsResults', 'modelsQueue',
   'btnStudio', 'studioModal', 'studioX', 'studioSources', 'studioCfg', 'studioPrompt', 'studioNegative',
   'studioSize', 'studioN', 'studioSteps', 'studioGen', 'studioResult', 'galleryGrid', 'galleryReveal']) addId(id);
 byId.connsBody.classList.add('conns-body');
+// v0.24.2: mirror the real model-type tabs (the harness DOM is synthetic/flat)
+for (const [pipe, label, active] of [['', 'همه', true], ['image-generation', '🖼 تصویری', false], ['text-generation', '💬 متنی (LLM)', false]]) {
+  const t = new El('button');
+  t.className = 'models-tab' + (active ? ' active' : '');
+  t.dataset.pipe = pipe;
+  t.textContent = label;
+  byId.modelsTabs.appendChild(t);
+}
 // mirror the real DOM: ⋯ button + menu live in a .more-wrap that is a sibling
 // of .messages (not an ancestor of it), so outside-click detection works
 {
@@ -320,13 +328,25 @@ function router(cmd, args = {}) {
     case 'models_set_folder': return Promise.resolve({ folder: args.folder, free_space: 40 * 1073741824 });
     case 'models_hf_token': v24HfTokenSet = !!(args.value && args.value.trim()); if (args.value && args.value.trim()) v24HfToken = args.value.trim(); return Promise.resolve();
     case 'models_hf_token_get': return Promise.resolve(v24HfToken || null);
-    case 'models_search': return Promise.resolve([
-      { id: 'stabilityai/stable-diffusion-xl-base-1.0', downloads: 2100000, likes: 3100, pipeline_tag: 'image-generation' },
-      { id: 'stabilityai/stable-diffusion-3-medium', downloads: 480000, likes: 900, pipeline_tag: 'image-generation' },
-      { id: 'Qwen/Qwen2.5-7B-Instruct-GGUF', downloads: 900000, likes: 1200, pipeline_tag: 'text-generation' },
-    ]);
+    case 'models_search': {
+      const all = [
+        { id: 'stabilityai/stable-diffusion-xl-base-1.0', downloads: 2100000, likes: 3100, pipeline_tag: 'image-generation' },
+        { id: 'stabilityai/stable-diffusion-3-medium', downloads: 480000, likes: 900, pipeline_tag: 'image-generation' },
+        { id: 'Qwen/Qwen2.5-7B-Instruct-GGUF', downloads: 900000, likes: 1200, pipeline_tag: 'text-generation' },
+      ];
+      if (String(args.query || '').toLowerCase().includes('gated')) all.push({ id: 'gated/model', downloads: 10, likes: 1, pipeline_tag: 'image-generation' });
+      const pipe = args.pipeline || null;
+      return Promise.resolve(pipe ? all.filter((m) => m.pipeline_tag === pipe) : all);
+    }
     case 'models_add': {
       if (v24Jobs.some((j) => j.repo === args.repo)) return Promise.reject(new Error('این مدل قبلاً به صف اضافه شده است'));
+      if (args.repo === 'gated/model') {
+        const job = { id: 'job-' + (++v24JobSeq), repo: args.repo, added_at: Date.now(), folder: 'C:/u/.atria/models/gated-model', files: [
+          { path: 'model.safetensors', size: 5000000000, downloaded: 0, state: 'error', error: 'HTTP 401 — این مدل gated است و توکن Hugging Face لازم دارد' },
+        ], error: null };
+        v24Jobs.push(job);
+        return Promise.resolve({ job });
+      }
       const job = { id: 'job-' + (++v24JobSeq), repo: args.repo, added_at: Date.now(), folder: 'C:/u/.atria/models/' + args.repo.replace('/', '-'), files: [
         { path: 'README.md', size: 1200, downloaded: 0, state: 'pending', error: null },
         { path: 'weights/model.safetensors', size: 6930000000, downloaded: 0, state: 'pending', error: null },
@@ -1297,10 +1317,11 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
   const v24Cards = byId.modelsResults.querySelectorAll('.model-card');
   ok('جست‌وجو HF کارت مدل برمی‌گرداند', v24Cards.length === 3 && v24Cards[0].textContent.includes('stabilityai/stable-diffusion-xl-base-1.0'));
   ok('برچسب pipeline روی کارت مدل است', v24Cards[0].textContent.includes('image-generation'));
-  v24Cards[0].querySelector('.model-card-add').click();
+  v24Cards[0].querySelector('.model-card-queue').click(); // v0.24.2: «افزودن به صف» بدون شروع
   await sleep(50);
   let v24Rows = byId.modelsQueue.querySelectorAll('.q-row');
   ok('مدل به صف اضافه شد و row ساخته می‌شود', v24Rows.length === 1 && v24Rows[0].textContent.includes('stabilityai/stable-diffusion-xl-base-1.0'));
+  ok('نکتهٔ راهنما وقتی دانلودی فعال نیست، زیر صف دیده می‌شود', !!byId.modelsQueue.querySelector('.q-hint'));
   ok('حجم کل فایل‌های مدل محاسبه می‌شود (6.5 GB)', String(byId.modelsQueue.textContent).includes('6.5 GB'));
   v24Rows[0].querySelectorAll('button')[0].click(); // شروع
   await sleep(50);
@@ -1317,6 +1338,53 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
   for (const b of byId.modelsQueue.querySelectorAll('button')) if (b.textContent.includes('حذف از صف')) b.click();
   await sleep(50);
   ok('حذف از صف، row را برمی‌دارد (فایل‌ها می‌مانند)', byId.modelsQueue.querySelectorAll('.q-row').length === 0);
+
+  // — v0.24.2: تب‌های نوع مدل (تصویری/متنی) —
+  const tabBlock = /<div class="models-tabs" id="modelsTabs"[\s\S]*?<\/div>/.exec(htmlSrc);
+  ok('index.html بلوک تب‌های نوع مدل را دارد (همه/تصویری/متنی)', !!tabBlock && tabBlock[0].includes('data-pipe="image-generation"') && tabBlock[0].includes('data-pipe="text-generation"'));
+  const v242Tabs = byId.modelsTabs.querySelectorAll('.models-tab');
+  ok('سه تب نوع مدل وجود دارد و «همه» فعال است', v242Tabs.length === 3 && v242Tabs[0].classList.contains('active'));
+  bridgeCalls.length = 0;
+  v242Tabs[2].click(); // متنی (LLM)
+  await sleep(60);
+  const v242Search = bridgeCalls.find((c) => c[0] === 'models_search');
+  ok('تب «متنی» جست‌وجو را با pipeline=text-generation اجرا می‌کند و فعال می‌شود', !!v242Search && v242Search[1].pipeline === 'text-generation' && v242Tabs[2].classList.contains('active') && !v242Tabs[0].classList.contains('active'));
+  ok('فیلتر تب فقط مدل متنی را برمی‌گرداند', byId.modelsResults.querySelectorAll('.model-card').length === 1 && byId.modelsResults.textContent.includes('Qwen'));
+  v242Tabs[0].click(); // همه
+  await sleep(60);
+  ok('تب «همه» همهٔ مدل‌ها را برمی‌گرداند', byId.modelsResults.querySelectorAll('.model-card').length === 3 && v242Tabs[0].classList.contains('active'));
+
+  // — v0.24.2: دانلود یک‌کلیکی (افزودن + شروع فوری) —
+  bridgeCalls.length = 0;
+  byId.modelsResults.querySelectorAll('.model-card')[0].querySelector('.model-card-add').click(); // ⬇ دانلود
+  await sleep(80);
+  ok('دکمهٔ «⬇ دانلود» مدل را اضافه و بلافاصله شروع می‌کند', byId.modelsQueue.querySelectorAll('.q-row').length === 1 && bridgeCalls.some((c) => c[0] === 'models_start'));
+  const v242ActiveRow = byId.modelsQueue.querySelector('.q-row');
+  ok('صف فعال دکمهٔ توقف دارد و «شروع» ندارد', String(v242ActiveRow.textContent).includes('توقف') && !String(v242ActiveRow.textContent).includes('▶ شروع'));
+  ok('وقتی دانلود فعال است، نکتهٔ راهنما پنهان می‌شود', !byId.modelsQueue.querySelector('.q-hint'));
+  confirmResult = true;
+  for (const b of v242ActiveRow.querySelectorAll('button')) if (b.textContent.includes('حذف از صف')) b.click();
+  await sleep(50);
+
+  // — v0.24.2: خطای قابل‌دید در صف (مدل gated) —
+  bridgeCalls.length = 0;
+  byId.modelsSearch.value = 'gated';
+  byId.modelsSearchBtn.click();
+  await sleep(60);
+  const v242GatedCard = [...byId.modelsResults.querySelectorAll('.model-card')].find((c) => c.textContent.includes('gated/model'));
+  ok('جست‌وجوی «gated» کارت مدل محدود را برمی‌گرداند', !!v242GatedCard);
+  v242GatedCard.querySelector('.model-card-queue').click();
+  await sleep(60);
+  const v242ErrRow = [...byId.modelsQueue.querySelectorAll('.q-row')].find((r) => r.textContent.includes('gated/model'));
+  ok('خطای مدل gated داخل row دیده می‌شود (نه فقط برچسب «خطا»)', !!v242ErrRow && !!v242ErrRow.querySelector('.q-error') && String(v242ErrRow.querySelector('.q-error').textContent).includes('401'));
+  const v242TokBtn = v242ErrRow.querySelector('.q-error-token');
+  ok('برای خطای توکن، دکمهٔ «ذخیرهٔ توکن HF» داخل row است', !!v242TokBtn && String(v242TokBtn.textContent).includes('توکن'));
+  v242TokBtn.click();
+  ok('دکمهٔ توکن، فوکوس را به فیلد توکن HF می‌برد', doc.activeElement === byId.hfToken);
+  confirmResult = true;
+  for (const b of v242ErrRow.querySelectorAll('button')) if (b.textContent.includes('حذف از صف')) b.click();
+  await sleep(50);
+  ok('صف برای تست بعدی خالی است', byId.modelsQueue.querySelectorAll('.q-row').length === 0);
 
   // — استودیو عکس —
   byId.btnStudio.click();
