@@ -735,6 +735,16 @@
               <button class="btn tiny" id="hfTokenSave" type="button">ذخیره</button>
             </div>
           </section>
+          <section class="mp-panel">
+            <label class="flabel">🔌 پروکسی <span class="models-optional">(اختیاری — اگر مستقیم به هوشینگ‌فیس وصل نمی‌شوید)</span></label>
+            <div class="models-folder-row">
+              <input type="text" id="hfProxy" dir="ltr" placeholder="http://127.0.0.1:7890" spellcheck="false">
+              <button class="btn tiny" id="hfProxySave" type="button">ذخیره</button>
+              <button class="btn tiny" id="hfConnTest" type="button">آزمون اتصال</button>
+            </div>
+            <div class="hf-proxy-hint">اگر با V2Ray/Clash اینترنت دارید، آدرس + پورتش را از تنظیمات همان برنامه ببینید (معمولاً <span dir="ltr">http://127.0.0.1:7890</span>) — بدون پروکسی، دانلود روی شبکه‌های فیلترشده کار نمی‌کند.</div>
+            <div class="hf-proxy-result" id="hfConnResult"></div>
+          </section>
         </aside>
       </div>
     </div>

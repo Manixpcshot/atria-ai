@@ -26,6 +26,7 @@ pub mod mcp;
 pub mod store;
 pub mod toolfmt;
 pub mod openai;
+pub mod proxy;
 pub mod sse;
 pub mod tools;
 pub mod types;

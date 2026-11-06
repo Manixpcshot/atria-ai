@@ -209,7 +209,7 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'cfDelete', 'cfSetActive', 'cfTestConn', 'cfTestStatus', 'storageBox', 'btnRevealAtria', 'btnAttach', 'fileInput', 'imgTray',
   'stars', 'appVer', 'tokChip',
   // v0.24.0: image chip + model library + image studio
-  'imgChip', 'btnModels', 'modelsModal', 'modelsX', 'modelsFolder', 'modelsFolderPick', 'modelsFree', 'hfToken', 'hfTokenSave',
+  'imgChip', 'btnModels', 'modelsModal', 'modelsX', 'modelsFolder', 'modelsFolderPick', 'modelsFree', 'hfToken', 'hfTokenSave', 'hfProxy', 'hfProxySave', 'hfConnTest', 'hfConnResult',
   'modelsSearch', 'modelsTabs', 'modelsSearchBtn', 'modelsResults', 'modelsQueue',
   'btnStudio', 'studioModal', 'studioX', 'studioSources', 'studioCfg', 'studioPrompt', 'studioNegative',
   'studioSize', 'studioN', 'studioSteps', 'studioGen', 'studioResult', 'galleryGrid', 'galleryReveal']) addId(id);
@@ -358,6 +358,10 @@ function router(cmd, args = {}) {
     case 'models_pause': { const pj = v24Jobs.find((j) => j.id === args.jobId); if (pj) pj.files.forEach((f) => { if (f.state === 'downloading') f.state = 'paused'; }); v24ActiveJob = null; return Promise.resolve({ paused: args.jobId }); }
     case 'models_stop': { const stj = v24Jobs.find((j) => j.id === args.jobId); if (stj) stj.files.forEach((f) => { if (f.state === 'downloading') { f.state = 'pending'; f.downloaded = 0; } }); v24ActiveJob = null; return Promise.resolve({ stopped: args.jobId }); }
     case 'models_remove': v24Jobs = v24Jobs.filter((j) => j.id !== args.jobId); return Promise.resolve({ removed: args.jobId });
+    // v0.26.2: optional proxy (direct connect is blocked on filtered networks)
+    case 'models_set_proxy': v24ProxyUrl = (args.url || '').trim(); return Promise.resolve({ ok: true, url: v24ProxyUrl });
+    case 'models_proxy_get': return Promise.resolve({ url: v24ProxyUrl });
+    case 'models_test_conn': return Promise.resolve({ ok: true, message: 'وصل شد ✓ — هوشینگ‌فیس در دسترس است (123 ms)' });
     // v0.24.0: image studio
     case 'img_generate': {
       if (args.source.kind === 'hf' && !args.source.token) return Promise.reject(new Error('توکن Hugging Face لازم است (در بخش مدل‌ها ذخیره کنید)'));
@@ -376,6 +380,7 @@ function router(cmd, args = {}) {
 // v0.24.0 mock state
 let v24HfToken = '';
 let v24HfTokenSet = false;
+let v24ProxyUrl = '';
 let v24ActiveJob = null;
 let v24Jobs = [];
 let v24JobSeq = 0;
@@ -1310,12 +1315,33 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
       !!wrapCss && !!bg && !bg.toLowerCase().startsWith('rgba') && bg.includes('#') === bg.startsWith('#') && /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(bg));
     ok('صفحهٔ مدل‌ها بالاتر از همهٔ لایه‌های اپ است (z-index)', !!zO && Number(zO[1]) >= 999);
   }
+  // v0.26.2: proxy box must exist — reqwest connects DIRECTLY (no system
+  // proxy), so behind V2Ray/Clash the download button looked dead
+  {
+    const jsTxt = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), 'utf8');
+    ok('بخش پروکسی در صفحهٔ مدل‌ها است (input + ذخیره + آزمون اتصال)',
+      htmlSrc.includes('id="hfProxy"') && htmlSrc.includes('id="hfProxySave"') && htmlSrc.includes('id="hfConnTest"') && htmlSrc.includes('id="hfConnResult"'));
+    ok('app.js دستورهای پروکسی را سیم‌کشی کرده',
+      jsTxt.includes('models_set_proxy') && jsTxt.includes('models_test_conn') && jsTxt.includes('models_proxy_get'));
+    ok('CSS نتیجهٔ آزمون اتصال + چشمک ردیف تازهٔ صف تعریف شده',
+      cssSrc.includes('.hf-proxy-result.ok') && cssSrc.includes('.q-row.new'));
+  }
 
   // — مدل‌ها (Hugging Face) —
   byId.btnModels.click();
   await sleep(40);
   ok('مودال مدل‌ها با models_state باز می‌شود و پوشه را نشان می‌دهد', !byId.modelsModal.classList.contains('hidden') && byId.modelsFolder.textContent.includes('.atria/models'));
   ok('فضای خالی دیسک نمایش می‌یابد', String(byId.modelsFree.textContent).includes('GB'));
+  // v0.26.2: proxy save + connection test live behavior
+  byId.hfProxy.value = 'http://127.0.0.1:7890';
+  byId.hfProxySave.click();
+  await sleep(25);
+  const v242Proxy = bridgeCalls.find((c) => c[0] === 'models_set_proxy');
+  ok('ذخیرهٔ پروکسی با models_set_proxy به بک‌اند می‌رود', !!v242Proxy && v242Proxy[1].url === 'http://127.0.0.1:7890');
+  byId.hfConnTest.click();
+  await sleep(30);
+  ok('آزمون اتصال نتیجه را در صفحه نشان می‌دهد (نه فقط toast)',
+    String(byId.hfConnResult.textContent).includes('وصل شد') && String(byId.hfConnResult.className).includes('ok'));
   // واقعی‌سازی DOM: مودال‌های باز‌ننشده‌ای که test پیشین بازشان نکرده، hidden دارند
   for (const k of ['settingsModal', 'memoryModal', 'projectsModal', 'tokenGuide', 'cmdk', 'studioModal']) byId[k].classList.add('hidden');
   byId.modelsModal.classList.remove('hidden');

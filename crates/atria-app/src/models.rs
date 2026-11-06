@@ -116,6 +116,44 @@ pub async fn models_set_folder(folder: PathBuf) -> Result<serde_json::Value, Str
     Ok(serde_json::json!({ "folder": out.to_string_lossy(), "free_space": free_space(&out) }))
 }
 
+/// v0.26.2: optional proxy (e.g. `http://127.0.0.1:7890`) for HF traffic.
+/// Empty string clears it. Persisted to `~/.atria/hf-proxy.json`.
+#[tauri::command]
+pub async fn models_set_proxy(url: String) -> Result<serde_json::Value, String> {
+    atria_core::proxy::save_file(&root().join("hf-proxy.json"), &url)?;
+    atria_core::proxy::set(Some(url));
+    Ok(serde_json::json!({ "ok": true, "url": atria_core::proxy::current().unwrap_or_default() }))
+}
+
+#[tauri::command]
+pub async fn models_proxy_get() -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({ "url": atria_core::proxy::current().unwrap_or_default() }))
+}
+
+/// «آزمون اتصال» — one small HF API call so the user can see instantly
+/// whether the network (direct or via proxy) reaches Hugging Face.
+#[tauri::command]
+pub async fn models_test_conn() -> Result<serde_json::Value, String> {
+    match hf::ping_hf().await {
+        Ok(ms) => Ok(serde_json::json!({
+            "ok": true,
+            "message": format!("وصل شد ✓ — هوشینگ‌فیس در دسترس است ({ms} ms)"),
+        })),
+        Err(e) => {
+            let low = e.to_lowercase();
+            let network_ish = ["timed out", "timeout", "connect", "resolve", "dns", "network", "handshake"]
+                .iter()
+                .any(|k| low.contains(k));
+            let hint = if atria_core::proxy::current().is_some() || !network_ish {
+                String::new()
+            } else {
+                " — اگر اینترنتتان از پروکسی/VPN می‌رود، آدرسش را در بخش «پروکسی» وارد کنید (مثلاً http://127.0.0.1:7890).".to_string()
+            };
+            Ok(serde_json::json!({ "ok": false, "message": format!("اتصال ممکن نشد: {e}{hint}") }))
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn models_hf_token(value: String) -> Result<(), String> {
     let v = value.trim().to_string();

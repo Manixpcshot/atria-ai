@@ -6,7 +6,10 @@ license.workspace = true
 description = "Rust engine for the Atria AI desktop app: Messages API client, SSE streaming, agent loop and built-in tools"
 
 [dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2", "blocking"] }
+# v0.26.2: `socks` enables socks5:// proxy urls; `system-proxy` makes reqwest
+# fall back to the OS proxy (WinINET on Windows) when no explicit proxy is
+# set — behind Clash/V2Ray with system-proxy on, downloads work with zero config.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2", "blocking", "socks", "system-proxy"] }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

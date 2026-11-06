@@ -25,6 +25,11 @@ fn main() {
             let root = commands::atria_root();
             let _ = std::fs::create_dir_all(root.join("chats"));
             let _ = std::fs::create_dir_all(root.join("workspace"));
+            // v0.26.2: restore the optional HTTP proxy (set on the models page)
+            // so downloads use it from the very first request of this session.
+            if let Some(p) = atria_core::proxy::load_file(&root.join("hf-proxy.json")) {
+                atria_core::proxy::set(Some(p));
+            }
             let mem_path = root.join("memory.json");
             // one-time migration of the old app-data memory file
             if !mem_path.exists() {
@@ -146,6 +151,9 @@ fn main() {
             models::models_pause,
             models::models_stop,
             models::models_remove,
+            models::models_set_proxy,
+            models::models_proxy_get,
+            models::models_test_conn,
             img::img_generate,
             img::img_gallery_list,
             img::img_delete,

@@ -560,12 +560,40 @@ pub async fn download_file(
     Err(format!("download failed after {RETRIES} attempts: {last_err}"))
 }
 
+/// Shared HTTP client for all HF traffic (search, file lists, downloads).
+///
+/// v0.26.2: routes through the user-configured proxy when one is set (see
+/// `crate::proxy`), and fails the CONNECT step fast (15s) so a blocked /
+/// filtered network surfaces an error within seconds instead of hanging the
+/// download button for minutes.
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent("atria-desktop/0.24 (model library)")
-        .timeout(Duration::from_secs(300))
-        .build()
+    let mut b = reqwest::Client::builder()
+        .user_agent("atria-desktop/0.26 (model library)")
+        .timeout(Duration::from_secs(90))
+        .connect_timeout(Duration::from_secs(15));
+    if let Some(p) = crate::proxy::current() {
+        match reqwest::Proxy::all(&p) {
+            Ok(pr) => b = b.proxy(pr),
+            Err(_) => eprintln!("hf: ignoring invalid proxy url: {p}"),
+        }
+    }
+    b.build()
         .expect("reqwest client")
+}
+
+/// Quick reachability probe behind the «آزمون اتصال» button.
+/// Returns elapsed milliseconds on success, a Persian error otherwise.
+pub async fn ping_hf() -> Result<u128, String> {
+    let started = std::time::Instant::now();
+    let r = http_client()
+        .get(format!("{HF_API}/models?limit=1"))
+        .send()
+        .await
+        .map_err(|e| hf_http_err(e, None))?;
+    if !r.status().is_success() {
+        return Err(hf_err_text(Some(r.status()), "هوشینگ‌فیس پاسخ درست نداد", None));
+    }
+    Ok(started.elapsed().as_millis())
 }
 
 // ---------------------------------------------------------------------------

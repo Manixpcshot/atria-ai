@@ -1176,6 +1176,7 @@ function cacheEls() {
     btnModels: $('#btnModels'), modelsModal: $('#modelsModal'), modelsX: $('#modelsX'),
     modelsFolder: $('#modelsFolder'), modelsFolderPick: $('#modelsFolderPick'), modelsFree: $('#modelsFree'),
     hfToken: $('#hfToken'), hfTokenSave: $('#hfTokenSave'),
+    hfProxy: $('#hfProxy'), hfProxySave: $('#hfProxySave'), hfConnTest: $('#hfConnTest'), hfConnResult: $('#hfConnResult'),
     modelsSearch: $('#modelsSearch'), modelsTabs: $('#modelsTabs'), modelsSearchBtn: $('#modelsSearchBtn'),
     modelsResults: $('#modelsResults'), modelsQueue: $('#modelsQueue'),
     btnStudio: $('#btnStudio'), studioModal: $('#studioModal'), studioX: $('#studioX'),
@@ -4839,17 +4840,24 @@ function v24ModelCard(m) {
   card.appendChild(meta);
   const acts = v24El('div', 'model-card-actions');
   const dl = v24El('button', 'btn primary tiny model-card-add', '⬇ دانلود');
-  dl.onclick = () => v24AddModel(m.id, true);
-  acts.appendChild(dl);
   const q = v24El('button', 'btn tiny model-card-queue', '＋ افزودن به صف');
-  q.onclick = () => v24AddModel(m.id, false);
+  dl.onclick = () => v24AddModel(m.id, true, dl, q);
+  q.onclick = () => v24AddModel(m.id, false, q, dl);
+  acts.appendChild(dl);
   acts.appendChild(q);
   card.appendChild(acts);
   return card;
 }
 
-async function v24AddModel(repo, autostart) {
+async function v24AddModel(repo, autostart, btn, btn2) {
   if (!repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return toast('repo id نامعتبر است', 'warn');
+  // v0.26.2: immediate button feedback — the click must be visible even
+  // when the network is slow/blocked (previously the button sat "dead"
+  // while the HF file-list request hung for minutes).
+  const btns = [btn, btn2].filter(Boolean);
+  const prev = btn ? btn.textContent : '';
+  btns.forEach((b) => { b.disabled = true; });
+  if (btn) btn.textContent = '⏳ در حال افزودن…';
   try {
     const r = await v24Atr('models_add', { repo });
     const job = r && r.job;
@@ -4859,6 +4867,15 @@ async function v24AddModel(repo, autostart) {
       if (free > 0 && total > free) toast('هشدار: فضای خالی دیسک (' + v24Bytes(free) + ') از حجم مدل (' + v24Bytes(total) + ') کمتر است', 'warn');
     }
     await v24RefreshModels();
+    if (job && els.modelsQueue) {
+      // v0.26.2: bring the queue into view + flash the new row, so the user
+      // immediately sees that the click worked (before: it happened off-screen).
+      try { els.modelsQueue.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+      setTimeout(() => {
+        const row = els.modelsQueue && els.modelsQueue.querySelector('.q-row[data-job="' + job.id + '"]');
+        if (row) { row.classList.add('new'); setTimeout(() => row.classList.remove('new'), 2600); }
+      }, 180);
+    }
     if (autostart) {
       if (v24models.active) {
         toast('به صف اضافه شد — یک دانلود دیگر در حال اجراست؛ بعداً «شروع» را بزنید', 'warn');
@@ -4870,11 +4887,20 @@ async function v24AddModel(repo, autostart) {
       toast('به صف اضافه شد — «▶ شروع» را بزنید', 'ok');
     }
   } catch (e) {
+    let msg = v24Err(e);
+    // v0.26.2: network-ish failure → tell the user about the proxy box
+    // (direct connect hangs/fails on filtered networks behind V2Ray/Clash).
+    if (/timed out|timeout|connect|resolve|dns|network|proxy|handshake/i.test(msg)) {
+      msg += ' — اگر اینترنتتان از پروکسی/VPN می‌رود، آدرسش را در بخش «🔌 پروکسی» پایین صفحه وارد کنید و «آزمون اتصال» را بزنید.';
+    }
     if (els.modelsResults) {
       els.modelsResults.textContent = '';
-      els.modelsResults.appendChild(v24El('div', 'models-error', 'افزودن به صف ممکن نشد: ' + v24Err(e)));
+      els.modelsResults.appendChild(v24El('div', 'models-error', 'افزودن به صف ممکن نشد: ' + msg));
     }
-    toast(v24Err(e), 'err');
+    toast(msg, 'err');
+  } finally {
+    btns.forEach((b) => { b.disabled = false; });
+    if (btn) btn.textContent = prev;
   }
 }
 
@@ -5103,6 +5129,7 @@ function openModels() {
   v24RefreshModels();
   v25LlamaRefresh();
   v24Atr('models_hf_token_get').then((t) => { if (t && els.hfToken) els.hfToken.value = t; }).catch(() => {});
+  v24Atr('models_proxy_get').then((r) => { if (r && els.hfProxy) els.hfProxy.value = r.url || ''; }).catch(() => {});
 }
 function openStudio() {
   if (!els.studioModal) return;
@@ -5297,6 +5324,37 @@ function v24Init() {
       toast(v24hfToken ? 'توکن HF ذخیره شد' : 'توکن HF پاک شد', 'ok');
       v24RenderCfg();
     } catch (e) { toast(v24Err(e), 'err'); }
+  };
+  // v0.26.2: optional proxy for HF traffic (direct connect is blocked on
+  // many networks, e.g. behind V2Ray/Clash in Iran)
+  if (els.hfProxySave) els.hfProxySave.onclick = async () => {
+    try {
+      const url = (els.hfProxy.value || '').trim();
+      await v24Atr('models_set_proxy', { url });
+      toast(url ? 'پروکسی ذخیره شد — اتصال‌ها از این به بعد از آن می‌روند' : 'پروکسی پاک شد — اتصال مستقیم', 'ok');
+      if (els.hfConnResult) { els.hfConnResult.textContent = ''; els.hfConnResult.className = 'hf-proxy-result'; }
+    } catch (e) { toast(v24Err(e), 'err'); }
+  };
+  if (els.hfConnTest) els.hfConnTest.onclick = async () => {
+    const b = els.hfConnTest, r = els.hfConnResult;
+    b.disabled = true;
+    b.textContent = 'در حال آزمون…';
+    if (r) { r.textContent = 'در حال اتصال به هوشینگ‌فیس…'; r.className = 'hf-proxy-result'; }
+    try {
+      // save pending proxy text first so the test reflects what the user sees
+      const url = (els.hfProxy.value || '').trim();
+      await v24Atr('models_set_proxy', { url });
+      const res = await v24Atr('models_test_conn');
+      if (r) { r.textContent = res.message; r.className = 'hf-proxy-result ' + (res.ok ? 'ok' : 'err'); }
+      toast(res.message, res.ok ? 'ok' : 'err');
+    } catch (e) {
+      const msg = v24Err(e);
+      if (r) { r.textContent = msg; r.className = 'hf-proxy-result err'; }
+      toast(msg, 'err');
+    } finally {
+      b.disabled = false;
+      b.textContent = 'آزمون اتصال';
+    }
   };
   if (els.modelsTabs) {
     for (const tab of els.modelsTabs.querySelectorAll('.models-tab')) {

@@ -1819,6 +1819,14 @@ mark.chat-hit.cur { background: rgba(255, 150, 60, 0.75); }
 .models-free { margin-top: 5px; font: 10.5px var(--font); color: #8b9bc0; }
 .models-free.warn { color: #ffb27a; }
 .models-optional { color: #7d8db2; font-weight: 400; font-size: 10px; }
+/* v0.26.2: proxy box hint + connection-test result */
+.hf-proxy-hint { margin-top: 6px; font: 10.5px var(--font); color: #7d8db2; line-height: 1.7; }
+.hf-proxy-result { margin-top: 8px; font: 11.5px var(--font); min-height: 0; line-height: 1.6; }
+.hf-proxy-result.ok { color: #7fd6a2; }
+.hf-proxy-result.err { color: #ff9a9a; }
+/* v0.26.2: flash the freshly-added queue row so the click is visible */
+@keyframes qrownewpulse { 0% { background: rgba(140,170,255,.25); } 100% { background: transparent; } }
+.q-row.new { animation: qrownewpulse 2.4s ease-out; }
 
 /* models: search */
 .models-search-row { display: flex; gap: 8px; }

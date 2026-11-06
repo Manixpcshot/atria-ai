@@ -360,10 +360,16 @@ fn strip_prefix(name: &str, prefix: &str) -> String {
 }
 
 fn hf_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    let mut b = reqwest::Client::builder()
         .user_agent("atria-desktop (local-llm runtime)")
         .timeout(Duration::from_secs(120))
-        .build()
+        .connect_timeout(Duration::from_secs(15));
+    if let Some(p) = crate::proxy::current() {
+        if let Ok(pr) = reqwest::Proxy::all(&p) {
+            b = b.proxy(pr);
+        }
+    }
+    b.build()
         .expect("reqwest client")
 }
 
