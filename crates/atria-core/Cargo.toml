@@ -6,7 +6,7 @@ license.workspace = true
 description = "Rust engine for the Atria AI desktop app: Messages API client, SSE streaming, agent loop and built-in tools"
 
 [dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2", "blocking"] }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -18,8 +18,13 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "io-ut
 
 # v0.18.0: raw deflate decoding for embedded ZIP reading (docx/xlsx extraction)
 flate2 = "1"
+# v0.25.0: extract the llama.cpp runtime archive (zip OR tar.gz)
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "io-util", "process"] }
+# v0.25.0: net+sync for the in-test HTTP server that regression-tests
+# resume/pause/stop of `hf::download_file`
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "io-util", "process", "net", "sync"] }
 
 # v0.18.0: raw deflate for embedded ZIP reading (docx/xlsx extraction)

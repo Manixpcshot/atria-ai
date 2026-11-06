@@ -4,6 +4,7 @@
 
 mod commands;
 mod img;
+mod local_llm;
 mod models;
 mod scheduler;
 mod secrets;
@@ -150,7 +151,20 @@ fn main() {
             img::img_delete,
             img::img_bytes,
             img::img_folder,
+            img::img_set_folder,
+            // v0.25.0: local LLM runtime (llama.cpp)
+            local_llm::llama_status,
+            local_llm::llama_install,
+            local_llm::llama_start,
+            local_llm::llama_stop,
+            local_llm::llama_config,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the Atria app");
+        .build(tauri::generate_context!())
+        .expect("error while building the Atria app")
+        .run(|_app_handle, event| {
+            // v0.25.0: never leave a llama-server child behind
+            if let tauri::RunEvent::Exit = event {
+                atria_core::llama::shutdown();
+            }
+        });
 }

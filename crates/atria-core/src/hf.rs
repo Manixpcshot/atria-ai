@@ -351,6 +351,21 @@ pub enum Ctrl {
     Stop,
 }
 
+/// Terminal outcome of a `download_file` call.
+///
+/// **Regression (v0.25.0):** pause used to surface as `Ok(())`, which the
+/// caller treated as "file complete" — a paused job was marked *done* with
+/// the full size and its resume skipped the partially-downloaded file,
+/// leaving a broken model while the UI showed success. Pause is now an
+/// explicit, distinguishable outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DlOutcome {
+    /// File fully present at `dest`.
+    Done,
+    /// User paused; the `.part` file is kept for a later resume.
+    Paused,
+}
+
 pub fn ctrl_cell() -> AtomicU8 {
     AtomicU8::new(0)
 }
@@ -405,13 +420,16 @@ fn part_path(dest: &Path) -> PathBuf {
 ///
 /// `progress` receives `(downloaded_bytes, total_bytes)` where total may be 0
 /// when the server sends no Content-Length.
+///
+/// Returns [`DlOutcome::Done`] when the file is complete, [`DlOutcome::Paused`]
+/// when the user paused (`.part` kept), or `Err("cancelled")` on stop.
 pub async fn download_file(
     url: &str,
     token: Option<&str>,
     dest: &Path,
     ctrl: &AtomicU8,
     mut progress: impl FnMut(u64, u64),
-) -> Result<(), String> {
+) -> Result<DlOutcome, String> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create folder: {e}"))?;
@@ -420,7 +438,7 @@ pub async fn download_file(
         // already complete (e.g. resumed job)
         let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
         progress(size, size);
-        return Ok(());
+        return Ok(DlOutcome::Done);
     }
     let part = part_path(dest);
     let mut existing = part.metadata().map(|m| m.len()).unwrap_or(0);
@@ -481,7 +499,7 @@ pub async fn download_file(
             let _ = std::fs::rename(&part, dest);
             let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
             progress(size, size);
-            return Ok(());
+            return Ok(DlOutcome::Done);
         }
 
         let total = match resp.content_length() {
@@ -520,7 +538,7 @@ pub async fn download_file(
             match ctrl_get(ctrl) {
                 Ctrl::Run => {}
                 Ctrl::Pause => {
-                    return Ok(()); // keep `.part` for resume
+                    return Ok(DlOutcome::Paused); // keep `.part` for resume
                 }
                 Ctrl::Stop => {
                     let _ = std::fs::remove_file(&part);
@@ -537,7 +555,7 @@ pub async fn download_file(
         let _ = std::fs::rename(&part, dest);
         let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
         progress(size, total.max(size));
-        return Ok(());
+        return Ok(DlOutcome::Done);
     }
     Err(format!("download failed after {RETRIES} attempts: {last_err}"))
 }
@@ -557,6 +575,8 @@ fn http_client() -> reqwest::Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
 
     #[test]
     fn repo_id_validation() {
@@ -732,6 +752,215 @@ mod tests {
         assert!(out[1].lfs);
         assert_eq!(out[0].size, 1234);
         assert!(!out[0].lfs);
+    }
+
+    // ------------------------------------------------------------------
+    // In-test HTTP server + download regression tests (v0.25.0)
+    // ------------------------------------------------------------------
+
+    /// Tiny single-file HTTP server: honors `Range` (206/416) or always
+    /// answers 200 (when `honors_range` is false). Serves in `chunk`-sized
+    /// pieces with a small pause between them so clients can observe
+    /// partial progress. Records each request's Range header.
+    async fn start_test_server(
+        body: Vec<u8>,
+        chunk: usize,
+        honors_range: bool,
+    ) -> (u16, Arc<tokio::sync::Mutex<Vec<String>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let requests: Arc<tokio::sync::Mutex<Vec<String>>> = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let reqs = requests.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut sock, _) = match listener.accept().await {
+                    Ok(x) => x,
+                    Err(_) => break,
+                };
+                let body = body.clone();
+                let reqs = reqs.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let mut got = 0usize;
+                    while !buf[..got].windows(4).any(|w| w == b"\r\n\r\n") {
+                        match sock.read(&mut buf[got..]).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => got += n,
+                        }
+                    }
+                    let head = String::from_utf8_lossy(&buf[..got]).to_string();
+                    let mut range: Option<String> = None;
+                    for l in head.lines() {
+                        let low = l.to_lowercase();
+                        if let Some(v) = low.strip_prefix("range:") {
+                            range = Some(v.trim().to_string());
+                            break;
+                        }
+                    }
+                    reqs.lock().await.push(range.clone().unwrap_or_else(|| "none".into()));
+                    let (status, start) = match range.as_deref() {
+                        Some(r) if honors_range => {
+                            let s = r.strip_prefix("bytes=").unwrap_or(r).split('-').next().and_then(|x| x.parse::<usize>().ok()).unwrap_or(0);
+                            if s >= body.len() {
+                                let resp = format!(
+                                    "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                                    body.len()
+                                );
+                                let _ = sock.write_all(resp.as_bytes()).await;
+                                return;
+                            }
+                            ("HTTP/1.1 206 Partial Content\r\n", s)
+                        }
+                        _ => ("HTTP/1.1 200 OK\r\n", 0),
+                    };
+                    let slice = &body[start..];
+                    let mut resp = String::from(status);
+                    if range.is_some() {
+                        resp.push_str(&format!("Content-Range: bytes {start}-{}\r\n", body.len() - 1));
+                    }
+                    resp.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", slice.len()));
+                    if sock.write_all(resp.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    for piece in slice.chunks(chunk) {
+                        if sock.write_all(piece).await.is_err() || sock.flush().await.is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    }
+                });
+            }
+        });
+        (port, requests)
+    }
+
+    /// v0.25.0 regression: pause used to be reported as `Ok(())` (done) and the
+    /// job marked complete with an incomplete file. Now: pause → Paused, the
+    /// `.part` keeps the bytes, resume → Range → exact full content.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn download_pause_then_resume_is_complete() {
+        let body: Vec<u8> = (0..64 * 1024).map(|i| (i % 251) as u8).collect();
+        let (port, requests) = start_test_server(body.clone(), 8 * 1024, true).await;
+        let dir = std::env::temp_dir().join(format!("hf-dl-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("sub/model.bin");
+        let part = dir.join("sub/model.bin.atria-part");
+        let url = format!("http://127.0.0.1:{port}/model.bin");
+
+        // 1) start, pause after the first progress tick
+        let ctrl = ctrl_cell();
+        let fired = Arc::new(AtomicBool::new(false));
+        let f2 = fired.clone();
+        let res = download_file(&url, None, &dest, &ctrl, |_d, _t| {
+            if !f2.swap(true, Ordering::SeqCst) {
+                ctrl_set(&ctrl, Ctrl::Pause);
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(res, DlOutcome::Paused, "pause must be an explicit outcome");
+        assert!(!dest.exists(), "paused file must NOT be treated as complete");
+        let kept = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        assert!(kept > 0 && kept < body.len() as u64, "part kept with partial bytes");
+
+        // 2) resume → completes with byte-exact content via HTTP Range
+        let ctrl2 = ctrl_cell();
+        let res = download_file(&url, None, &dest, &ctrl2, |_d, _t| {}).await.unwrap();
+        assert_eq!(res, DlOutcome::Done);
+        assert_eq!(std::fs::read(&dest).unwrap(), body, "resumed bytes must match");
+        assert!(!part.exists(), "part renamed to final file");
+
+        // 3) the second request used a Range header equal to the kept bytes
+        let reqs = requests.lock().await;
+        assert_eq!(reqs[0], "none");
+        assert_eq!(reqs[1], format!("bytes={kept}-"), "resume must request from the kept offset");
+        drop(reqs);
+
+        // 4) re-running on the finished file is an instant Done (no re-download)
+        let ctrl3 = ctrl_cell();
+        assert_eq!(
+            download_file(&url, None, &dest, &ctrl3, |_d, _t| {}).await.unwrap(),
+            DlOutcome::Done
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn download_stop_removes_part_and_dest_stays_absent() {
+        let body: Vec<u8> = vec![7u8; 32 * 1024];
+        let (port, _requests) = start_test_server(body, 4 * 1024, true).await;
+        let dir = std::env::temp_dir().join(format!("hf-dl-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("m.bin");
+        let part = dir.join("m.bin.atria-part");
+        let url = format!("http://127.0.0.1:{port}/m.bin");
+        let ctrl = ctrl_cell();
+        let fired = Arc::new(AtomicBool::new(false));
+        let f2 = fired.clone();
+        let res = download_file(&url, None, &dest, &ctrl, |_d, _t| {
+            if !f2.swap(true, Ordering::SeqCst) {
+                ctrl_set(&ctrl, Ctrl::Stop);
+            }
+        })
+        .await;
+        assert_eq!(res.unwrap_err(), "cancelled");
+        assert!(!part.exists(), "stop must remove the .part");
+        assert!(!dest.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A server that ignores Range (always 200) must make the client restart
+    /// from zero instead of corrupting the file.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn download_server_ignoring_range_restarts_clean() {
+        let body: Vec<u8> = (0..16 * 1024).map(|i| (i % 199) as u8).collect();
+        let (port, _requests) = start_test_server(body.clone(), 4 * 1024, false).await;
+        let dir = std::env::temp_dir().join(format!("hf-dl-norange-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("m.bin");
+        let part = dir.join("m.bin.atria-part");
+        let url = format!("http://127.0.0.1:{port}/m.bin");
+        // seed a partial part (pretend a previous run was interrupted)
+        std::fs::write(&part, &body[..4096]).unwrap();
+        let ctrl = ctrl_cell();
+        let res = download_file(&url, None, &dest, &ctrl, |_d, _t| {}).await.unwrap();
+        assert_eq!(res, DlOutcome::Done);
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Live check: download a small real file from the Hub through the full
+    /// production path (tree listing → resolve URL → streaming + verify size).
+    /// Ignored by default; run with `cargo test -- --ignored --include-ignored`.
+    #[tokio::test]
+    #[ignore = "hits the live Hugging Face API and downloads a real file"]
+    async fn live_small_file_download_end_to_end() {
+        // karpathy/tinyllamas has small plain files; pick the smallest file
+        // of a known public repo instead of a weight (fast, stable).
+        let files = repo_files("karpathy/tinyllamas").await.unwrap();
+        let f = files.iter().min_by_key(|x| x.size).unwrap();
+        assert!(f.size > 0 && f.size < 5_000_000, "expected a small file, got {} bytes", f.size);
+        let dir = std::env::temp_dir().join(format!("hf-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join(&f.path);
+        let ctrl = ctrl_cell();
+        let mut max_prog = 0u64;
+        let res = download_file(&file_url("karpathy/tinyllamas", &f.path), None, &dest, &ctrl, |d, _t| {
+            max_prog = max_prog.max(d);
+        })
+        .await
+        .unwrap();
+        assert_eq!(res, DlOutcome::Done);
+        let on_disk = std::fs::metadata(&dest).unwrap().len();
+        assert_eq!(on_disk, f.size, "downloaded bytes must equal the hub-reported size");
+        assert_eq!(max_prog, f.size);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Live check against the real Hub (network). Ignored by default.

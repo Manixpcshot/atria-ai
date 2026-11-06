@@ -1959,3 +1959,33 @@ mark.chat-hit.cur { background: rgba(255, 150, 60, 0.75); }
 /* --- composer: breathe a little between chips and the chat area --- */
 .composer-status { gap: 10px; }
 .composer { margin: 14px clamp(12px, 4vw, 48px) 18px; }
+
+/* ============ v0.25.0 — local LLM (llama.cpp) + image output folder ============ */
+.llama-field { margin-top: 14px; }
+.llama-box {
+  border: 1px solid rgba(150,160,210,.16); border-radius: 13px;
+  background: rgba(6,8,20,.35); padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.llama-state { font-size: 12px; color: #c7d0ea; line-height: 1.7; }
+.llama-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.llama-cfg-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-inline-start: auto; }
+.llama-cfg-label { font-size: 10.5px; color: #7f89ab; }
+.llama-num {
+  width: 74px; padding: 5px 7px; border-radius: 8px; font: 11.5px var(--font);
+  background: rgba(255,255,255,.05); border: 1px solid rgba(150,160,210,.2); color: #dfe7fb; outline: none;
+}
+.llama-num:focus { border-color: rgba(140,170,255,.55); }
+.llama-run { color: #b9d7a8; border-color: rgba(150,220,130,.35); }
+.llama-run:hover { background: rgba(150,220,130,.1); }
+
+.imgout-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 8px 0 10px; padding: 8px 10px; border-radius: 10px;
+  border: 1px dashed rgba(150,160,210,.18); background: rgba(255,255,255,.02);
+}
+.imgout-label { font-size: 10.5px; color: #7f89ab; flex: none; }
+.imgout-path {
+  flex: 1; min-width: 120px; font: 10.5px ui-monospace, monospace; color: #aeb9d8;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

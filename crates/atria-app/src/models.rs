@@ -245,7 +245,7 @@ async fn download_job(
         let li = idx;
 
         // I/O-bound: await directly on the app runtime (no 'static needed).
-        let result: Result<(), String> = hf::download_file(
+        let result: Result<hf::DlOutcome, String> = hf::download_file(
             &url,
             token,
             &dest,
@@ -273,22 +273,27 @@ async fn download_job(
         .await;
 
         match result {
-            Ok(()) => {
+            Ok(hf::DlOutcome::Done) => {
                 let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(total);
                 set_file_state(job_id, li, FileState::Done, size, None);
                 emit_now(app, job_id, &f.path, size, size, "done");
             }
+            Ok(hf::DlOutcome::Paused) => {
+                // v0.25.0: pause is an explicit outcome. The file is NOT done —
+                // keep the `.part` size and mark it Paused so resume re-downloads
+                // the remainder via HTTP Range.
+                let kept = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+                set_file_state(job_id, li, FileState::Paused, kept, None);
+                emit_now(app, job_id, &f.path, kept, total, "paused");
+                break 'files;
+            }
             Err(e) => {
                 let cancelled = e == "cancelled";
-                let paused = !cancelled && hf::ctrl_get(&**ctrl) == Ctrl::Pause;
                 let kept = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
                 if cancelled {
                     // reset to pending; partial was removed by download_file
                     set_file_state(job_id, li, FileState::Pending, 0, None);
                     emit_now(app, job_id, &f.path, 0, total, "stopped");
-                } else if paused {
-                    set_file_state(job_id, li, FileState::Paused, kept, None);
-                    emit_now(app, job_id, &f.path, kept, total, "paused");
                 } else {
                     set_file_state(job_id, li, FileState::Error, kept, Some(e));
                     emit_now(app, job_id, &f.path, kept, total, "error");

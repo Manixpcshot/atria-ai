@@ -20,6 +20,7 @@ pub mod gallery;
 pub mod github;
 pub mod hf;
 pub mod imggen;
+pub mod llama;
 pub mod memory;
 pub mod mcp;
 pub mod store;

@@ -732,6 +732,13 @@
         <section class="models-right">
           <h3 class="models-h">صف دانلود</h3>
           <div class="models-queue" id="modelsQueue"></div>
+          <div class="field llama-field">
+            <label class="flabel">🧠 اجرای محلی (llama.cpp) — مدل‌های متنی بدون اینترنت</label>
+            <div class="llama-box" id="llamaBox">
+              <div class="llama-state" id="llamaState">در حال بررسی…</div>
+              <div class="llama-controls" id="llamaControls"></div>
+            </div>
+          </div>
         </section>
       </div>
     </section>
@@ -787,7 +794,14 @@
           <div class="studio-result" id="studioResult"></div>
         </section>
         <section class="studio-right">
-          <h3 class="models-h">گالری <button class="btn tiny" id="galleryReveal" type="button">بازکردن پوشه</button></h3>
+          <h3 class="models-h">گالری
+            <button class="btn tiny" id="galleryReveal" type="button">بازکردن پوشه</button>
+          </h3>
+          <div class="imgout-row">
+            <span class="imgout-label">خروجی تصاویر:</span>
+            <code class="imgout-path" id="imgOutPath" dir="ltr"></code>
+            <button class="btn tiny" id="imgOutPick" type="button">تغییر پوشه</button>
+          </div>
           <div class="gallery-grid" id="galleryGrid"></div>
         </section>
       </div>

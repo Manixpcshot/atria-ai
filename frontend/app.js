@@ -1184,6 +1184,9 @@ function cacheEls() {
     studioSize: $('#studioSize'), studioN: $('#studioN'), studioSteps: $('#studioSteps'),
     studioGen: $('#studioGen'), studioResult: $('#studioResult'),
     galleryGrid: $('#galleryGrid'), galleryReveal: $('#galleryReveal'),
+    // v0.25.0: local LLM + configurable image output
+    llamaBox: $('#llamaBox'), llamaState: $('#llamaState'), llamaControls: $('#llamaControls'),
+    imgOutPath: $('#imgOutPath'), imgOutPick: $('#imgOutPick'),
   };
 }
 
@@ -4732,6 +4735,14 @@ function v24QueueRow(job) {
   const folder = v24El('button', 'btn tiny', '📂 پوشه');
   folder.onclick = () => v24Atr('reveal_path', { path: job.folder }).catch((e) => toast(v24Err(e), 'warn'));
   act.appendChild(folder);
+  // v0.25.0: a finished GGUF can be run locally (llama.cpp) and wired into chat
+  const ggufs = (job.files || []).filter((f) => /\.gguf$/i.test(f.path) && f.state === 'done');
+  if (ggufs.length) {
+    const run = v24El('button', 'btn tiny llama-run', '▶ اجرای محلی');
+    run.title = 'اجرای این مدل با llama.cpp روی سیستم شما + اتصال خودکار به چت';
+    run.onclick = () => v25RunLocal(job);
+    act.appendChild(run);
+  }
   const rm = v24El('button', 'btn tiny', '🗑 حذف از صف');
   rm.onclick = () => {
     if (!window.confirm || window.confirm('این مدل از صف حذف شود؟ (فایل‌های دانلودشده می‌مانند)')) v24RemoveJob(job.id);
@@ -5090,6 +5101,7 @@ function openModels() {
   if (!els.modelsModal) return;
   openModal(els.modelsModal);
   v24RefreshModels();
+  v25LlamaRefresh();
   v24Atr('models_hf_token_get').then((t) => { if (t && els.hfToken) els.hfToken.value = t; }).catch(() => {});
 }
 function openStudio() {
@@ -5097,12 +5109,161 @@ function openStudio() {
   openModal(els.studioModal);
   v24RenderSources();
   v24RenderCfg();
+  v25ImgOutRefresh();
   if (els.studioPrompt) els.studioPrompt.value = v24studio.prompt || '';
   if (els.studioNegative) els.studioNegative.value = v24studio.negative || '';
   if (els.studioSize) els.studioSize.value = v24studio.size || '1024x1024';
   if (els.studioN) els.studioN.value = String(v24studio.n || 1);
   if (els.studioSteps) els.studioSteps.value = String(v24studio.steps || 25);
   v24RenderGallery();
+}
+
+/* ---------------- v0.25.0: local LLM (llama.cpp) + configurable image output ---------------- */
+let v25llamaBusy = false;
+
+function v25FileModelId(p) { return String(p || '').split('/').pop().replace(/\.gguf$/i, ''); }
+
+function v25LlamaStateText(s) {
+  if (!s) return 'وضعیت نامشخص…';
+  const parts = [];
+  parts.push(s.installed ? 'موتور نصب است' + (s.tag ? ' (' + s.tag + ')' : '') : 'موتور نصب نیست');
+  if (s.running) {
+    parts.push(s.ready
+      ? '🟢 در حال اجرا: ' + (s.model_id || s.model || 'مدل') + ' · پورت ' + s.port
+      : '🟡 در حال بارگذاری… · پورت ' + s.port);
+  } else {
+    parts.push('⚪ متوقف');
+  }
+  return parts.join(' — ');
+}
+
+async function v25LlamaRefresh() {
+  if (!els.llamaState) return;
+  let s = null;
+  try { s = await v24Atr('llama_status'); }
+  catch (e) { els.llamaState.textContent = 'بررسی وضعیت مدل محلی ممکن نشد: ' + v24Err(e); return; }
+  if (!v25llamaBusy) els.llamaState.textContent = v25LlamaStateText(s);
+  const box = els.llamaControls;
+  if (!box) return;
+  box.textContent = '';
+  if (!s.installed) {
+    const b = v24El('button', 'btn tiny', '🧩 نصب موتور llama.cpp');
+    b.onclick = () => v25LlamaInstall();
+    box.appendChild(b);
+  } else if (s.running) {
+    const b = v24El('button', 'btn tiny', '⏹ توقف مدل محلی');
+    b.onclick = async () => {
+      try { await v24Atr('llama_stop'); toast('مدل محلی متوقف شد', 'ok'); v25LlamaRefresh(); }
+      catch (e) { toast(v24Err(e), 'err'); }
+    };
+    box.appendChild(b);
+  }
+  // تنظیمات: پورت + اندازهٔ کانتکست
+  const row = v24El('div', 'llama-cfg-row');
+  row.appendChild(v24El('span', 'llama-cfg-label', 'پورت'));
+  const pi = v24El('input', 'llama-num'); pi.type = 'number'; pi.dir = 'ltr'; pi.min = '1'; pi.max = '65535';
+  pi.value = String((s && s.port) || 8790);
+  row.appendChild(pi);
+  row.appendChild(v24El('span', 'llama-cfg-label', 'کانتکست'));
+  const ci = v24El('input', 'llama-num'); ci.type = 'number'; ci.dir = 'ltr'; ci.min = '256'; ci.step = '256';
+  ci.value = String((s && s.ctx_size) || 4096);
+  row.appendChild(ci);
+  const save = v24El('button', 'btn tiny', 'ذخیره');
+  save.onclick = async () => {
+    try {
+      await v24Atr('llama_config', { port: Number(pi.value), ctx_size: Number(ci.value) });
+      toast('تنظیمات مدل محلی ذخیره شد (برای مدل در حال اجرا بعد از دوبارهٔ اجرای آن اعمال می‌شود)', 'ok');
+    } catch (e) { toast(v24Err(e), 'err'); }
+  };
+  row.appendChild(save);
+  box.appendChild(row);
+}
+
+async function v25LlamaInstall() {
+  if (v25llamaBusy) return toast('عملیاتی در حال انجام است…', 'warn');
+  v25llamaBusy = true;
+  if (els.llamaState) els.llamaState.textContent = 'در حال دانلود موتور محلی (llama.cpp)…';
+  try {
+    await v24Atr('llama_install', {});
+    toast('موتور llama.cpp نصب شد', 'ok');
+  } catch (e) {
+    toast('نصب موتور محلی ناموفق بود: ' + v24Err(e), 'err');
+  }
+  v25llamaBusy = false;
+  v25LlamaRefresh();
+}
+
+/// Run a downloaded GGUF locally and wire it into chat automatically.
+async function v25RunLocal(job) {
+  if (v25llamaBusy) return toast('عملیاتی در حال انجام است…', 'warn');
+  const ggufs = (job.files || []).filter((f) => /\.gguf$/i.test(f.path) && f.state === 'done');
+  if (!ggufs.length) return toast('فایل GGUF کاملی در این مدل پیدا نشد', 'warn');
+  ggufs.sort((a, b) => (b.size || 0) - (a.size || 0));
+  const file = ggufs[0];
+  const modelPath = String(job.folder || '').replace(/\/+$/, '') + '/' + file.path;
+  v25llamaBusy = true;
+  try {
+    let s = await v24Atr('llama_status');
+    if (!s.installed) {
+      if (els.llamaState) els.llamaState.textContent = 'مرحلهٔ ۱: دانلود موتور محلی (llama.cpp)…';
+      await v24Atr('llama_install', {});
+      s = await v24Atr('llama_status');
+    }
+    if (els.llamaState) els.llamaState.textContent = 'مرحلهٔ ۲: بارگذاری مدل «' + file.path + '» (برای مدل‌های بزرگ کمی طول می‌کشد)…';
+    await v24Atr('llama_start', { model_path: modelPath });
+    const t0 = Date.now();
+    let st = null;
+    while (Date.now() - t0 < 300000) {
+      await sleep(2000);
+      st = await v24Atr('llama_status');
+      if (st.ready || !st.running) break;
+      const mins = Math.round((Date.now() - t0) / 60000);
+      if (els.llamaState) els.llamaState.textContent = 'در حال بارگذاری مدل محلی… (دقیقهٔ ' + mins + ')';
+    }
+    if (st && st.ready) {
+      await v25UpsertLocalConn(st.port, st.model_id || v25FileModelId(file.path));
+      toast('مدل محلی آماده است — حالا در چت باهاش حرف بزن', 'ok');
+    } else if (st && st.running) {
+      toast('مدل هنوز در حال بارگذاری است — کمی بعد به همین پنجره سر بزن', 'warn');
+    } else {
+      toast('مدل محلی راه‌اندازی نشد — خطاها را در llama.log پوشهٔ موتور ببینید', 'err');
+    }
+  } catch (e) {
+    toast('اجرای محلی ممکن نشد: ' + v24Err(e), 'err');
+  }
+  v25llamaBusy = false;
+  v25LlamaRefresh();
+}
+
+/// Upsert the OpenAI-compatible connection pointing at the local llama-server
+/// and activate it, so the just-loaded model is immediately chat-usable.
+async function v25UpsertLocalConn(port, modelId) {
+  const id = 'conn_local_llama';
+  const base = 'http://127.0.0.1:' + port + '/v1';
+  let c = st.conns.find((x) => x.id === id);
+  if (!c) {
+    c = {
+      id, name: 'محلی — llama.cpp', kind: 'openai', base, key: '',
+      lastModel: modelId, enabled: true,
+      models: modelId ? [modelId] : [], favorites: [], capabilities: {}, lastHealth: null,
+    };
+    st.conns.push(c);
+  } else {
+    c.name = 'محلی — llama.cpp';
+    c.base = base;
+    c.key = '';
+    if (modelId && !c.models.includes(modelId)) c.models.push(modelId);
+    if (modelId) c.lastModel = modelId;
+  }
+  await saveConns();
+  setActiveConn(id);
+}
+
+async function v25ImgOutRefresh() {
+  if (!els.imgOutPath) return;
+  try {
+    els.imgOutPath.textContent = await v24Atr('img_folder');
+  } catch { els.imgOutPath.textContent = '—'; }
 }
 
 function v24Init() {
@@ -5163,9 +5324,28 @@ function v24Init() {
     v24Atr('img_folder').then((p) => v24Atr('reveal_path', { path: p })).catch((e) => toast(v24Err(e), 'warn'));
   };
 
+  // v0.25.0: image output folder picker
+  if (els.imgOutPick) els.imgOutPick.onclick = async () => {
+    const dlg = window.__TAURI__ && window.__TAURI__.dialog;
+    if (!dlg) return toast('انتخاب پوشه در دسترس نیست', 'warn');
+    try {
+      const dir = await dlg.select({ directory: true, multiple: false });
+      if (!dir) return;
+      await v24Atr('img_set_folder', { folder: dir });
+      toast('پوشهٔ خروجی تصاویر تغییر کرد — عکس‌های قبلی منتقل شدند', 'ok');
+      v25ImgOutRefresh();
+    } catch (e) { toast(v24Err(e), 'err'); }
+  };
+
   // live progress events from the download engine
   v24AtrInvokeListen('atria-models-progress', (p) => v24ApplyProgress(p));
   v24AtrInvokeListen('atria-models-status', () => v24RefreshModels());
+  // v0.25.0: local-llm runtime install progress
+  v24AtrInvokeListen('atria-llama-progress', (p) => {
+    if (v25llamaBusy && els.llamaState) {
+      els.llamaState.textContent = 'دانلود موتور محلی… ' + v24Bytes(p.downloaded || 0) + ' از ' + v24Bytes(p.total || 0);
+    }
+  });
 }
 
 function v24AtrInvokeListen(name, cb) {

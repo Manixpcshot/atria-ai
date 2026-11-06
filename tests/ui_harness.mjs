@@ -454,9 +454,9 @@ ok('پل IPC همهٔ توابع لازم را دارد', needed.every((k) => ty
 ok('دکمهٔ انتخاب مدل سیم‌کشی شد', typeof byId.modelPick.onclick === 'function');
 ok('نشانگر Full Access سیم‌کشی شد', typeof byId.fullAccessIndicator.onclick === 'function');
 ok('دکمهٔ ارسال سیم‌کشی شد', typeof byId.btnSend.onclick === 'function');
-eq('listenEvents همهٔ رویدادها را ثبت کرد (۱۱ + schedule + drag-drop)',
+eq('listenEvents همهٔ رویدادها را ثبت کرد (۱۲ + schedule + drag-drop)',
   Object.keys(tauriListeners).sort(),
-  ['atria-models-progress', 'atria-models-status', 'atria:done', 'atria:error', 'atria:retry', 'atria:round', 'atria:schedule_result', 'atria:stopped', 'atria:text',
+  ['atria-llama-progress', 'atria-models-progress', 'atria-models-status', 'atria:done', 'atria:error', 'atria:retry', 'atria:round', 'atria:schedule_result', 'atria:stopped', 'atria:text',
    'atria:thinking', 'atria:tool_args', 'atria:tool_end', 'atria:tool_pending', 'atria:tool_start', 'tauri://drag-drop']);
 ok('هیچ اشاره‌ای به دکمهٔ حذف‌شده باقی نمانده', !('btnManageConns' in T.els));
 await sleep(20);
