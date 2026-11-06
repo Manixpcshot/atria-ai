@@ -1757,9 +1757,12 @@ mark.chat-hit.cur { background: rgba(255, 150, 60, 0.75); }
   margin: 0 0 2px; font: 600 12.5px var(--font); color: #cdd8f2; display: flex; align-items: center; gap: 8px;
 }
 
-/* models: separate full-screen page (v0.26.0) */
+/* models: separate full-screen page (v0.26.0; opaque in v0.26.1) */
+/* v0.26.1: --bg is NOT a defined variable — var(--bg) computed to nothing and
+   the whole app showed through the page. Solid color + top z-index. */
 .models-page-wrap {
-  position: fixed; inset: 0; z-index: 300; background: var(--bg); overflow-y: auto;
+  position: fixed; inset: 0; z-index: 1000; overflow-y: auto;
+  background: #0a0d1e;
 }
 .models-page {
   min-height: 100%; width: 100%; max-width: 1440px; margin: 0 auto;

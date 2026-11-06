@@ -1297,6 +1297,19 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
   ok('چیپ «🎨 عکس» در نوار کامپوزر است (قبل از چیپ کدکس)', !!byId.imgChip && htmlSrc.includes('id="imgChip"') && htmlSrc.indexOf('imgChip') < htmlSrc.indexOf('codexChip'));
   ok('دکمه‌های «مدل‌ها» و «استودیو عکس» در نوار کناری هستند (بعد از پروژه‌ها)', !!byId.btnModels && !!byId.btnStudio && htmlSrc.includes('id="btnModels"') && htmlSrc.includes('id="btnStudio"') && htmlSrc.indexOf('btnModels') > htmlSrc.indexOf('btnProjects') && htmlSrc.indexOf('btnStudio') > htmlSrc.indexOf('btnModels'));
   ok('سبک‌بندی چیپ عکس، صف دانلود و گالری در CSS تعریف شده', cssSrc.includes('.photo-chip') && cssSrc.includes('.q-bar') && cssSrc.includes('.gallery-grid') && cssSrc.includes('.src-card'));
+  // v0.26.1: the models page must be OPAQUE (solid color) and above every app
+  // layer — v0.26.0 used an undefined var(--bg) and the chat ghosted through
+  {
+    const wrapMatch = cssSrc.match(/\.models-page-wrap\s*\{[^}]*\}/);
+    const wrapCss = wrapMatch ? wrapMatch[0] : '';
+    const bgO = wrapCss.match(/background(?:-color)?:\s*(#[0-9a-fA-F]{6}|rgba?\([^)]*\))/);
+    const zO = wrapCss.match(/z-index:\s*(\d+)/);
+    const bg = bgO ? bgO[1] : '';
+    const opaque = bg.startsWith('#') || (bg.startsWith('rgb(') && !bg.includes(',' + ' ') && !/rgba/.test(bg)) || (/^#[0-9a-fA-F]{6}$/.test(bg));
+    ok('صفحهٔ مدل‌ها پس‌زمینهٔ کدر (opaque) دارد — چت از پشت آن دیده نمی‌شود',
+      !!wrapCss && !!bg && !bg.toLowerCase().startsWith('rgba') && bg.includes('#') === bg.startsWith('#') && /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(bg));
+    ok('صفحهٔ مدل‌ها بالاتر از همهٔ لایه‌های اپ است (z-index)', !!zO && Number(zO[1]) >= 999);
+  }
 
   // — مدل‌ها (Hugging Face) —
   byId.btnModels.click();

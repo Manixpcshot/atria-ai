@@ -103,6 +103,11 @@ pub async fn models_set_folder(folder: PathBuf) -> Result<serde_json::Value, Str
     let folder = folder
         .canonicalize()
         .map_err(|_| "پوشه پیدا نشد — دوباره انتخاب کنید".to_string())?;
+    // v0.26.1: the native folder dialog can still accept a *file* path (typed
+    // in the address bar on Windows) — refuse anything that is not a folder.
+    if !folder.is_dir() {
+        return Err(format!("مسیر انتخابی یک پوشه نیست: {folder:?} — یک پوشه انتخاب کنید"));
+    }
     std::fs::create_dir_all(&folder).map_err(|e| format!("cannot create folder: {e}"))?;
     let out = with_queue(|q, _p| {
         q.folder = folder.clone();
@@ -404,6 +409,21 @@ mod tests {
     fn free_space_nonzero_on_existing_dir() {
         let d = std::env::temp_dir();
         assert!(free_space(&d) > 0);
+    }
+
+    #[test]
+    fn models_set_folder_rejects_file_paths() {
+        // v0.26.1: the native folder dialog can accept a FILE path (typed in
+        // the address bar on Windows) — the command must refuse it instead of
+        // silently "setting" the download folder to a file.
+        let f = std::env::temp_dir().join(format!("atria-setfolder-test-{}.html", std::process::id()));
+        std::fs::write(&f, b"not a folder").unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let res = rt.block_on(models_set_folder(f.clone()));
+        assert!(res.is_err(), "file path must be rejected");
+        let msg = res.err().unwrap();
+        assert!(msg.contains("پوشه نیست"), "error must explain it: {msg}");
+        let _ = std::fs::remove_file(&f);
     }
 
     #[test]

@@ -121,6 +121,10 @@ fn set_image_folder(folder: &Path) -> Result<serde_json::Value, String> {
     let folder = folder
         .canonicalize()
         .map_err(|_| "پوشه پیدا نشد — دوباره انتخاب کنید".to_string())?;
+    // v0.26.1: refuse file paths passed as folders (same dialog quirk)
+    if !folder.is_dir() {
+        return Err(format!("مسیر انتخابی یک پوشه نیست: {folder:?} — یک پوشه انتخاب کنید"));
+    }
     std::fs::create_dir_all(&folder).map_err(|e| format!("cannot create folder: {e}"))?;
     let current = images_dir();
     if current.canonicalize().ok() != Some(folder.clone()) {
@@ -213,5 +217,17 @@ mod tests {
         } else {
             let _ = std::fs::remove_file(&cfg_path);
         }
+    }
+
+    #[test]
+    fn img_set_folder_rejects_file_paths() {
+        // v0.26.1: same dialog quirk as the models folder
+        let _lock = IMG_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let f = std::env::temp_dir().join(format!("atria-imgout-file-test-{}.png", std::process::id()));
+        std::fs::write(&f, b"not a folder").unwrap();
+        let res = set_image_folder(&f);
+        assert!(res.is_err(), "file path must be rejected");
+        assert!(res.unwrap_err().contains("پوشه نیست"));
+        let _ = std::fs::remove_file(&f);
     }
 }
