@@ -620,14 +620,16 @@ mod tests {
 
     #[test]
     fn find_server_entry_handles_nested_paths() {
+        let base = if cfg!(windows) { "llama-server.exe" } else { "llama-server" };
+        let nested = format!("build/bin/{base}");
         let names = vec![
-            "build/bin/llama-server".to_string(),
+            nested.clone(),
             "build/bin/llama-cli".to_string(),
             "README.md".to_string(),
         ];
-        assert_eq!(find_server_entry(&names).map(|s| s.as_str()), Some("build/bin/llama-server"));
-        let flat = vec!["llama-server".to_string()];
-        assert_eq!(find_server_entry(&flat).map(|s| s.as_str()), Some("llama-server"));
+        assert_eq!(find_server_entry(&names).map(|s| s.as_str()), Some(nested.as_str()));
+        let flat = vec![base.to_string()];
+        assert_eq!(find_server_entry(&flat).map(|s| s.as_str()), Some(base));
         assert!(find_server_entry(&["a/llama-cli".into()]).is_none());
     }
 
