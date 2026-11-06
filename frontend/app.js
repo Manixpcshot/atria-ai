@@ -4331,7 +4331,7 @@ function v18ScheduleBootMerge() {
       v18AppendSchedMsg('assistant', (r.is_error ? '❌ ' : '✅ ') + (r.output || '(بدون خروجی)'));
       last = r.ran_at;
     });
-    if (last) window.__atria.invoke('schedule_ack', { ran_at: last }).catch(() => {});
+    if (last) window.__atria.invoke('schedule_ack', { ranAt: last }).catch(() => {});
     toast(items.length + ' نتیجهٔ زمان‌بندی منتقل شد', 'ok');
   }).catch(() => {});
 }
@@ -4789,21 +4789,21 @@ async function v24StartJob(id) {
   if (v24busy) return;
   v24busy = true;
   try {
-    await v24Atr('models_start', { job_id: id });
+    await v24Atr('models_start', { jobId: id });
     await v24RefreshModels();
   } catch (e) { toast(v24Err(e), 'err'); }
   v24busy = false;
 }
 async function v24PauseJob(id) {
-  try { await v24Atr('models_pause', { job_id: id }); await v24RefreshModels(); }
+  try { await v24Atr('models_pause', { jobId: id }); await v24RefreshModels(); }
   catch (e) { toast(v24Err(e), 'warn'); }
 }
 async function v24StopJob(id) {
-  try { await v24Atr('models_stop', { job_id: id }); await v24RefreshModels(); }
+  try { await v24Atr('models_stop', { jobId: id }); await v24RefreshModels(); }
   catch (e) { toast(v24Err(e), 'warn'); }
 }
 async function v24RemoveJob(id) {
-  try { await v24Atr('models_remove', { job_id: id }); await v24RefreshModels(); }
+  try { await v24Atr('models_remove', { jobId: id }); await v24RefreshModels(); }
   catch (e) { toast(v24Err(e), 'err'); }
 }
 
@@ -5171,7 +5171,7 @@ async function v25LlamaRefresh() {
   const save = v24El('button', 'btn tiny', 'ذخیره');
   save.onclick = async () => {
     try {
-      await v24Atr('llama_config', { port: Number(pi.value), ctx_size: Number(ci.value) });
+      await v24Atr('llama_config', { port: Number(pi.value), ctxSize: Number(ci.value) });
       toast('تنظیمات مدل محلی ذخیره شد (برای مدل در حال اجرا بعد از دوبارهٔ اجرای آن اعمال می‌شود)', 'ok');
     } catch (e) { toast(v24Err(e), 'err'); }
   };
@@ -5210,7 +5210,7 @@ async function v25RunLocal(job) {
       s = await v24Atr('llama_status');
     }
     if (els.llamaState) els.llamaState.textContent = 'مرحلهٔ ۲: بارگذاری مدل «' + file.path + '» (برای مدل‌های بزرگ کمی طول می‌کشد)…';
-    await v24Atr('llama_start', { model_path: modelPath });
+    await v24Atr('llama_start', { modelPath });
     const t0 = Date.now();
     let st = null;
     while (Date.now() - t0 < 300000) {
@@ -5270,7 +5270,7 @@ function v24Init() {
   // side buttons
   if (els.btnModels) els.btnModels.onclick = () => openModels();
   if (els.modelsX) els.modelsX.onclick = () => closeModal(els.modelsModal);
-  if (els.modelsModal) els.modelsModal.onclick = (e) => { if (e.target === els.modelsModal) closeModal(els.modelsModal); };
+  // v0.26.0: models is a full-screen page — no click-outside-to-close (accidental taps would exit the page)
   if (els.btnStudio) els.btnStudio.onclick = () => openStudio();
   if (els.studioX) els.studioX.onclick = () => closeModal(els.studioModal);
   if (els.studioModal) els.studioModal.onclick = (e) => { if (e.target === els.studioModal) closeModal(els.studioModal); };

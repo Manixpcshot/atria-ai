@@ -686,42 +686,29 @@
   </div>
 
   <!-- ============ Model Library (Hugging Face) ============ -->
-  <div class="modal-backdrop hidden" id="modelsModal">
-    <section class="project-modal glass models-section" role="dialog" aria-modal="true" aria-labelledby="modelsTitle">
-      <header class="modal-head">
-        <div>
+  <!-- ============ Models — separate full-screen page (v0.26.0) ============ -->
+  <div class="models-page-wrap hidden" id="modelsModal">
+    <div class="models-page" role="dialog" aria-modal="true" aria-labelledby="modelsTitle">
+      <header class="mp-topbar">
+        <button class="mp-back" id="modelsX" type="button" aria-label="بازگشت به چت">← بازگشت</button>
+        <div class="mp-title">
           <h2 id="modelsTitle">📦 مدل‌ها — Hugging Face</h2>
-          <p class="project-intro">جست‌وجو و دانلود مدل (عکس، LLM، …) با صف، پیشرفت و ادامهٔ دانلود. فایل‌ها برای استفاده در ComfyUI / A1111 / LM Studio و… ذخیره می‌شوند.</p>
+          <p class="mp-sub">جست‌وجو و دانلود مدل (عکس، LLM) با صف و پیشرفت + اجرای محلی مدل‌های متنی</p>
         </div>
-        <button class="x" id="modelsX" type="button" aria-label="بستن مدل‌ها">✕</button>
+        <div class="mp-meta">
+          <span class="models-free" id="modelsFree"></span>
+          <span class="models-folder" id="modelsFolder" dir="ltr">…</span>
+          <button class="btn tiny" id="modelsFolderPick" type="button">📁 تغییر پوشه</button>
+        </div>
       </header>
-      <div class="models-body">
-        <section class="models-left">
-          <div class="field">
-            <label class="flabel">پوشهٔ دانلود</label>
-            <div class="models-folder-row">
-              <span class="models-folder" id="modelsFolder" dir="ltr">…</span>
-              <button class="btn tiny" id="modelsFolderPick" type="button">تغییر</button>
-            </div>
-            <div class="models-free" id="modelsFree"></div>
-          </div>
-          <div class="field">
-            <label class="flabel">توکن Hugging Face <span class="models-optional">(اختیاری — مدل‌های خصوصی و تولید عکس با HF)</span></label>
-            <div class="models-folder-row">
-              <input type="password" id="hfToken" dir="ltr" placeholder="hf_…" autocomplete="off">
-              <button class="btn tiny" id="hfTokenSave" type="button">ذخیره</button>
-            </div>
-          </div>
-          <div class="field">
-            <label class="flabel">نوع مدل</label>
+      <div class="mp-body">
+        <section class="mp-main">
+          <div class="mp-toolbar">
             <div class="models-tabs" id="modelsTabs" role="tablist">
               <button class="models-tab active" data-pipe="" type="button">همه</button>
               <button class="models-tab" data-pipe="image-generation" type="button">🖼 تصویری</button>
               <button class="models-tab" data-pipe="text-generation" type="button">💬 متنی (LLM)</button>
             </div>
-          </div>
-          <div class="field">
-            <label class="flabel">جست‌وجو</label>
             <div class="models-search-row">
               <input type="text" id="modelsSearch" dir="ltr" placeholder="مثلاً stable diffusion xl یا org/model">
               <button class="btn primary tiny" id="modelsSearchBtn" type="button">جستجو</button>
@@ -729,19 +716,28 @@
           </div>
           <div class="models-results" id="modelsResults"></div>
         </section>
-        <section class="models-right">
-          <h3 class="models-h">صف دانلود</h3>
-          <div class="models-queue" id="modelsQueue"></div>
-          <div class="field llama-field">
-            <label class="flabel">🧠 اجرای محلی (llama.cpp) — مدل‌های متنی بدون اینترنت</label>
+        <aside class="mp-side">
+          <section class="mp-panel">
+            <h3 class="models-h">📥 صف دانلود</h3>
+            <div class="models-queue" id="modelsQueue"></div>
+          </section>
+          <section class="mp-panel">
+            <label class="flabel">🧠 اجرای محلی (llama.cpp) — مدل‌های متنی، بدون اینترنت</label>
             <div class="llama-box" id="llamaBox">
               <div class="llama-state" id="llamaState">در حال بررسی…</div>
               <div class="llama-controls" id="llamaControls"></div>
             </div>
-          </div>
-        </section>
+          </section>
+          <section class="mp-panel">
+            <label class="flabel">🔑 توکن Hugging Face <span class="models-optional">(اختیاری — مدل‌های خصوصی)</span></label>
+            <div class="models-folder-row">
+              <input type="password" id="hfToken" dir="ltr" placeholder="hf_…" autocomplete="off">
+              <button class="btn tiny" id="hfTokenSave" type="button">ذخیره</button>
+            </div>
+          </section>
+        </aside>
       </div>
-    </section>
+    </div>
   </div>
 
   <!-- ============ Image Studio ============ -->

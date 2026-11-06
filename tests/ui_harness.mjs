@@ -354,10 +354,10 @@ function router(cmd, args = {}) {
       v24Jobs.push(job);
       return Promise.resolve({ job });
     }
-    case 'models_start': v24ActiveJob = args.job_id; { const sj = v24Jobs.find((j) => j.id === args.job_id); if (sj) sj.files.forEach((f) => { if (f.state !== 'done') f.state = 'downloading'; }); } return Promise.resolve({ started: args.job_id });
-    case 'models_pause': { const pj = v24Jobs.find((j) => j.id === args.job_id); if (pj) pj.files.forEach((f) => { if (f.state === 'downloading') f.state = 'paused'; }); v24ActiveJob = null; return Promise.resolve({ paused: args.job_id }); }
-    case 'models_stop': { const stj = v24Jobs.find((j) => j.id === args.job_id); if (stj) stj.files.forEach((f) => { if (f.state === 'downloading') { f.state = 'pending'; f.downloaded = 0; } }); v24ActiveJob = null; return Promise.resolve({ stopped: args.job_id }); }
-    case 'models_remove': v24Jobs = v24Jobs.filter((j) => j.id !== args.job_id); return Promise.resolve({ removed: args.job_id });
+    case 'models_start': v24ActiveJob = args.jobId; { const sj = v24Jobs.find((j) => j.id === args.jobId); if (sj) sj.files.forEach((f) => { if (f.state !== 'done') f.state = 'downloading'; }); } return Promise.resolve({ started: args.jobId });
+    case 'models_pause': { const pj = v24Jobs.find((j) => j.id === args.jobId); if (pj) pj.files.forEach((f) => { if (f.state === 'downloading') f.state = 'paused'; }); v24ActiveJob = null; return Promise.resolve({ paused: args.jobId }); }
+    case 'models_stop': { const stj = v24Jobs.find((j) => j.id === args.jobId); if (stj) stj.files.forEach((f) => { if (f.state === 'downloading') { f.state = 'pending'; f.downloaded = 0; } }); v24ActiveJob = null; return Promise.resolve({ stopped: args.jobId }); }
+    case 'models_remove': v24Jobs = v24Jobs.filter((j) => j.id !== args.jobId); return Promise.resolve({ removed: args.jobId });
     // v0.24.0: image studio
     case 'img_generate': {
       if (args.source.kind === 'hf' && !args.source.token) return Promise.reject(new Error('توکن Hugging Face لازم است (در بخش مدل‌ها ذخیره کنید)'));
@@ -1436,6 +1436,100 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
   ok('عکس در گالری ماندگار ذخیره شد', v24Gallery.some((e) => e.prompt.includes('خرس قطبی')));
   byId.imgChip.click();
   ok('بازکلیک چیپ، حالت عکس را خاموش می‌کند', T.st.imgMode === false && !byId.imgChip.classList.contains('active'));
+
+  // ============ v0.26.0: IPC contract — JS invoke arg names must match Rust ============
+  // (bug class this guards: JS sent snake_case `job_id` while Tauri v2 requires
+  //  camelCase `jobId` — the download queue looked alive but every action failed)
+  {
+    const fs2 = await import('node:fs');
+    const walk = (d) => {
+      const out = [];
+      for (const e of fs2.readdirSync(d, { withFileTypes: true })) {
+        const fp = path.join(d, e.name);
+        if (e.isDirectory()) { if (!['target', 'node_modules', '.git'].includes(e.name)) out.push(...walk(fp)); }
+        else if (e.name.endsWith('.rs')) out.push(fp);
+      }
+      return out;
+    };
+    const camelOf = (n) => n.split('_').map((pp, i) => (i ? pp[0].toUpperCase() + pp.slice(1) : pp)).join('');
+    const rustCmdArgs = new Map();
+    for (const f of walk(path.join(__dirname, '..', 'crates'))) {
+      const rsrc = fs2.readFileSync(f, 'utf8');
+      // robust scan: each #[tauri::command] → next `fn name(` → bracket-matched arg list
+      let pos = 0;
+      while (true) {
+        const a = rsrc.indexOf('#[tauri::command]', pos);
+        if (a < 0) break;
+        const fnIdx = rsrc.indexOf('fn ', a);
+        if (fnIdx < 0 || fnIdx - a > 400) { pos = a + 1; continue; }
+        let n0 = fnIdx + 3;
+        while (rsrc[n0] === ' ') n0++;
+        const nameMatch = rsrc.slice(n0).match(/^[a-z_0-9]+/);
+        if (!nameMatch) { pos = a + 1; continue; }
+        const cmdName = nameMatch[0];
+        let k = n0 + cmdName.length;
+        while (rsrc[k] === ' ' || rsrc[k] === '\n') k++;
+        if (rsrc[k] !== '(') { pos = a + 1; continue; }
+        // bracket-match to the closing paren
+        let depth = 0, end = k;
+        for (let q = k; q < rsrc.length; q++) {
+          if (rsrc[q] === '(') depth++;
+          else if (rsrc[q] === ')') { depth--; if (depth === 0) { end = q; break; } }
+        }
+        if (depth !== 0) { pos = a + 1; continue; }
+        const argList = rsrc.slice(k + 1, end);
+        // split on top-level commas
+        const parts = [];
+        let d = 0, cur = '';
+        for (const ch of argList) {
+          if (ch === '(' || ch === '<') d++;
+          else if (ch === ')' || ch === '>') d--;
+          if (ch === ',' && d === 0) { parts.push(cur); cur = ''; }
+          else cur += ch;
+        }
+        if (cur.trim()) parts.push(cur);
+        const args = new Set();
+        for (let part of parts) {
+          part = part.trim();
+          const am = part.match(/^([a-z_][a-z0-9_]*)\s*:/);
+          if (!am) continue;
+          const ty = part.slice(am[0].length).trim();
+          if (ty === 'AppHandle' || ty.startsWith('State<')) continue; // Tauri-injected
+          args.add(camelOf(am[1]));
+        }
+        if (!rustCmdArgs.has(cmdName) || rustCmdArgs.get(cmdName).size < args.size) rustCmdArgs.set(cmdName, args);
+        pos = a + 1;
+      }
+    }
+    const jsSrc = fs2.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), 'utf8');
+    const topKeys = (objSrc) => {
+      const keys = [];
+      let depth = 0;
+      const re2 = /([A-Za-z_$][\w$]*)\s*:|\{|\}/g;
+      let mm;
+      while ((mm = re2.exec(objSrc))) {
+        if (mm[0] === '{') depth++;
+        else if (mm[0] === '}') depth--;
+        else if (depth === 0) keys.push(mm[1]);
+      }
+      return keys;
+    };
+    const jsRe = /(?:v24Atr|__atria\.invoke)\(\s*'([a-z_0-9]+)'\s*,\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g;
+    let jm, bad = [];
+    while ((jm = jsRe.exec(jsSrc))) {
+      const cmd = jm[1];
+      if (!rustCmdArgs.has(cmd)) { bad.push(cmd + ' (Rust command not found)'); continue; }
+      for (const k of topKeys(jm[2])) {
+        if (!rustCmdArgs.get(cmd).has(k)) bad.push(cmd + ' ← JS sends "' + k + '" but Rust expects camelCase of its args');
+      }
+    }
+    ok(bad.length
+      ? 'IPC contract: arg-name mismatches — ' + bad.join(' | ')
+      : 'IPC contract: all JS invoke arg names match the Rust commands (camelCase)',
+      bad.length === 0);
+    ok('IPC contract: Rust command signatures parsed (sanity: models_start has jobId)',
+      rustCmdArgs.has('models_start') && rustCmdArgs.get('models_start').has('jobId'));
+  }
 }
 
 console.log('\n============================');
