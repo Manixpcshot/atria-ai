@@ -5,7 +5,7 @@
 use crate::commands::AppState;
 use atria_core::gallery::{Gallery, GalleryEntry, new_id};
 use atria_core::imggen::{self, ImageRequest, ImageSource};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use tauri::State;
 
@@ -111,9 +111,13 @@ pub async fn img_folder(st: State<'_, AppState>) -> Result<String, String> {
 #[tauri::command]
 pub async fn img_set_folder(
     folder: PathBuf,
-    st: State<'_, AppState>,
+    _st: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _ = st;
+    set_image_folder(&folder)
+}
+
+/// Core of [`img_set_folder`] without Tauri state, so it is unit-testable.
+fn set_image_folder(folder: &Path) -> Result<serde_json::Value, String> {
     let folder = folder
         .canonicalize()
         .map_err(|_| "پوشه پیدا نشد — دوباره انتخاب کنید".to_string())?;
@@ -123,7 +127,14 @@ pub async fn img_set_folder(
         for entry in std::fs::read_dir(&current).map_err(|e| format!("cannot read current folder: {e}"))? {
             let entry = entry.map_err(|e| e.to_string())?;
             let to = folder.join(entry.file_name());
-            let _ = std::fs::rename(entry.path(), &to);
+            let from = entry.path();
+            // rename may fail across filesystems (EXDEV) — fall back to
+            // copy+delete so images are never lost
+            if std::fs::rename(&from, &to).is_err() {
+                std::fs::copy(&from, &to)
+                    .and_then(|_| std::fs::remove_file(&from))
+                    .map_err(|e| format!("cannot migrate {}: {e}", from.display()))?;
+            }
         }
     }
     std::fs::write(
@@ -138,10 +149,16 @@ pub async fn img_set_folder(
 mod tests {
     use super::*;
 
+    // both tests mutate the real profile state (image-out.json + the default
+    // gallery dir) — serialize them or they race each other
+    static IMG_TEST_LOCK: LazyLock<std::sync::Mutex<()>> =
+        LazyLock::new(|| std::sync::Mutex::new(()));
+
     #[test]
     fn gallery_dir_is_under_atria_root() {
         // v0.25.0: the output folder is configurable — test the DEFAULT by
         // temporarily hiding any user override.
+        let _lock = IMG_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let cfg_path = images_dir_cfg_path();
         let had_cfg = std::fs::read(&cfg_path).ok();
         let _ = std::fs::remove_file(&cfg_path);
@@ -152,6 +169,49 @@ mod tests {
         assert!(path.parent().map(|p| p == root()).unwrap_or(false));
         if let Some(raw) = had_cfg {
             let _ = std::fs::write(&cfg_path, raw);
+        }
+    }
+
+    #[test]
+    fn img_set_folder_migrates_existing_images() {
+        let _lock = IMG_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // hide any user override so the default gallery is used
+        let cfg_path = images_dir_cfg_path();
+        let had_cfg = std::fs::read(&cfg_path).ok();
+        let _ = std::fs::remove_file(&cfg_path);
+
+        let default_dir = images_dir();
+        std::fs::create_dir_all(&default_dir).unwrap();
+        let seed = default_dir.join("atria-migrate-test.png");
+        let seed_backup = std::fs::read(&seed).ok();
+        std::fs::write(&seed, b"fake-png-bytes").unwrap();
+
+        let target =
+            std::env::temp_dir().join(format!("atria-imgout-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&target);
+        std::fs::create_dir_all(&target).unwrap();
+
+        let res = set_image_folder(&target).expect("set folder");
+        let canon = target.canonicalize().unwrap();
+        assert_eq!(res["folder"].as_str(), Some(canon.to_str().unwrap()));
+        // override now drives images_dir()
+        assert_eq!(images_dir().canonicalize().ok(), Some(canon.clone()));
+        // existing gallery content migrated, nothing lost
+        assert!(canon.join("atria-migrate-test.png").exists());
+        assert!(!seed.exists());
+
+        // restore original state
+        let _ = std::fs::remove_file(canon.join("atria-migrate-test.png"));
+        if let Some(raw) = seed_backup {
+            let _ = std::fs::write(&seed, raw);
+        } else {
+            let _ = std::fs::remove_file(&seed);
+        }
+        let _ = std::fs::remove_dir_all(&target);
+        if let Some(raw) = had_cfg {
+            let _ = std::fs::write(&cfg_path, raw);
+        } else {
+            let _ = std::fs::remove_file(&cfg_path);
         }
     }
 }
