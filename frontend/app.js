@@ -4689,8 +4689,13 @@ function v24QueueRow(job) {
   const doneB = job.files.reduce((a, f) => a + (f.state === 'done' ? (f.size || 0) : (f.downloaded || 0)), 0);
   const doneF = job.files.filter((f) => f.state === 'done').length;
   const meta = v24El('div', 'q-row-meta');
-  meta.appendChild(v24El('span', '', v24Bytes(doneB) + ' از ' + v24Bytes(total) + ' · ' + doneF + '/' + job.files.length + ' فایل'));
-  meta.appendChild(v24El('span', '', job.folder ? '' : ''));
+  // v0.26.3: make the "waiting for first bytes" state explicit — a 0% bar
+  // with no explanation read as "dead". The backend watchdog fails this with
+  // a visible error within ~30s if no data ever arrives.
+  const connecting = v24models.active === job.id && doneB === 0;
+  meta.appendChild(v24El('span', '', connecting
+    ? '⏳ در حال اتصال به سرور… · کل حجم: ' + v24Bytes(total) + ' — اگر داده نیامد، حداکثر تا ۳۰ ثانیه دیگر خطا می‌دهد'
+    : v24Bytes(doneB) + ' از ' + v24Bytes(total) + ' · ' + doneF + '/' + job.files.length + ' فایل'));
   row.appendChild(meta);
 
   const files = v24El('div', 'q-files');
@@ -4715,6 +4720,10 @@ function v24QueueRow(job) {
       tk.onclick = () => { if (els.hfToken) { try { els.hfToken.scrollIntoView({ block: 'center' }); } catch {} els.hfToken.focus(); } };
       err.appendChild(tk);
     }
+    // v0.26.3: one-click retry after an error (resumes from the .part file)
+    const ry = v24El('button', 'btn tiny q-retry', '🔄 تلاش دوباره');
+    ry.onclick = () => v24StartJob(job.id);
+    err.appendChild(ry);
     row.appendChild(err);
   }
 
@@ -4838,13 +4847,13 @@ function v24ModelCard(m) {
   const meta = v24El('div', 'model-card-meta');
   meta.textContent = '↓ ' + fmtN(m.downloads || 0) + ' دانلود · ♥ ' + fmtN(m.likes || 0);
   card.appendChild(meta);
+  // v0.26.3: ONE button per card — «⬇ دانلود» adds to the queue AND starts.
+  // The old second button («افزودن به صف») left jobs pending with no clear
+  // next step; users experienced it as "nothing happens".
   const acts = v24El('div', 'model-card-actions');
   const dl = v24El('button', 'btn primary tiny model-card-add', '⬇ دانلود');
-  const q = v24El('button', 'btn tiny model-card-queue', '＋ افزودن به صف');
-  dl.onclick = () => v24AddModel(m.id, true, dl, q);
-  q.onclick = () => v24AddModel(m.id, false, q, dl);
+  dl.onclick = () => v24AddModel(m.id, true, dl);
   acts.appendChild(dl);
-  acts.appendChild(q);
   card.appendChild(acts);
   return card;
 }

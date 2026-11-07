@@ -423,16 +423,67 @@ fn part_path(dest: &Path) -> PathBuf {
 ///
 /// Returns [`DlOutcome::Done`] when the file is complete, [`DlOutcome::Paused`]
 /// when the user paused (`.part` kept), or `Err("cancelled")` on stop.
+// v0.26.3: network watchdog. Filtered networks / misconfigured proxies can
+// accept a TCP connection and then send nothing — previously that stalled a
+// download for up to an hour with no error and no working cancel (pause/stop
+// were only checked when data arrived). Now:
+//   * FIRST_BYTE_SECS — no response headers within 30s → retry, then error
+//   * INACTIVE_SECS   — no bytes for 60s while streaming → retry (resume), then error
+//   * pause/stop are honored within ~CTRL_POLL_MS even when the network is
+//     completely silent (a watcher races every network wait)
+pub const FIRST_BYTE_SECS: u64 = 30;
+pub const INACTIVE_SECS: u64 = 60;
+const CTRL_POLL_MS: u64 = 200;
+
+/// Wait until pause/stop is requested (light polling). Races every network
+/// wait so cancellation responds within ~CTRL_POLL_MS even while silent.
+async fn ctrl_wait_any(ctrl: &AtomicU8) {
+    loop {
+        if ctrl.load(Ordering::Relaxed) != 0 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(CTRL_POLL_MS)).await;
+    }
+}
+
+/// Download `url` to `dest` with resume + progress + cooperative control.
+///
+/// `progress` receives `(downloaded_bytes, total_bytes)` where total may be 0
+/// when the server sends no Content-Length.
+///
+/// Returns [`DlOutcome::Done`] when the file is complete, [`DlOutcome::Paused`]
+/// when the user paused (`.part` kept), or `Err("cancelled")` on stop.
 pub async fn download_file(
     url: &str,
     token: Option<&str>,
     dest: &Path,
     ctrl: &AtomicU8,
+    progress: impl FnMut(u64, u64),
+) -> Result<DlOutcome, String> {
+    download_file_timed(
+        url,
+        token,
+        dest,
+        ctrl,
+        progress,
+        Duration::from_secs(FIRST_BYTE_SECS),
+        Duration::from_secs(INACTIVE_SECS),
+    )
+    .await
+}
+
+/// Same as [`download_file`] with explicit watchdog timeouts (tests use short values).
+pub async fn download_file_timed(
+    url: &str,
+    token: Option<&str>,
+    dest: &Path,
+    ctrl: &AtomicU8,
     mut progress: impl FnMut(u64, u64),
+    first_byte: Duration,
+    inactive: Duration,
 ) -> Result<DlOutcome, String> {
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("cannot create folder: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("cannot create folder: {e}"))?;
     }
     if dest.exists() {
         // already complete (e.g. resumed job)
@@ -443,6 +494,7 @@ pub async fn download_file(
     let part = part_path(dest);
     let mut existing = part.metadata().map(|m| m.len()).unwrap_or(0);
     let mut last_err = String::new();
+    use futures::StreamExt;
 
     for attempt in 0..RETRIES {
         if ctrl_get(ctrl) == Ctrl::Stop {
@@ -458,106 +510,161 @@ pub async fn download_file(
             }
             req.timeout(Duration::from_secs(3600))
         };
-        let resp = match req.send().await {
-            Ok(r) => r,
-            Err(e) => {
-                last_err = format!("connection failed: {e}");
+
+        // ---- wait for response headers, with watchdog + ctrl race ----------
+        // Dropping the request future on timeout/stop aborts the connection.
+        tokio::select! {
+            sent = req.send() => {
+                let resp = match sent {
+                    Ok(r) => r,
+                    Err(e) => {
+                        last_err = format!("اتصال به سرور ممکن نشد: {e}");
+                        tokio::time::sleep(Duration::from_millis(BACKOFF_MS * (attempt as u64 + 1))).await;
+                        continue;
+                    }
+                };
+
+                // 200 = server ignored Range → restart from zero.
+                if resp.status() == reqwest::StatusCode::OK && existing > 0 {
+                    existing = 0;
+                    let _ = std::fs::File::create(&part);
+                }
+                if !resp.status().is_success()
+                    && resp.status() != reqwest::StatusCode::RANGE_NOT_SATISFIABLE
+                {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    let hint = if body.len() < 300 {
+                        body
+                    } else {
+                        String::from(&body[..300])
+                    };
+                    let msg = match status {
+                        reqwest::StatusCode::UNAUTHORIZED => {
+                            "این مدل gated/خصوصی است — برای دانلود فایل‌ها باید توکن Hugging Face (با پذیرش لایسنس مدل) را در بخش «مدل‌ها» ذخیره کنید".to_string()
+                        }
+                        reqwest::StatusCode::FORBIDDEN => {
+                            "دسترسی به فایل رد شد (403) — مدل خصوصی است یا توکن با دسترسی لازم ندارد".to_string()
+                        }
+                        reqwest::StatusCode::NOT_FOUND => "فایل در repo پیدا نشد (404)".to_string(),
+                        _ => format!("Hugging Face error: HTTP {status} — {hint}"),
+                    };
+                    return Err(msg);
+                }
+                if resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+                    // part file already complete → finalize
+                    let _ = std::fs::rename(&part, dest);
+                    let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
+                    progress(size, size);
+                    return Ok(DlOutcome::Done);
+                }
+
+                let total = match resp.content_length() {
+                    Some(t) => existing + t,
+                    None => 0,
+                };
+                progress(existing, total);
+
+                let mut stream = resp.bytes_stream();
+                // append(true) in both cases: new file (empty) or resume at end of `.part`
+                let mut file = match std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&part)
+                {
+                    Ok(f) => f,
+                    Err(e) => return Err(format!("cannot open temp file: {e}")),
+                };
+
+                // ---- stream loop with inactivity watchdog + ctrl race ------
+                let mut stream_done = false;
+                let mut got_bytes = false;
+                let mut pause_requested = false;
+                'chunk: loop {
+                    tokio::select! {
+                        r = tokio::time::timeout(inactive, stream.next()) => {
+                            match r {
+                                Ok(Some(Ok(bytes))) => {
+                                    if let Err(e) = file.write_all(&bytes) {
+                                        last_err = format!("write failed: {e}");
+                                        break 'chunk;
+                                    }
+                                    existing += bytes.len() as u64;
+                                    got_bytes = true;
+                                    progress(existing, total);
+                                    // checked per-chunk (data flowing) AND via the
+                                    // ctrl race below (network silent) — pause/stop
+                                    // must never miss a signal in either case
+                                    match ctrl_get(ctrl) {
+                                        Ctrl::Stop => {
+                                            let _ = std::fs::remove_file(&part);
+                                            return Err("cancelled".into());
+                                        }
+                                        Ctrl::Pause => return Ok(DlOutcome::Paused),
+                                        Ctrl::Run => {}
+                                    }
+                                }
+                                Ok(Some(Err(e))) => {
+                                    last_err = format!("stream error: {e}");
+                                    break 'chunk;
+                                }
+                                Ok(None) => {
+                                    stream_done = true;
+                                    break 'chunk;
+                                }
+                                Err(_) => {
+                                    // inactivity: honor a pending pause before
+                                    // reporting a stall (user intent wins)
+                                    if pause_requested {
+                                        return Ok(DlOutcome::Paused);
+                                    }
+                                    last_err = "اتصال بدون داده ماند (بیش از ۶۰ ثانیه) — اینترنت یا پروکسی را بررسی کنید".into();
+                                    break 'chunk;
+                                }
+                            }
+                        }
+                        _ = ctrl_wait_any(ctrl) => {
+                            match ctrl_get(ctrl) {
+                                Ctrl::Stop => {
+                                    let _ = std::fs::remove_file(&part);
+                                    return Err("cancelled".into());
+                                }
+                                // pause only lands once at least one byte is
+                                // stored (a 0-byte "paused" part is pointless);
+                                // before that it defers to the first byte or the
+                                // inactivity timeout
+                                Ctrl::Pause if got_bytes => return Ok(DlOutcome::Paused),
+                                Ctrl::Pause => pause_requested = true,
+                                Ctrl::Run => {} // spurious wake — keep going
+                            }
+                        }
+                    }
+                }
+
+                if stream_done {
+                    let _ = std::fs::rename(&part, dest);
+                    let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
+                    progress(size, total.max(size));
+                    return Ok(DlOutcome::Done);
+                }
+                // retryable failure (stall / stream error / write) → resume via Range
                 tokio::time::sleep(Duration::from_millis(BACKOFF_MS * (attempt as u64 + 1))).await;
                 continue;
             }
-        };
-
-        // 200 = server ignored Range → restart from zero.
-        if resp.status() == reqwest::StatusCode::OK && existing > 0 {
-            existing = 0;
-            let _ = std::fs::File::create(&part);
-        }
-        if !resp.status().is_success()
-            && resp.status() != reqwest::StatusCode::RANGE_NOT_SATISFIABLE
-        {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            let hint = if body.len() < 300 {
-                body
-            } else {
-                String::from(&body[..300])
-            };
-            let msg = match status {
-                reqwest::StatusCode::UNAUTHORIZED => {
-                    "این مدل gated/خصوصی است — برای دانلود فایل‌ها باید توکن Hugging Face (با پذیرش لایسنس مدل) را در بخش «مدل‌ها» ذخیره کنید".to_string()
-                }
-                reqwest::StatusCode::FORBIDDEN => {
-                    "دسترسی به فایل رد شد (403) — مدل خصوصی است یا توکن با دسترسی لازم ندارد".to_string()
-                }
-                reqwest::StatusCode::NOT_FOUND => "فایل در repo پیدا نشد (404)".to_string(),
-                _ => format!("Hugging Face error: HTTP {status} — {hint}"),
-            };
-            return Err(msg);
-        }
-        if resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
-            // part file already complete → finalize
-            let _ = std::fs::rename(&part, dest);
-            let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
-            progress(size, size);
-            return Ok(DlOutcome::Done);
-        }
-
-        let total = match resp.content_length() {
-            Some(t) => existing + t,
-            None => 0,
-        };
-        progress(existing, total);
-
-        use futures::StreamExt;
-        let mut stream = resp.bytes_stream();
-        // append(true) in both cases: new file (empty) or resume at end of `.part`
-        let mut file = match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&part)
-        {
-            Ok(f) => f,
-            Err(e) => return Err(format!("cannot open temp file: {e}")),
-        };
-        let mut loop_err = None;
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    if let Err(e) = file.write_all(&bytes) {
-                        loop_err = Some(format!("write failed: {e}"));
-                        break;
-                    }
-                    existing += bytes.len() as u64;
-                    progress(existing, total);
-                }
-                Err(e) => {
-                    loop_err = Some(format!("stream error: {e}"));
-                    break;
-                }
+            _ = tokio::time::sleep(first_byte) => {
+                last_err = "سرور در مهلت ۳۰ ثانیه پاسخ نداد (اتصال فیلترشده یا آدرس پروکسی اشتباه است)".into();
+                tokio::time::sleep(Duration::from_millis(BACKOFF_MS * (attempt as u64 + 1))).await;
+                continue;
             }
-            match ctrl_get(ctrl) {
-                Ctrl::Run => {}
-                Ctrl::Pause => {
-                    return Ok(DlOutcome::Paused); // keep `.part` for resume
-                }
-                Ctrl::Stop => {
-                    let _ = std::fs::remove_file(&part);
-                    return Err("cancelled".into());
+            _ = ctrl_wait_any(ctrl) => {
+                match ctrl_get(ctrl) {
+                    Ctrl::Stop => return Err("cancelled".into()),
+                    _ => return Ok(DlOutcome::Paused),
                 }
             }
         }
-        if let Some(e) = loop_err {
-            last_err = e;
-            tokio::time::sleep(Duration::from_millis(BACKOFF_MS * (attempt as u64 + 1))).await;
-            continue;
-        }
-        // stream finished
-        let _ = std::fs::rename(&part, dest);
-        let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
-        progress(size, total.max(size));
-        return Ok(DlOutcome::Done);
     }
-    Err(format!("download failed after {RETRIES} attempts: {last_err}"))
+    Err(format!("دانلود پس از {RETRIES} تلاش ممکن نشد: {last_err}"))
 }
 
 /// Shared HTTP client for all HF traffic (search, file lists, downloads).
@@ -1000,5 +1107,123 @@ mod tests {
         let files = repo_files(&models[0].id).await.unwrap();
         assert!(!files.is_empty());
         assert!(files.iter().all(|f| !f.path.contains("..")));
+    }
+
+    // ------------------------------------------------------------------
+    // v0.26.3: download watchdog e2e (local TCP servers)
+    // ------------------------------------------------------------------
+
+    /// Tiny HTTP-ish server. `kind`:
+    ///  "fast"                 → 200 + Content-Length: 5 + "01234", close
+    ///  "stall-headers"        → accept, read request, send NOTHING (hold open)
+    ///  "headers-then-stall"   → 200 + CL: 100 + 5 bytes, then hold open
+    async fn dl_test_server(kind: &str) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let kind = kind.to_string();
+        tokio::spawn(async move {
+            loop {
+                let (sock, _) = match listener.accept().await {
+                    Ok(x) => x,
+                    Err(_) => return,
+                };
+                let kind = kind.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut sock = sock;
+                    let mut buf = [0u8; 8192];
+                    let _ = sock.read(&mut buf).await;
+                    match kind.as_str() {
+                        "fast" => {
+                            let _ = sock
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n01234")
+                                .await;
+                            let _ = sock.flush().await;
+                            // drop closes the connection → client sees EOF after body
+                        }
+                        "stall-headers" | "headers-then-stall" => {
+                            if kind == "headers-then-stall" {
+                                let _ = sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n01234").await;
+                                let _ = sock.flush().await;
+                            }
+                            // hold the connection open, send nothing more
+                            let _ = tokio::time::sleep(Duration::from_secs(60)).await;
+                        }
+                        _ => {}
+                    }
+                });
+            }
+        });
+        addr
+    }
+
+    fn dl_tmp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("atria-dl-test-{}-{}", tag, std::process::id()));
+        let _ = std::fs::create_dir_all(&d);
+        d
+    }
+
+    #[tokio::test]
+    async fn dl_v263_fast_download_succeeds() {
+        let addr = dl_test_server("fast").await;
+        let d = dl_tmp_dir("fast");
+        let dest = d.join("fast.bin");
+        let ctrl = AtomicU8::new(0);
+        let t0 = std::time::Instant::now();
+        let r = download_file_timed(
+            &format!("http://{addr}/f.bin"), None, &dest, &ctrl, |_d, _t| {},
+            Duration::from_secs(5), Duration::from_secs(5),
+        )
+        .await;
+        assert!(matches!(r, Ok(DlOutcome::Done)), "expected Done: {r:?}");
+        assert_eq!(std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0), 5);
+        assert!(t0.elapsed() < Duration::from_secs(10));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn dl_v263_stalled_headers_fail_fast_with_error() {
+        // Filtered-network simulation: TCP accepted, no response headers.
+        // Must end in a clear error within seconds (was: up to 1 hour, no error).
+        let addr = dl_test_server("stall-headers").await;
+        let d = dl_tmp_dir("stallh");
+        let dest = d.join("stall.bin");
+        let ctrl = AtomicU8::new(0);
+        let t0 = std::time::Instant::now();
+        let r = download_file_timed(
+            &format!("http://{addr}/s.bin"), None, &dest, &ctrl, |_d, _t| {},
+            Duration::from_millis(300), Duration::from_millis(300),
+        )
+        .await;
+        let elapsed = t0.elapsed();
+        assert!(r.is_err(), "expected an error, got {r:?}");
+        assert!(elapsed < Duration::from_secs(15), "took {elapsed:?}");
+        assert!(!dest.exists(), "no file may remain");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn dl_v263_stop_cancels_fast_while_network_is_silent() {
+        // The bug users hit: download silent (stalled) → stop must still work.
+        let addr = dl_test_server("headers-then-stall").await;
+        let d = dl_tmp_dir("stopstall");
+        let dest = d.join("stop.bin");
+        let ctrl = std::sync::Arc::new(AtomicU8::new(0));
+        let ctrl2 = std::sync::Arc::clone(&ctrl);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            ctrl_set(&ctrl2, Ctrl::Stop);
+        });
+        let t0 = std::time::Instant::now();
+        let r = download_file_timed(
+            &format!("http://{addr}/x.bin"), None, &dest, &ctrl, |_d, _t| {},
+            Duration::from_secs(5), Duration::from_secs(5),
+        )
+        .await;
+        let elapsed = t0.elapsed();
+        assert_eq!(r, Err("cancelled".into()), "expected cancelled: {r:?}");
+        assert!(elapsed < Duration::from_secs(5), "stop took {elapsed:?}");
+        assert!(!dest.exists());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -357,7 +357,8 @@ function router(cmd, args = {}) {
     case 'models_start': v24ActiveJob = args.jobId; { const sj = v24Jobs.find((j) => j.id === args.jobId); if (sj) sj.files.forEach((f) => { if (f.state !== 'done') f.state = 'downloading'; }); } return Promise.resolve({ started: args.jobId });
     case 'models_pause': { const pj = v24Jobs.find((j) => j.id === args.jobId); if (pj) pj.files.forEach((f) => { if (f.state === 'downloading') f.state = 'paused'; }); v24ActiveJob = null; return Promise.resolve({ paused: args.jobId }); }
     case 'models_stop': { const stj = v24Jobs.find((j) => j.id === args.jobId); if (stj) stj.files.forEach((f) => { if (f.state === 'downloading') { f.state = 'pending'; f.downloaded = 0; } }); v24ActiveJob = null; return Promise.resolve({ stopped: args.jobId }); }
-    case 'models_remove': v24Jobs = v24Jobs.filter((j) => j.id !== args.jobId); return Promise.resolve({ removed: args.jobId });
+    // v0.26.3: removing the ACTIVE job auto-stops it (backend change)
+    case 'models_remove': v24Jobs = v24Jobs.filter((j) => j.id !== args.jobId); if (v24ActiveJob === args.jobId) v24ActiveJob = null; return Promise.resolve({ removed: args.jobId });
     // v0.26.2: optional proxy (direct connect is blocked on filtered networks)
     case 'models_set_proxy': v24ProxyUrl = (args.url || '').trim(); return Promise.resolve({ ok: true, url: v24ProxyUrl });
     case 'models_proxy_get': return Promise.resolve({ url: v24ProxyUrl });
@@ -1325,6 +1326,11 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
       jsTxt.includes('models_set_proxy') && jsTxt.includes('models_test_conn') && jsTxt.includes('models_proxy_get'));
     ok('CSS نتیجهٔ آزمون اتصال + چشمک ردیف تازهٔ صف تعریف شده',
       cssSrc.includes('.hf-proxy-result.ok') && cssSrc.includes('.q-row.new'));
+    // v0.26.3: one download button per card (the ambiguous second button
+    // left jobs pending → "nothing happens, can't cancel")
+    ok('v0.26.3: دکمهٔ مبهم «افزودن به صف» از کارت‌ها حذف شده', !jsTxt.includes('model-card-queue'));
+    ok('v0.26.3: حالت «در حال اتصال» + دکمهٔ «تلاش دوباره» وجود دارند',
+      jsTxt.includes('در حال اتصال به سرور') && jsTxt.includes('تلاش دوباره'));
   }
 
   // — مدل‌ها (Hugging Face) —
@@ -1356,13 +1362,14 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
   const v24Cards = byId.modelsResults.querySelectorAll('.model-card');
   ok('جست‌وجو HF کارت مدل برمی‌گرداند', v24Cards.length === 3 && v24Cards[0].textContent.includes('stabilityai/stable-diffusion-xl-base-1.0'));
   ok('برچسب pipeline روی کارت مدل است', v24Cards[0].textContent.includes('image-generation'));
-  v24Cards[0].querySelector('.model-card-queue').click(); // v0.24.2: «افزودن به صف» بدون شروع
+  // v0.26.3: cards have ONE button — «⬇ دانلود» adds AND starts
+  v24Cards[0].querySelector('.model-card-add').click();
   await sleep(50);
   let v24Rows = byId.modelsQueue.querySelectorAll('.q-row');
-  ok('مدل به صف اضافه شد و row ساخته می‌شود', v24Rows.length === 1 && v24Rows[0].textContent.includes('stabilityai/stable-diffusion-xl-base-1.0'));
-  ok('نکتهٔ راهنما وقتی دانلودی فعال نیست، زیر صف دیده می‌شود', !!byId.modelsQueue.querySelector('.q-hint'));
-  ok('حجم کل فایل‌های مدل محاسبه می‌شود (6.5 GB)', String(byId.modelsQueue.textContent).includes('6.5 GB'));
-  v24Rows[0].querySelectorAll('button')[0].click(); // شروع
+  ok('«⬇ دانلود» مدل را به صف اضافه و بلافاصله شروع می‌کند', v24Rows.length === 1 && v24Rows[0].textContent.includes('stabilityai/stable-diffusion-xl-base-1.0') && bridgeCalls.some((c) => c[0] === 'models_start'));
+  ok('کارت مدل فقط یک دکمه دارد (دکمهٔ مبهم «افزودن به صف» حذف شده)', v24Cards[0].querySelectorAll('.model-card-actions button').length === 1);
+  ok('حالت صفر-بایت: «در حال اتصال به سرور» + حجم کل نمایش داده می‌شود', String(v24Rows[0].querySelector('.q-row-meta').textContent).includes('در حال اتصال') && String(byId.modelsQueue.textContent).includes('6.5 GB'));
+  v24Rows[0].querySelectorAll('button')[0].click(); // شروع (دوباره‌شود؟ خیر — active است)
   await sleep(50);
   const v24JobId = v24Rows[0].dataset.job;
   emit('atria-models-progress', { job_id: v24JobId, file: 'weights/model.safetensors', downloaded: 3465000000, total: 6930000000, state: 'downloading', file_count: 2, file_index: 2 });
@@ -1404,6 +1411,7 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
   confirmResult = true;
   for (const b of v242ActiveRow.querySelectorAll('button')) if (b.textContent.includes('حذف از صف')) b.click();
   await sleep(50);
+  ok('v0.26.3: حذف job فعال دیگر مردود نیست — دانلود auto-stop شده و row برداشته می‌شود', byId.modelsQueue.querySelectorAll('.q-row').length === 0);
 
   // — v0.24.2: خطای قابل‌دید در صف (مدل gated) —
   bridgeCalls.length = 0;
@@ -1412,7 +1420,7 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
   await sleep(60);
   const v242GatedCard = [...byId.modelsResults.querySelectorAll('.model-card')].find((c) => c.textContent.includes('gated/model'));
   ok('جست‌وجوی «gated» کارت مدل محدود را برمی‌گرداند', !!v242GatedCard);
-  v242GatedCard.querySelector('.model-card-queue').click();
+  v242GatedCard.querySelector('.model-card-add').click(); // v0.26.3: one button, auto-start
   await sleep(60);
   const v242ErrRow = [...byId.modelsQueue.querySelectorAll('.q-row')].find((r) => r.textContent.includes('gated/model'));
   ok('خطای مدل gated داخل row دیده می‌شود (نه فقط برچسب «خطا»)', !!v242ErrRow && !!v242ErrRow.querySelector('.q-error') && String(v242ErrRow.querySelector('.q-error').textContent).includes('401'));

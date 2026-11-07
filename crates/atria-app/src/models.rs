@@ -222,6 +222,14 @@ pub async fn models_add(repo: String) -> Result<serde_json::Value, String> {
 /// Start (or resume) downloading a job. One job at a time.
 #[tauri::command]
 pub async fn models_start(app: AppHandle, job_id: String) -> Result<serde_json::Value, String> {
+    // v0.26.3: fail fast with a clear, visible message when Hugging Face is
+    // unreachable. Previously a dead network produced a job that sat "pending"
+    // forever — no error, no progress, no working cancel.
+    if let Err(e) = hf::ping_hf().await {
+        return Err(format!(
+            "اتصال به هوشینگ‌فیس ممکن نشد: {e} — اگر اینترنتتان از پروکسی/VPN می‌رود، در بخش «🔌 پروکسی» آدرسش را وارد کنید (مثلاً http://127.0.0.1:7890) و «آزمون اتصال» را بزنید."
+        ));
+    }
     let snapshot = {
         let mut guard = ENGINE.lock().unwrap_or_else(|p| p.into_inner());
         if guard.queue.is_none() {
@@ -424,12 +432,24 @@ pub async fn models_stop(job_id: String) -> Result<serde_json::Value, String> {
 }
 
 /// Remove a job from the queue (downloaded files stay on disk).
+///
+/// v0.26.3: removing the ACTIVE job now auto-stops its download. The old
+/// behavior was a dead end: remove refused the active job, and pause/stop
+/// could not interrupt a stalled network wait — the user could neither
+/// cancel nor delete.
 #[tauri::command]
 pub async fn models_remove(job_id: String) -> Result<serde_json::Value, String> {
     {
-        let guard = ENGINE.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = ENGINE.lock().unwrap_or_else(|p| p.into_inner());
         if guard.active.as_deref() == Some(job_id.as_str()) {
-            return Err("اول دانلود را معلق یا متوقف کنید".into());
+            if let Some(c) = &guard.cancel {
+                hf::ctrl_set(c, Ctrl::Stop);
+            }
+            // the spawned task exits within ~200ms (ctrl watcher); it may
+            // touch the queue once more — set_file_state is a no-op for a
+            // missing job, so this is safe.
+            guard.active = None;
+            guard.cancel = None;
         }
     }
     with_queue(|q, _p| {
