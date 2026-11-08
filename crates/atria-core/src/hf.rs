@@ -21,10 +21,54 @@ use std::time::Duration;
 
 pub const HF_API: &str = "https://huggingface.co/api";
 pub const HF_WEB: &str = "https://huggingface.co";
+/// v0.27.0: mirror fallback. On filtered networks the primary domain is
+/// often the one that is blocked/stalled while the mirror answers — the
+/// download engine alternates sources per attempt, and API calls fall back
+/// automatically.
+pub const HF_MIRROR_WEB: &str = "https://hf-mirror.com";
+/// (base url, display name) — primary first.
+pub const HF_SOURCES: [(&str, &str); 2] = [
+    (HF_WEB, "huggingface.co"),
+    (HF_MIRROR_WEB, "hf-mirror.com"),
+];
 
 const MAX_DEPTH: usize = 3;
-const RETRIES: u32 = 3;
+// v0.27.0: 4 attempts so each of the 2 sources gets a second chance
+// (pattern: primary, mirror, primary, mirror).
+const RETRIES: u32 = 4;
 const BACKOFF_MS: u64 = 1200;
+
+/// GET + JSON against the HF sources in order. Network-level failures and
+/// 403 (a common filtered-network signal) fall through to the next source;
+/// other HTTP errors are returned as-is.
+async fn get_json_fallback(
+    build: &(dyn Fn(&str) -> String + Sync),
+    repo: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let mut last_err = String::new();
+    for (base, _name) in HF_SOURCES {
+        let url = build(base);
+        let resp = match http_client().get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("اتصال به هوشینگ‌فیس ممکن نشد: {e}");
+                continue;
+            }
+        };
+        let status = resp.status();
+        if status == reqwest::StatusCode::FORBIDDEN {
+            last_err = hf_err_text(Some(status), "دسترسی رد شد", repo);
+            continue;
+        }
+        return resp
+            .error_for_status()
+            .map_err(|e| hf_http_err(e, repo))?
+            .json()
+            .await
+            .map_err(|e| format!("پاسخ هوشینگ‌فیس معتبر نبود: {e}"));
+    }
+    Err(last_err)
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -190,26 +234,24 @@ pub async fn search_models(
     limit: usize,
 ) -> Result<Vec<HfModel>, String> {
     let limit = limit.clamp(1, 40);
-    let mut url = format!(
-        "{HF_API}/models?limit={limit}&sort=downloads&direction=-1"
-    );
     let q = query.trim();
-    if !q.is_empty() {
-        url.push_str(&format!("&search={}", urlenc(q)));
-    }
-    if let Some(tag) = pipeline.map(str::trim).filter(|t| !t.is_empty()) {
-        url.push_str(&format!("&filter={}", urlenc(tag)));
-    }
-    let v: Vec<serde_json::Value> = http_client()
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("اتصال به Hugging Face ممکن نشد: {e}"))?
-        .error_for_status()
-        .map_err(|e| hf_http_err(e, None))?
-        .json()
-        .await
-        .map_err(|e| format!("پاسخ Hugging Face معتبر نبود: {e}"))?;
+    let tag = pipeline.map(str::trim).filter(|t| !t.is_empty());
+    // v0.27.0: automatic mirror fallback (primary base passed per attempt)
+    let val = get_json_fallback(&|base| {
+        let mut url = format!("{base}/api/models?limit={limit}&sort=downloads&direction=-1");
+        if !q.is_empty() {
+            url.push_str(&format!("&search={}", urlenc(q)));
+        }
+        if let Some(t) = tag {
+            url.push_str(&format!("&filter={}", urlenc(t)));
+        }
+        url
+    }, None)
+    .await?;
+    let v: Vec<serde_json::Value> = match val.as_array() {
+        Some(a) => a.clone(),
+        None => return Err("پاسخ هوشینگ‌فیس معتبر نبود".into()),
+    };
     Ok(v
         .into_iter()
         .filter_map(|m| {
@@ -230,17 +272,16 @@ pub async fn repo_files(repo: &str) -> Result<Vec<HfFile>, String> {
     if !is_repo_id(repo) {
         return Err("repo id نامعتبر است — شکل: `org/model-name`".into());
     }
-    let url = tree_url(repo);
-    let v: Vec<serde_json::Value> = http_client()
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("اتصال به Hugging Face ممکن نشد: {e}"))?
-        .error_for_status()
-        .map_err(|e| hf_http_err(e, Some(repo)))?
-        .json()
-        .await
-        .map_err(|e| format!("Hugging Face response is not JSON: {e}"))?;
+    // v0.27.0: automatic mirror fallback (primary base passed per attempt)
+    let val = get_json_fallback(
+        &|base| format!("{base}/api/models/{repo}/tree/main?recursive=true"),
+        Some(repo),
+    )
+    .await?;
+    let v: Vec<serde_json::Value> = match val.as_array() {
+        Some(a) => a.clone(),
+        None => return Err("پاسخ هوشینگ‌فیس معتبر نبود".into()),
+    };
     let mut out = Vec::new();
     for item in v {
         if item.get("type").and_then(|t| t.as_str()) != Some("file") {
@@ -315,6 +356,28 @@ fn hf_http_err(e: reqwest::Error, repo: Option<&str>) -> String {
 }
 
 /// Direct download URL for a file in a repo (main branch).
+/// v0.27.0: every source the file can be fetched from, primary first.
+/// The download engine alternates them per attempt — a filtered network
+/// that stalls one domain usually answers on the other.
+pub fn file_sources(repo: &str, path: &str) -> Vec<(String, String)> {
+    let mut out = Vec::with_capacity(HF_SOURCES.len());
+    for (base, name) in HF_SOURCES {
+        out.push((file_url_base(base, repo, path), name.to_string()));
+    }
+    out
+}
+
+fn file_url_base(base: &str, repo: &str, path: &str) -> String {
+    let mut out = format!("{base}/{repo}/resolve/main/", repo = repo.trim());
+    for (i, seg) in path.trim_start_matches('/').split('/').enumerate() {
+        if i > 0 {
+            out.push('/');
+        }
+        out.push_str(&urlenc(seg));
+    }
+    out
+}
+
 pub fn file_url(repo: &str, path: &str) -> String {
     let mut out = format!("{HF_WEB}/{}/resolve/main/", repo.trim());
     for (i, seg) in path.trim_start_matches('/').split('/').enumerate() {
@@ -454,14 +517,14 @@ async fn ctrl_wait_any(ctrl: &AtomicU8) {
 /// Returns [`DlOutcome::Done`] when the file is complete, [`DlOutcome::Paused`]
 /// when the user paused (`.part` kept), or `Err("cancelled")` on stop.
 pub async fn download_file(
-    url: &str,
+    sources: &[(String, String)],
     token: Option<&str>,
     dest: &Path,
     ctrl: &AtomicU8,
-    progress: impl FnMut(u64, u64),
+    progress: impl FnMut(u64, u64, &str),
 ) -> Result<DlOutcome, String> {
     download_file_timed(
-        url,
+        sources,
         token,
         dest,
         ctrl,
@@ -473,22 +536,29 @@ pub async fn download_file(
 }
 
 /// Same as [`download_file`] with explicit watchdog timeouts (tests use short values).
+///
+/// `sources` = (url, display name) pairs, tried round-robin across attempts:
+/// a domain that stalls for the first-byte window hands off to the mirror,
+/// so one filtered hop does not kill the whole download.
 pub async fn download_file_timed(
-    url: &str,
+    sources: &[(String, String)],
     token: Option<&str>,
     dest: &Path,
     ctrl: &AtomicU8,
-    mut progress: impl FnMut(u64, u64),
+    mut progress: impl FnMut(u64, u64, &str),
     first_byte: Duration,
     inactive: Duration,
 ) -> Result<DlOutcome, String> {
+    if sources.is_empty() {
+        return Err("no download source".into());
+    }
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("cannot create folder: {e}"))?;
     }
     if dest.exists() {
         // already complete (e.g. resumed job)
         let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
-        progress(size, size);
+        progress(size, size, sources[0].1.as_str());
         return Ok(DlOutcome::Done);
     }
     let part = part_path(dest);
@@ -500,6 +570,8 @@ pub async fn download_file_timed(
         if ctrl_get(ctrl) == Ctrl::Stop {
             return Err("cancelled".into());
         }
+        // round-robin over sources: primary, mirror, primary, mirror…
+        let (url, src) = &sources[(attempt as usize) % sources.len()];
         let req = {
             let mut req = http_client().get(url);
             if existing > 0 {
@@ -555,7 +627,7 @@ pub async fn download_file_timed(
                     // part file already complete → finalize
                     let _ = std::fs::rename(&part, dest);
                     let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
-                    progress(size, size);
+                    progress(size, size, src);
                     return Ok(DlOutcome::Done);
                 }
 
@@ -563,7 +635,7 @@ pub async fn download_file_timed(
                     Some(t) => existing + t,
                     None => 0,
                 };
-                progress(existing, total);
+                progress(existing, total, src);
 
                 let mut stream = resp.bytes_stream();
                 // append(true) in both cases: new file (empty) or resume at end of `.part`
@@ -591,7 +663,7 @@ pub async fn download_file_timed(
                                     }
                                     existing += bytes.len() as u64;
                                     got_bytes = true;
-                                    progress(existing, total);
+                                    progress(existing, total, src);
                                     // checked per-chunk (data flowing) AND via the
                                     // ctrl race below (network silent) — pause/stop
                                     // must never miss a signal in either case
@@ -644,7 +716,7 @@ pub async fn download_file_timed(
                 if stream_done {
                     let _ = std::fs::rename(&part, dest);
                     let size = dest.metadata().map(|m| m.len()).unwrap_or(0);
-                    progress(size, total.max(size));
+                    progress(size, total.max(size), src);
                     return Ok(DlOutcome::Done);
                 }
                 // retryable failure (stall / stream error / write) → resume via Range
@@ -689,18 +761,23 @@ fn http_client() -> reqwest::Client {
 }
 
 /// Quick reachability probe behind the «آزمون اتصال» button.
-/// Returns elapsed milliseconds on success, a Persian error otherwise.
-pub async fn ping_hf() -> Result<u128, String> {
-    let started = std::time::Instant::now();
-    let r = http_client()
-        .get(format!("{HF_API}/models?limit=1"))
-        .send()
-        .await
-        .map_err(|e| hf_http_err(e, None))?;
-    if !r.status().is_success() {
-        return Err(hf_err_text(Some(r.status()), "هوشینگ‌فیس پاسخ درست نداد", None));
+/// Returns (elapsed_ms, source that answered) on success, a Persian error
+/// after ALL sources were tried otherwise.
+pub async fn ping_hf() -> Result<(u128, String), String> {
+    let mut last_err = String::new();
+    for (base, name) in HF_SOURCES {
+        let started = std::time::Instant::now();
+        match http_client().get(format!("{base}/api/models?limit=1")).send().await {
+            Ok(r) if r.status().is_success() => {
+                return Ok((started.elapsed().as_millis(), name.to_string()));
+            }
+            Ok(r) => {
+                last_err = hf_err_text(Some(r.status()), "هوشینگ‌فیس پاسخ درست نداد", None);
+            }
+            Err(e) => last_err = hf_http_err(e, None),
+        }
     }
-    Ok(started.elapsed().as_millis())
+    Err(last_err)
 }
 
 // ---------------------------------------------------------------------------
@@ -712,6 +789,11 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+
+    /// single-source list for engine tests (multi-source is tested separately)
+    fn srcs(url: &str) -> Vec<(String, String)> {
+        vec![(url.to_string(), "test-source".to_string())]
+    }
 
     #[test]
     fn repo_id_validation() {
@@ -989,7 +1071,7 @@ mod tests {
         let ctrl = ctrl_cell();
         let fired = Arc::new(AtomicBool::new(false));
         let f2 = fired.clone();
-        let res = download_file(&url, None, &dest, &ctrl, |_d, _t| {
+        let res = download_file(&srcs(&url), None, &dest, &ctrl, |_d, _t, _src| {
             if !f2.swap(true, Ordering::SeqCst) {
                 ctrl_set(&ctrl, Ctrl::Pause);
             }
@@ -1003,7 +1085,7 @@ mod tests {
 
         // 2) resume → completes with byte-exact content via HTTP Range
         let ctrl2 = ctrl_cell();
-        let res = download_file(&url, None, &dest, &ctrl2, |_d, _t| {}).await.unwrap();
+        let res = download_file(&srcs(&url), None, &dest, &ctrl2, |_d, _t, _src| {}).await.unwrap();
         assert_eq!(res, DlOutcome::Done);
         assert_eq!(std::fs::read(&dest).unwrap(), body, "resumed bytes must match");
         assert!(!part.exists(), "part renamed to final file");
@@ -1017,7 +1099,7 @@ mod tests {
         // 4) re-running on the finished file is an instant Done (no re-download)
         let ctrl3 = ctrl_cell();
         assert_eq!(
-            download_file(&url, None, &dest, &ctrl3, |_d, _t| {}).await.unwrap(),
+            download_file(&srcs(&url), None, &dest, &ctrl3, |_d, _t, _src| {}).await.unwrap(),
             DlOutcome::Done
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -1036,7 +1118,7 @@ mod tests {
         let ctrl = ctrl_cell();
         let fired = Arc::new(AtomicBool::new(false));
         let f2 = fired.clone();
-        let res = download_file(&url, None, &dest, &ctrl, |_d, _t| {
+        let res = download_file(&srcs(&url), None, &dest, &ctrl, |_d, _t, _src| {
             if !f2.swap(true, Ordering::SeqCst) {
                 ctrl_set(&ctrl, Ctrl::Stop);
             }
@@ -1063,7 +1145,7 @@ mod tests {
         // seed a partial part (pretend a previous run was interrupted)
         std::fs::write(&part, &body[..4096]).unwrap();
         let ctrl = ctrl_cell();
-        let res = download_file(&url, None, &dest, &ctrl, |_d, _t| {}).await.unwrap();
+        let res = download_file(&srcs(&url), None, &dest, &ctrl, |_d, _t, _src| {}).await.unwrap();
         assert_eq!(res, DlOutcome::Done);
         assert_eq!(std::fs::read(&dest).unwrap(), body);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1086,7 +1168,7 @@ mod tests {
         let dest = dir.join(&f.path);
         let ctrl = ctrl_cell();
         let mut max_prog = 0u64;
-        let res = download_file(&file_url("karpathy/tinyllamas", &f.path), None, &dest, &ctrl, |d, _t| {
+        let res = download_file(&srcs(&file_url("karpathy/tinyllamas", &f.path)), None, &dest, &ctrl, |d, _t, _src| {
             max_prog = max_prog.max(d);
         })
         .await
@@ -1171,7 +1253,7 @@ mod tests {
         let ctrl = AtomicU8::new(0);
         let t0 = std::time::Instant::now();
         let r = download_file_timed(
-            &format!("http://{addr}/f.bin"), None, &dest, &ctrl, |_d, _t| {},
+            &srcs(&format!("http://{addr}/f.bin")), None, &dest, &ctrl, |_d, _t, _src| {},
             Duration::from_secs(5), Duration::from_secs(5),
         )
         .await;
@@ -1191,7 +1273,7 @@ mod tests {
         let ctrl = AtomicU8::new(0);
         let t0 = std::time::Instant::now();
         let r = download_file_timed(
-            &format!("http://{addr}/s.bin"), None, &dest, &ctrl, |_d, _t| {},
+            &srcs(&format!("http://{addr}/s.bin")), None, &dest, &ctrl, |_d, _t, _src| {},
             Duration::from_millis(300), Duration::from_millis(300),
         )
         .await;
@@ -1216,7 +1298,7 @@ mod tests {
         });
         let t0 = std::time::Instant::now();
         let r = download_file_timed(
-            &format!("http://{addr}/x.bin"), None, &dest, &ctrl, |_d, _t| {},
+            &srcs(&format!("http://{addr}/x.bin")), None, &dest, &ctrl, |_d, _t, _src| {},
             Duration::from_secs(5), Duration::from_secs(5),
         )
         .await;
@@ -1224,6 +1306,41 @@ mod tests {
         assert_eq!(r, Err("cancelled".into()), "expected cancelled: {r:?}");
         assert!(elapsed < Duration::from_secs(5), "stop took {elapsed:?}");
         assert!(!dest.exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn dl_v270_falls_back_to_mirror_when_primary_stalls() {
+        // The v0.27.0 story: a filtered hop accepts the primary connection
+        // but sends nothing. The engine must hand off to the mirror and
+        // finish — and report which source served the data.
+        let primary = dl_test_server("stall-headers").await;
+        let mirror = dl_test_server("fast").await;
+        let d = dl_tmp_dir("fallback");
+        let dest = d.join("fb.bin");
+        let ctrl = AtomicU8::new(0);
+        let got_source = Arc::new(std::sync::Mutex::new(None));
+        let gs = got_source.clone();
+        let t0 = std::time::Instant::now();
+        let r = download_file_timed(
+            &[
+                (format!("http://{primary}/a.bin"), "primary".to_string()),
+                (format!("http://{mirror}/b.bin"), "mirror".to_string()),
+            ],
+            None,
+            &dest,
+            &ctrl,
+            |_d, _t, src| {
+                *gs.lock().unwrap() = Some(src.to_string());
+            },
+            Duration::from_millis(400),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(matches!(r, Ok(DlOutcome::Done)), "expected Done via mirror: {r:?}");
+        assert_eq!(*got_source.lock().unwrap(), Some("mirror".to_string()));
+        assert!(t0.elapsed() < Duration::from_secs(20));
+        assert_eq!(std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0), 5);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

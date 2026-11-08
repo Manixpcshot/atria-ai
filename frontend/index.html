@@ -692,10 +692,11 @@
       <header class="mp-topbar">
         <button class="mp-back" id="modelsX" type="button" aria-label="بازگشت به چت">← بازگشت</button>
         <div class="mp-title">
-          <h2 id="modelsTitle">📦 مدل‌ها — Hugging Face</h2>
-          <p class="mp-sub">جست‌وجو و دانلود مدل (عکس، LLM) با صف و پیشرفت + اجرای محلی مدل‌های متنی</p>
+          <h2 id="modelsTitle">📦 مدل‌های سیستمی</h2>
+          <p class="mp-sub">دانلودگر چندمنبعه — اگر سرور اصلی کند/مسدود باشد، خودکار آینه را امتحان می‌کند</p>
         </div>
         <div class="mp-meta">
+          <span class="mp-version-chip" id="modelsVersion" title="نسخهٔ نصب‌شدهٔ Atria (امکان می‌دهد نسخهٔ تازه رسیده است یا نه)">…</span>
           <span class="models-free" id="modelsFree"></span>
           <span class="models-folder" id="modelsFolder" dir="ltr">…</span>
           <button class="btn tiny" id="modelsFolderPick" type="button">📁 تغییر پوشه</button>
@@ -717,33 +718,42 @@
           <div class="models-results" id="modelsResults"></div>
         </section>
         <aside class="mp-side">
+          <section class="mp-panel mp-active-panel">
+            <h3 class="models-h">⚡ دانلود فعال</h3>
+            <div class="mp-active-body" id="modelsActive"></div>
+          </section>
           <section class="mp-panel">
             <h3 class="models-h">📥 صف دانلود</h3>
             <div class="models-queue" id="modelsQueue"></div>
           </section>
-          <section class="mp-panel">
-            <label class="flabel">🧠 اجرای محلی (llama.cpp) — مدل‌های متنی، بدون اینترنت</label>
-            <div class="llama-box" id="llamaBox">
-              <div class="llama-state" id="llamaState">در حال بررسی…</div>
-              <div class="llama-controls" id="llamaControls"></div>
-            </div>
-          </section>
-          <section class="mp-panel">
-            <label class="flabel">🔑 توکن Hugging Face <span class="models-optional">(اختیاری — مدل‌های خصوصی)</span></label>
-            <div class="models-folder-row">
-              <input type="password" id="hfToken" dir="ltr" placeholder="hf_…" autocomplete="off">
-              <button class="btn tiny" id="hfTokenSave" type="button">ذخیره</button>
-            </div>
-          </section>
-          <section class="mp-panel">
-            <label class="flabel">🔌 پروکسی <span class="models-optional">(اختیاری — اگر مستقیم به هوشینگ‌فیس وصل نمی‌شوید)</span></label>
-            <div class="models-folder-row">
-              <input type="text" id="hfProxy" dir="ltr" placeholder="http://127.0.0.1:7890" spellcheck="false">
-              <button class="btn tiny" id="hfProxySave" type="button">ذخیره</button>
-              <button class="btn tiny" id="hfConnTest" type="button">آزمون اتصال</button>
-            </div>
-            <div class="hf-proxy-hint">اگر با V2Ray/Clash اینترنت دارید، آدرس + پورتش را از تنظیمات همان برنامه ببینید (معمولاً <span dir="ltr">http://127.0.0.1:7890</span>) — بدون پروکسی، دانلود روی شبکه‌های فیلترشده کار نمی‌کند.</div>
-            <div class="hf-proxy-result" id="hfConnResult"></div>
+          <section class="mp-panel mp-settings-panel">
+            <details class="mp-settings" open>
+              <summary>⚙ تنظیمات (موتور محلی · توکن · پروکسی)</summary>
+              <div class="mp-setblock">
+                <label class="flabel">🧠 اجرای محلی (llama.cpp) — مدل‌های متنی، بدون اینترنت</label>
+                <div class="llama-box" id="llamaBox">
+                  <div class="llama-state" id="llamaState">در حال بررسی…</div>
+                  <div class="llama-controls" id="llamaControls"></div>
+                </div>
+              </div>
+              <div class="mp-setblock">
+                <label class="flabel">🔑 توکن Hugging Face <span class="models-optional">(اختیاری — مدل‌های خصوصی)</span></label>
+                <div class="models-folder-row">
+                  <input type="password" id="hfToken" dir="ltr" placeholder="hf_…" autocomplete="off">
+                  <button class="btn tiny" id="hfTokenSave" type="button">ذخیره</button>
+                </div>
+              </div>
+              <div class="mp-setblock">
+                <label class="flabel">🔌 پروکسی <span class="models-optional">(اختیاری — برای دانلود و خودبه‌روزشدن)</span></label>
+                <div class="models-folder-row">
+                  <input type="text" id="hfProxy" dir="ltr" placeholder="http://127.0.0.1:7890" spellcheck="false">
+                  <button class="btn tiny" id="hfProxySave" type="button">ذخیره</button>
+                  <button class="btn tiny" id="hfConnTest" type="button">آزمون اتصال</button>
+                </div>
+                <div class="hf-proxy-hint">اگر با V2Ray/Clash اینترنت دارید، آدرس + پورتش را از تنظیمات همان برنامه ببینید (معمولاً <span dir="ltr">http://127.0.0.1:7890</span>) — این پروکسی هم برای دانلود مدل‌ها و هم برای خودبه‌روزشدن اپلیکیشن استفاده می‌شود.</div>
+                <div class="hf-proxy-result" id="hfConnResult"></div>
+              </div>
+            </details>
           </section>
         </aside>
       </div>

@@ -1179,6 +1179,7 @@ function cacheEls() {
     hfProxy: $('#hfProxy'), hfProxySave: $('#hfProxySave'), hfConnTest: $('#hfConnTest'), hfConnResult: $('#hfConnResult'),
     modelsSearch: $('#modelsSearch'), modelsTabs: $('#modelsTabs'), modelsSearchBtn: $('#modelsSearchBtn'),
     modelsResults: $('#modelsResults'), modelsQueue: $('#modelsQueue'),
+    modelsVersion: $('#modelsVersion'), modelsActive: $('#modelsActive'),
     btnStudio: $('#btnStudio'), studioModal: $('#studioModal'), studioX: $('#studioX'),
     studioSources: $('#studioSources'), studioCfg: $('#studioCfg'),
     studioPrompt: $('#studioPrompt'), studioNegative: $('#studioNegative'),
@@ -4630,6 +4631,7 @@ async function v24RefreshModels() {
   } catch (e) { return; }
   v24RenderModelsFolder();
   v24RenderQueue();
+  v24RenderActive();
 }
 function v24RenderModelsFolder() {
   if (!els.modelsFolder) return;
@@ -4666,6 +4668,117 @@ function v24RenderQueue() {
   for (const job of jobs) els.modelsQueue.appendChild(v24QueueRow(job));
   if (!v24models.active) {
     els.modelsQueue.appendChild(v24El('div', 'q-hint', 'دانلودها یکی‌در‌میان انجام می‌شوند — روی «⬇ دانلود» کارت مدل یا «▶ شروع» صف بزنید.'));
+  }
+}
+
+// v0.27.0: download manager — big live card for the active job with
+// real-time speed + ETA + the source actually serving the bytes.
+const v24speed = {}; // job.id -> { b, ts, v, src, file }
+
+function v24SpeedOf(jobId, ev) {
+  if (!ev || ev.state !== 'downloading') return;
+  const now = Date.now();
+  let last = v24speed[jobId];
+  const b = ev.downloaded || 0;
+  if (!last || (ev.file && last.file !== ev.file)) {
+    last = { b, ts: now, v: 0, src: ev.source || '', file: ev.file || '' };
+  } else if (b > last.b && now > last.ts) {
+    last.v = (b - last.b) / ((now - last.ts) / 1000);
+    if (last.v > 500 * 1048576) last.v = 500 * 1048576; // clamp absurd samples
+  }
+  if (ev.source) last.src = ev.source;
+  if (ev.file) last.file = ev.file;
+  last.b = b;
+  last.ts = now;
+  v24speed[jobId] = last;
+}
+function v24Dur(s) {
+  if (!isFinite(s) || s <= 0) return '—';
+  if (s < 60) return Math.ceil(s) + ' ثانیه';
+  if (s < 3600) return Math.ceil(s / 60) + ' دقیقه';
+  return Math.ceil(s / 3600) + ' ساعت';
+}
+function v24RenderActive() {
+  if (!els.modelsActive) return;
+  const box = els.modelsActive;
+  let job = (v24models.jobs || []).find((j) => j.id === v24models.active);
+  // a paused job keeps its card (the user is still looking at it)
+  if (!job) job = (v24models.jobs || []).find((j) => v24JobState(j) === 'paused');
+  box.textContent = '';
+  if (!job) {
+    box.appendChild(v24El('div', 'mp-active-empty', 'دانلودی فعال نیست — از ستون جست‌وجو «⬇ دانلود» بزنید.'));
+    return;
+  }
+  const state = v24JobState(job);
+  v24ActivePaint(box, job, state);
+}
+function v24ActivePaint(box, job, state) {
+  const total = job.files.reduce((a, f) => a + (f.size || 0), 0);
+  const doneB = job.files.reduce((a, f) => a + (f.state === 'done' ? (f.size || 0) : (f.downloaded || 0)), 0);
+  const pct = total > 0 ? Math.round((doneB / total) * 100) : 0;
+  const cur = job.files.find((f) => f.state === 'downloading') || job.files.find((f) => f.state !== 'done') || {};
+  const sp = v24speed[job.id];
+  const speed = sp && sp.v > 0 ? sp.v : 0;
+  const eta = speed > 0 && total > doneB ? (total - doneB) / speed : 0;
+  const card = v24El('div', 'mp-active ' + state);
+  const top = v24El('div', 'mp-active-top');
+  const repo = v24El('span', 'mp-active-repo', job.repo);
+  repo.dir = 'ltr';
+  top.appendChild(repo);
+  const badge = v24El('span', 'mp-source-badge ' + state,
+    state === 'downloading' ? ('سرور: ' + (sp && sp.src ? sp.src : '…'))
+      : state === 'paused' ? '⏸ متوقف' : 'در صف');
+  top.appendChild(badge);
+  card.appendChild(top);
+  const bar = v24El('div', 'mp-active-bar');
+  const fill = v24El('div', 'mp-active-fill');
+  fill.style.width = pct + '%';
+  bar.appendChild(fill);
+  card.appendChild(bar);
+  const stats = v24El('div', 'mp-active-stats');
+  stats.appendChild(v24El('span', 'mp-stat', v24Bytes(doneB) + ' از ' + v24Bytes(total)));
+  stats.appendChild(v24El('span', 'mp-stat mp-stat-speed', state === 'downloading' ? (speed > 0 ? (speed / 1048576).toFixed(1) + ' MB/s' : 'در حال اتصال/اندازه‌گیری…') : '—'));
+  stats.appendChild(v24El('span', 'mp-stat mp-stat-eta', state === 'downloading' && speed > 0 ? 'باقی: ' + v24Dur(eta) : '—'));
+  stats.appendChild(v24El('span', 'mp-stat', job.files.filter((f) => f.state === 'done').length + '/' + job.files.length + ' فایل'));
+  card.appendChild(stats);
+  if (cur.path) card.appendChild(v24El('div', 'mp-active-file', 'فایل فعلی: ' + cur.path));
+  const acts = v24El('div', 'mp-active-acts');
+  if (state !== 'done') {
+    const pause = v24El('button', 'btn primary tiny', state === 'paused' ? '▶ ادامه' : '⏸ توقف');
+    pause.onclick = () => (state === 'paused' ? v24StartJob(job.id) : v24PauseJob(job.id));
+    acts.appendChild(pause);
+    const stop = v24El('button', 'btn tiny', '⏹ لغو فایل');
+    stop.onclick = () => v24StopJob(job.id);
+    acts.appendChild(stop);
+    const rm = v24El('button', 'btn tiny', '🗑 حذف از صف');
+    rm.onclick = () => { if (!window.confirm || window.confirm('این مدل از صف حذف شود؟ (فایل‌های دانلودشده می‌مانند)')) v24RemoveJob(job.id); };
+    acts.appendChild(rm);
+  }
+  card.appendChild(acts);
+  box.appendChild(card);
+}
+function v24ActiveUpdate(ev, job) {
+  // in-place fast path (buttons must survive high-frequency progress events)
+  const ab = els.modelsActive && els.modelsActive.querySelector('.mp-active');
+  if (!ab) { v24RenderActive(); return; }
+  const pct = Math.round(v24JobProgress(job) * 100);
+  const pctEl = ab.querySelector('.mp-active-bar');
+  if (pctEl) { const f = pctEl.querySelector('.mp-active-fill'); if (f) f.style.width = pct + '%'; }
+  const total = job.files.reduce((a, f) => a + (f.size || 0), 0);
+  const doneB = job.files.reduce((a, f) => a + (f.state === 'done' ? (f.size || 0) : (f.downloaded || 0)), 0);
+  const st = ab.querySelectorAll('.mp-stat');
+  if (st[0]) st[0].textContent = v24Bytes(doneB) + ' از ' + v24Bytes(total);
+  const sp = v24speed[job.id];
+  const speed = sp && sp.v > 0 ? sp.v : 0;
+  if (st[1]) st[1].textContent = speed > 0 ? (speed / 1048576).toFixed(1) + ' MB/s' : 'در حال اتصال/اندازه‌گیری…';
+  if (st[2]) st[2].textContent = speed > 0 && total > doneB ? 'باقی: ' + v24Dur((total - doneB) / speed) : '—';
+  if (st[3]) st[3].textContent = job.files.filter((f) => f.state === 'done').length + '/' + job.files.length + ' فایل';
+  const badge = ab.querySelector('.mp-source-badge');
+  if (badge && sp && sp.src) { badge.textContent = 'سرور: ' + sp.src; }
+  if (ev.file) {
+    let fl = ab.querySelector('.mp-active-file');
+    if (!fl) { fl = v24El('div', 'mp-active-file'); ab.insertBefore(fl, ab.querySelector('.mp-active-acts') || null); }
+    fl.textContent = 'فایل فعلی: ' + ev.file;
   }
 }
 
@@ -4776,9 +4889,13 @@ function v24ApplyProgress(ev) {
     }
   }
   if (ev.state === 'done' || ev.state === 'paused' || ev.state === 'error' || ev.state === 'stopped') {
+    delete v24speed[ev.job_id];
     v24RenderQueue();
+    v24RenderActive();
     return;
   }
+  // v0.27.0: speed/ETA telemetry + which source is serving the bytes
+  v24SpeedOf(ev.job_id, ev);
   // downloading: update the existing row in place (cheap)
   const row = els.modelsQueue && els.modelsQueue.querySelector('.q-row[data-job="' + ev.job_id + '"]');
   if (row) {
@@ -4793,6 +4910,7 @@ function v24ApplyProgress(ev) {
   } else {
     v24RenderQueue();
   }
+  v24ActiveUpdate(ev, job);
 }
 
 async function v24StartJob(id) {
@@ -5136,6 +5254,13 @@ function openModels() {
   if (!els.modelsModal) return;
   openModal(els.modelsModal);
   v24RefreshModels();
+  // v0.27.0: version chip — visible proof of which build is actually running
+  v24Atr('app_meta').then((m) => {
+    if (m && m.version && els.modelsVersion) {
+      els.modelsVersion.textContent = 'v' + m.version;
+      els.modelsVersion.title = 'نسخهٔ نصب‌شدهٔ Atria — اگر تازه‌ترین نسخه نیست، بخش «خودبه‌روزی» را در تنظیمات چک کنید';
+    }
+  }).catch(() => {});
   v25LlamaRefresh();
   v24Atr('models_hf_token_get').then((t) => { if (t && els.hfToken) els.hfToken.value = t; }).catch(() => {});
   v24Atr('models_proxy_get').then((r) => { if (r && els.hfProxy) els.hfProxy.value = r.url || ''; }).catch(() => {});

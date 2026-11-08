@@ -81,13 +81,27 @@ fn verify_manifest(bytes: &[u8], signature_hex: &str, release_tag: &str) -> Resu
     Ok(manifest)
 }
 
-async fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
+/// v0.27.0: the updater now honors the user-configured proxy (models page)
+/// and falls back to the OS system proxy (WinINET / Clash system mode) —
+/// before, a filtered network meant auto-update could NEVER reach GitHub,
+/// so users stayed on old versions and fixes never arrived.
+fn client(timeout: Duration) -> Result<reqwest::Client, String> {
+    let mut b = reqwest::Client::builder()
         .user_agent(format!("Atria/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(35))
-        .build()
+        .timeout(timeout)
+        .connect_timeout(Duration::from_secs(15));
+    if let Some(p) = atria_core::proxy::current() {
+        if let Ok(pr) = reqwest::Proxy::all(&p) {
+            b = b.proxy(pr);
+        }
+    }
+    b.build()
         .map_err(|e| format!("cannot initialize update client: {e}"))
 }
+
+const API_TIMEOUT: Duration = Duration::from_secs(35);
+// the verified executable is ~12 MB — a slow line needs far more than 35 s
+const EXE_TIMEOUT: Duration = Duration::from_secs(600);
 
 async fn response_bytes(response: reqwest::Response) -> Result<Vec<u8>, String> {
     let status = response.status();
@@ -102,7 +116,7 @@ async fn response_bytes(response: reqwest::Response) -> Result<Vec<u8>, String> 
 }
 
 async fn latest_verified() -> Result<(SignedManifest, reqwest::Client), String> {
-    let http = client().await?;
+    let http = client(API_TIMEOUT)?;
     let api = format!("https://api.github.com/repos/{REPOSITORY}/releases/latest");
     let release_resp = http.get(api).header("Accept", "application/vnd.github+json").send().await
         .map_err(|e| format!("cannot check for updates: {e}"))?;
@@ -139,7 +153,7 @@ pub async fn check() -> Result<UpdateStatus, String> {
 }
 
 pub async fn download_verified_executable() -> Result<(String, std::path::PathBuf), String> {
-    let (manifest, http) = latest_verified().await?;
+    let (manifest, _http) = latest_verified().await?;
     let current = env!("CARGO_PKG_VERSION");
     if version_tuple(&manifest.version)? <= version_tuple(current)? {
         return Err("Atria is already up to date".into());
@@ -148,6 +162,8 @@ pub async fn download_verified_executable() -> Result<(String, std::path::PathBu
     if asset.size > MAX_UPDATE_BYTES as u64 {
         return Err("update executable exceeds the safety size limit".into());
     }
+    // dedicated long-timeout client for the ~12 MB executable (v0.27.0)
+    let http = client(EXE_TIMEOUT)?;
     let bytes = response_bytes(http.get(&asset.url).send().await.map_err(|e| format!("cannot download update: {e}"))?).await?;
     if bytes.len() as u64 != asset.size {
         return Err("downloaded executable size does not match the signed manifest".into());

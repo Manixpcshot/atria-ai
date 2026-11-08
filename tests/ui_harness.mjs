@@ -210,7 +210,7 @@ for (const id of ['frame', 'messages', 'empty', 'input', 'btnSend', 'btnStop', '
   'stars', 'appVer', 'tokChip',
   // v0.24.0: image chip + model library + image studio
   'imgChip', 'btnModels', 'modelsModal', 'modelsX', 'modelsFolder', 'modelsFolderPick', 'modelsFree', 'hfToken', 'hfTokenSave', 'hfProxy', 'hfProxySave', 'hfConnTest', 'hfConnResult',
-  'modelsSearch', 'modelsTabs', 'modelsSearchBtn', 'modelsResults', 'modelsQueue',
+  'modelsSearch', 'modelsTabs', 'modelsSearchBtn', 'modelsResults', 'modelsQueue', 'modelsVersion', 'modelsActive',
   'btnStudio', 'studioModal', 'studioX', 'studioSources', 'studioCfg', 'studioPrompt', 'studioNegative',
   'studioSize', 'studioN', 'studioSteps', 'studioGen', 'studioResult', 'galleryGrid', 'galleryReveal']) addId(id);
 byId.connsBody.classList.add('conns-body');
@@ -362,7 +362,7 @@ function router(cmd, args = {}) {
     // v0.26.2: optional proxy (direct connect is blocked on filtered networks)
     case 'models_set_proxy': v24ProxyUrl = (args.url || '').trim(); return Promise.resolve({ ok: true, url: v24ProxyUrl });
     case 'models_proxy_get': return Promise.resolve({ url: v24ProxyUrl });
-    case 'models_test_conn': return Promise.resolve({ ok: true, message: 'وصل شد ✓ — هوشینگ‌فیس در دسترس است (123 ms)' });
+    case 'models_test_conn': return Promise.resolve({ ok: true, message: 'وصل شد ✓ — از hf-mirror.com (123 ms)' });
     // v0.24.0: image studio
     case 'img_generate': {
       if (args.source.kind === 'hf' && !args.source.token) return Promise.reject(new Error('توکن Hugging Face لازم است (در بخش مدل‌ها ذخیره کنید)'));
@@ -1331,6 +1331,10 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
     ok('v0.26.3: دکمهٔ مبهم «افزودن به صف» از کارت‌ها حذف شده', !jsTxt.includes('model-card-queue'));
     ok('v0.26.3: حالت «در حال اتصال» + دکمهٔ «تلاش دوباره» وجود دارند',
       jsTxt.includes('در حال اتصال به سرور') && jsTxt.includes('تلاش دوباره'));
+    // v0.27.0: multi-source download manager (new idea + new design)
+    ok('v0.27.0: دانلودگر جدید سیم‌کشی شده (پنل فعال + چیپ نسخه + source در progress)',
+      htmlSrc.includes('id="modelsVersion"') && htmlSrc.includes('id="modelsActive"') && jsTxt.includes('v24RenderActive') && jsTxt.includes('mp-source-badge'));
+    ok('v0.27.0: استایل‌های کارت فعال + چیپ نسخه تعریف شده‌اند', cssSrc.includes('.mp-active-fill') && cssSrc.includes('.mp-version-chip'));
   }
 
   // — مدل‌ها (Hugging Face) —
@@ -1432,6 +1436,33 @@ console.log('\n=== 22) v0.21.0 — حالت کدکس (بخش برنامه‌نو
   for (const b of v242ErrRow.querySelectorAll('button')) if (b.textContent.includes('حذف از صف')) b.click();
   await sleep(50);
   ok('صف برای تست بعدی خالی است', byId.modelsQueue.querySelectorAll('.q-row').length === 0);
+
+  // — v0.27.0: دانلودگر چندمنبعه (چیدمان دوپنلی جدید) —
+  ok('v0.27.0: چیپ نسخه، بیلد در حال اجرا را روی صفحهٔ مدل‌ها نشان می‌دهد', byId.modelsVersion.textContent === 'v0.24.1');
+  ok('v0.27.0: بدون job فعال، پنل فعال جای‌نگه‌دار دارد', !!byId.modelsActive.querySelector('.mp-active-empty'));
+  byId.modelsSearch.value = 'flux';
+  byId.modelsSearchBtn.click();
+  await sleep(50);
+  byId.modelsResults.querySelectorAll('.model-card')[0].querySelector('.model-card-add').click();
+  await sleep(50);
+  const v27JobId = byId.modelsQueue.querySelector('.q-row').dataset.job;
+  emit('atria-models-progress', { job_id: v27JobId, file: 'weights/model.safetensors', downloaded: 1000000000, total: 6930000000, state: 'downloading', source: 'hf-mirror.com', file_count: 2, file_index: 2 });
+  await sleep(30);
+  let v27Active = byId.modelsActive.querySelector('.mp-active');
+  ok('v0.27.0: job فعال در پنل «دانلود فعال» کارت زنده می‌شود', !!v27Active && !!v27Active.querySelector('.mp-active-bar'));
+  ok('v0.27.0: بج سرور، منبعی که واقعاً داده می‌فرستد را نشان می‌دهد', v27Active && String(v27Active.querySelector('.mp-source-badge').textContent).includes('hf-mirror.com'));
+  emit('atria-models-progress', { job_id: v27JobId, file: 'weights/model.safetensors', downloaded: 2200000000, total: 6930000000, state: 'downloading', source: 'hf-mirror.com', file_count: 2, file_index: 2 });
+  await sleep(30);
+  v27Active = byId.modelsActive.querySelector('.mp-active');
+  ok('v0.27.0: سرعت از رویدادهای پیشرفت اندازه گرفته می‌شود (MB/s)', v27Active && String(v27Active.querySelector('.mp-stat-speed').textContent).includes('MB/s'));
+  for (const b of v27Active.querySelectorAll('button')) if (b.textContent.includes('توقف')) b.click();
+  await sleep(50);
+  v27Active = byId.modelsActive.querySelector('.mp-active');
+  ok('v0.27.0: توقف، کارت فعال را «متوقف» با دکمهٔ ادامه نگه می‌دارد', v27Active && v27Active.classList.contains('paused') && String(v27Active.textContent).includes('▶ ادامه'));
+  confirmResult = true;
+  for (const b of v27Active.querySelectorAll('button')) if (b.textContent.includes('حذف از صف')) b.click();
+  await sleep(50);
+  ok('v0.27.0: حذف از کارت فعال، هر دو پنل را خالی می‌کند', byId.modelsQueue.querySelectorAll('.q-row').length === 0 && !!byId.modelsActive.querySelector('.mp-active-empty'));
 
   // — استودیو عکس —
   byId.btnStudio.click();

@@ -135,9 +135,9 @@ pub async fn models_proxy_get() -> Result<serde_json::Value, String> {
 #[tauri::command]
 pub async fn models_test_conn() -> Result<serde_json::Value, String> {
     match hf::ping_hf().await {
-        Ok(ms) => Ok(serde_json::json!({
+        Ok((ms, src)) => Ok(serde_json::json!({
             "ok": true,
-            "message": format!("وصل شد ✓ — هوشینگ‌فیس در دسترس است ({ms} ms)"),
+            "message": format!("وصل شد ✓ — از {src} ({ms} ms)"),
         })),
         Err(e) => {
             let low = e.to_lowercase();
@@ -279,7 +279,8 @@ async fn download_job(
             continue;
         }
         set_file_state(job_id, idx, FileState::Downloading, f.downloaded, None);
-        let url = hf::file_url(&job.repo, &f.path);
+        // v0.27.0: multi-source — primary + mirror, alternated per attempt
+        let sources = hf::file_sources(&job.repo, &f.path);
         let dest = match hf::safe_dest(&job.folder, &f.path) {
             Ok(d) => d,
             Err(e) => {
@@ -297,11 +298,11 @@ async fn download_job(
 
         // I/O-bound: await directly on the app runtime (no 'static needed).
         let result: Result<hf::DlOutcome, String> = hf::download_file(
-            &url,
+            &sources,
             token,
             &dest,
             &**ctrl,
-            |done, tot| {
+            |done, tot, src| {
                 let mut last = last_emit.lock().unwrap_or_else(|p| p.into_inner());
                 if last.elapsed() >= std::time::Duration::from_millis(250) {
                     *last = std::time::Instant::now();
@@ -313,6 +314,7 @@ async fn download_job(
                             "downloaded": done,
                             "total": tot,
                             "state": "downloading",
+                            "source": src,
                             "file_count": job.files.len(),
                             "file_index": li + 1,
                         }),

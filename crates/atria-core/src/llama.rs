@@ -137,7 +137,7 @@ pub fn installed_info(root: &Path) -> Option<RuntimeInfo> {
 pub async fn install_runtime(
     root: &Path,
     force: bool,
-    progress: impl FnMut(u64, u64),
+    mut progress: impl FnMut(u64, u64),
 ) -> Result<PathBuf, String> {
     let bin = binary_path(root);
     if !force && installed_info(root).is_some() && bin.exists() {
@@ -167,7 +167,9 @@ pub async fn install_runtime(
     let arc_path = runtime_dir(root).join(if is_zip { "llama.zip" } else { "llama.tar.gz" });
     let _ = std::fs::remove_file(&arc_path);
     let ctrl = hf::ctrl_cell();
-    hf::download_file(&asset.browser_download_url, None, &arc_path, &ctrl, progress)
+    // single source (GitHub release) — the multi-source engine runs it as-is
+    let srcs = vec![(asset.browser_download_url.clone(), "github.com".to_string())];
+    hf::download_file(&srcs, None, &arc_path, &ctrl, |d, t, _s| progress(d, t))
         .await
         .map_err(|e| format!("دانلود موتور محلی ناموفق بود: {e}"))?;
 
@@ -714,7 +716,8 @@ mod tests {
         let model = root.join(gguf.path.replace('/', "-"));
         if !model.exists() {
             let ctrl = hf::ctrl_cell();
-            hf::download_file(&hf::file_url(repo, &gguf.path), None, &model, &ctrl, |d, t| eprintln!("model {d}/{t}"))
+            let u = hf::file_url(repo, &gguf.path);
+            hf::download_file(&[(u, "huggingface.co".to_string())], None, &model, &ctrl, |d, t, _s| eprintln!("model {d}/{t}"))
                 .await
                 .expect("model download");
         }
